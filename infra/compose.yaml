@@ -1,0 +1,91 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - docmind-net
+    depends_on:
+      - api
+
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    restart: always
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    environment:
+      - APP_ENV=production
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-docmind}:${POSTGRES_PASSWORD:-docmind}@postgres:5432/${POSTGRES_DB:-docmind}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-docmind}:${POSTGRES_PASSWORD:-docmind}@postgres:5432/${POSTGRES_DB:-docmind}
+      - APP_SECRET_KEY=${APP_SECRET_KEY:-docmind-production-secret-key-32chars!}
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID:-}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
+      - R2_BUCKET=${R2_BUCKET:-docmind-private}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - AI_FEATURES_ENABLED=true
+      - WORKER_CONCURRENCY=1
+    networks:
+      - docmind-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    restart: always
+    command: ["python", "-m", "app.workers.runner"]
+    environment:
+      - APP_ENV=production
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-docmind}:${POSTGRES_PASSWORD:-docmind}@postgres:5432/${POSTGRES_DB:-docmind}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-docmind}:${POSTGRES_PASSWORD:-docmind}@postgres:5432/${POSTGRES_DB:-docmind}
+      - APP_SECRET_KEY=${APP_SECRET_KEY:-docmind-production-secret-key-32chars!}
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID:-}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
+      - R2_BUCKET=${R2_BUCKET:-docmind-private}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - WORKER_CONCURRENCY=1
+    networks:
+      - docmind-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-docmind}
+      POSTGRES_USER: ${POSTGRES_USER:-docmind}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-docmind}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - docmind-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-docmind} -d ${POSTGRES_DB:-docmind}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  docmind-net:
+    driver: bridge
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

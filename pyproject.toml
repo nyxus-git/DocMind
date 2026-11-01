@@ -1,0 +1,9 @@
+[tool.pyright]
+include = ["backend", "app"]
+extraPaths = ["backend"]
+venvPath = "."
+venv = "venv"
+
+[tool.pytest.ini_options]
+pythonpath = ["backend"]
+testpaths = ["backend/tests"]

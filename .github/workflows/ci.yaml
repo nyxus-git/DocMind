@@ -1,0 +1,81 @@
+name: DocMind CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-checks:
+    name: Backend Tests & Lint
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: docmind_test
+          POSTGRES_USER: docmind
+          POSTGRES_PASSWORD: testpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr libpq-dev
+
+      - name: Install Python Dependencies
+        run: |
+          cd backend
+          pip install --upgrade pip
+          pip install -r requirements.txt pytest pytest-asyncio
+
+      - name: Run Backend Unit & Integration Tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://docmind:testpassword@localhost:5432/docmind_test
+          SYNC_DATABASE_URL: postgresql+psycopg2://docmind:testpassword@localhost:5432/docmind_test
+          APP_SECRET_KEY: test-secret-key-at-least-32-characters-long!
+        run: |
+          cd backend
+          pytest -v tests/
+
+  frontend-checks:
+    name: Frontend Build & Type Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: frontend/package.json
+
+      - name: Install Dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Run Static Export Build
+        run: |
+          cd frontend
+          npm run build
