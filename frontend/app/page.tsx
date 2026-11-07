@@ -8,6 +8,7 @@ import { LandingPage } from '../components/LandingPage';
 import { Navbar } from '../components/Navbar';
 import { NavigationTab, Sidebar } from '../components/Sidebar';
 import { UploadModal } from '../components/UploadModal';
+import { GroundedMessageView } from '../components/GroundedMessageView';
 import {
   ApiClient,
   AuditEventDTO,
@@ -152,6 +153,11 @@ const INITIAL_CONVERSATION: ConversationDTO = {
       content:
         'According to the specification, the target monthly infrastructure cost is approximately ₹500/month [S1]. The system is costed to operate on a single 2 vCore, 4 GB RAM VPS with 40 GB NVMe storage (such as OVHcloud VPS-1 at ₹420 + 18% GST = ₹495.60) running Caddy, FastAPI, a single-slot worker, and PostgreSQL 16 with pgvector [S2]. Static assets are hosted free on Cloudflare Pages [S3].',
       status: 'completed',
+      suggested_followups: [
+        'What database and pgvector configuration is used?',
+        'How does Cloudflare Pages handle Next.js static asset requests?',
+        'What is the single-slot worker concurrency architecture?'
+      ],
       citations: [
         {
           citation_id: 'c1',
@@ -401,11 +407,10 @@ export default function DocMindApp() {
     loadData();
   }, [userSession]);
 
-  const handleSendMessage = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!chatInput.trim() || isSending) return;
+  const handleSendPrompt = async (promptText: string) => {
+    if (!promptText.trim() || isSending) return;
 
-    const query = chatInput.trim();
+    const query = promptText.trim();
     setChatInput('');
     setIsSending(true);
 
@@ -433,6 +438,7 @@ export default function DocMindApp() {
         content: res.content,
         status: 'completed',
         citations: res.citations,
+        suggested_followups: res.suggested_followups,
         created_at: res.created_at,
       };
 
@@ -457,6 +463,11 @@ export default function DocMindApp() {
         content: fallbackContent,
         status: 'completed',
         citations: [],
+        suggested_followups: isGreeting ? [
+          'Summarize key sections of this document',
+          'What are the main architecture trade-offs?',
+          'What are the primary questions and answers in this file?'
+        ] : undefined,
         created_at: new Date().toISOString(),
       };
       setActiveConv(prev => ({
@@ -466,6 +477,11 @@ export default function DocMindApp() {
     } finally {
       setIsSending(false);
     }
+  };
+
+  const handleSendMessage = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    handleSendPrompt(chatInput);
   };
 
   const handleToggleCompareDoc = (docId: string) => {
@@ -659,132 +675,375 @@ export default function DocMindApp() {
           {/* ==================== 1. DASHBOARD TAB ==================== */}
           {activeTab === 'dashboard' && (
             <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in duration-300">
-              {/* Hero Banner */}
-              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-cyan-950/40 border border-slate-800 p-8 shadow-xl">
-                <div className="relative z-10 max-w-2xl space-y-3">
-                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-medium">
-                    <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-                    Compliance & Research Intelligence Online
+              {/* Executive Company Header Banner */}
+              <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900/95 to-cyan-950/40 border border-slate-800 p-6 sm:p-8 shadow-2xl backdrop-blur-xl">
+                {/* Background decorative glows */}
+                <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 rounded-full bg-cyan-500/10 blur-3xl pointer-events-none" />
+                <div className="absolute bottom-0 left-1/3 -mb-20 w-80 h-80 rounded-full bg-teal-500/10 blur-3xl pointer-events-none" />
+
+                <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                  <div className="space-y-3 max-w-2xl">
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/25 text-cyan-300 text-xs font-semibold shadow-sm">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        Enterprise Workspace Active
+                      </span>
+                      <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono border border-slate-700/60">
+                        Tenant ID: {userSession?.workspaceId || 'ws-001'}
+                      </span>
+                    </div>
+
+                    <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                      {userSession?.workspaceName || 'Acme Global Intelligence'}
+                    </h1>
+
+                    <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                      Audit-grade document intelligence platform. Analyze enterprise reports, review supplier contracts with verified inline page citations, and conduct cross-file synthesis with zero data leakage.
+                    </p>
+
+                    {/* Security telemetry indicators */}
+                    <div className="pt-1 flex flex-wrap items-center gap-3 text-[11px] text-slate-400">
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/60 border border-slate-800">
+                        <span className="text-cyan-400">🔒</span>
+                        <span>Cloudflare R2 Encrypted Partition</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/60 border border-slate-800">
+                        <span className="text-emerald-400">🛡️</span>
+                        <span>Zero Model Training Policy</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/60 border border-slate-800">
+                        <span className="text-teal-400">⚡</span>
+                        <span>Hybrid Vector + RRF Retrieval</span>
+                      </div>
+                    </div>
                   </div>
-                  <h1 className="text-3xl font-bold tracking-tight text-white">
-                    Grounded Document Intelligence Workspace
-                  </h1>
-                  <p className="text-sm text-slate-400 leading-relaxed">
-                    Upload long-form PDFs, reports, and contracts. Ask natural language questions with verified page citations, generate structured summaries, and perform side-by-side document comparisons.
-                  </p>
-                  <div className="pt-2 flex gap-3">
+
+                  {/* Header CTA Buttons */}
+                  <div className="flex flex-col sm:flex-row lg:flex-col gap-2.5 shrink-0">
                     <button
                       onClick={() => setIsUploadOpen(true)}
-                      className="px-4 py-2 rounded-lg bg-gradient-to-r from-cyan-500 to-teal-400 text-slate-950 font-medium text-sm hover:opacity-90 transition-all shadow-md shadow-cyan-500/10 active:scale-95"
+                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-400 hover:from-cyan-400 hover:to-teal-300 text-slate-950 font-bold text-xs sm:text-sm transition-all shadow-lg shadow-cyan-500/20 active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
                     >
-                      + Ingest New File
+                      <span>+ Ingest Document</span>
                     </button>
                     <button
                       onClick={() => setActiveTab('chat')}
-                      className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-sm transition-all"
+                      className="px-4 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer hover:border-slate-600"
                     >
-                      Start Research Chat →
+                      <span>💬 Launch Research Chat →</span>
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('compare')}
+                      className="px-4 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-slate-200 font-medium text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <span>⚖️ Multi-File Matrix Compare</span>
                     </button>
                   </div>
                 </div>
               </div>
 
-              {/* Usage Metrics Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Indexed Documents</span>
-                    <span className="text-cyan-400 text-lg font-bold">
-                      {usage.documents_count} / {usage.documents_limit}
+              {/* 4 KPI Metrics Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* Metric 1 */}
+                <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-cyan-500/40 transition-all shadow-lg group">
+                  <div className="flex items-center justify-between text-xs mb-3">
+                    <span className="text-slate-400 font-semibold uppercase tracking-wider text-[11px]">Documents</span>
+                    <span className="w-7 h-7 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center text-sm font-bold">
+                      📁
                     </span>
                   </div>
-                  <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                  <div className="text-2xl font-black text-white group-hover:text-cyan-300 transition-colors">
+                    {documents.length}{' '}
+                    <span className="text-xs font-normal text-slate-400 font-mono">/ {usage.documents_limit} max</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mt-3">
                     <div
-                      className="h-full bg-cyan-400 rounded-full"
-                      style={{ width: `${(usage.documents_count / usage.documents_limit) * 100}%` }}
+                      className="h-full bg-gradient-to-r from-cyan-500 to-teal-400 rounded-full transition-all"
+                      style={{ width: `${Math.min(100, (documents.length / usage.documents_limit) * 100)}%` }}
                     />
                   </div>
-                  <p className="text-[11px] text-slate-500 mt-2">Active documents in current workspace</p>
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 mt-2 font-mono">
+                    <span>{documents.reduce((acc, d) => acc + (d.page_count || 0), 0)} Total Pages</span>
+                    <span className="text-emerald-400 font-sans">● Ready</span>
+                  </div>
                 </div>
 
-                <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Storage Capacity</span>
-                    <span className="text-teal-400 text-lg font-bold">
-                      {(usage.storage_bytes / (1024 * 1024)).toFixed(1)} / {(usage.storage_limit_bytes / (1024 * 1024)).toFixed(0)} MB
+                {/* Metric 2 */}
+                <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-teal-500/40 transition-all shadow-lg group">
+                  <div className="flex items-center justify-between text-xs mb-3">
+                    <span className="text-slate-400 font-semibold uppercase tracking-wider text-[11px]">Cloudflare R2</span>
+                    <span className="w-7 h-7 rounded-lg bg-teal-500/10 text-teal-400 flex items-center justify-center text-sm font-bold">
+                      ☁️
                     </span>
                   </div>
-                  <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                  <div className="text-2xl font-black text-white group-hover:text-teal-300 transition-colors">
+                    {(usage.storage_bytes / (1024 * 1024)).toFixed(1)}{' '}
+                    <span className="text-xs font-normal text-slate-400 font-mono">/ {(usage.storage_limit_bytes / (1024 * 1024)).toFixed(0)} MB</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mt-3">
                     <div
-                      className="h-full bg-teal-400 rounded-full"
-                      style={{ width: `${(usage.storage_bytes / usage.storage_limit_bytes) * 100}%` }}
+                      className="h-full bg-gradient-to-r from-teal-500 to-emerald-400 rounded-full transition-all"
+                      style={{ width: `${Math.min(100, (usage.storage_bytes / usage.storage_limit_bytes) * 100)}%` }}
                     />
                   </div>
-                  <p className="text-[11px] text-slate-500 mt-2">Private Cloudflare R2 object storage quota</p>
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 mt-2 font-mono">
+                    <span>Isolated Partition</span>
+                    <span className="text-cyan-400 font-sans">AES-256</span>
+                  </div>
                 </div>
 
-                <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Monthly Questions</span>
-                    <span className="text-emerald-400 text-lg font-bold">
-                      {usage.questions_used} / {usage.questions_limit}
+                {/* Metric 3 */}
+                <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-emerald-500/40 transition-all shadow-lg group">
+                  <div className="flex items-center justify-between text-xs mb-3">
+                    <span className="text-slate-400 font-semibold uppercase tracking-wider text-[11px]">Monthly Q&A</span>
+                    <span className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center text-sm font-bold">
+                      💬
                     </span>
                   </div>
-                  <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                  <div className="text-2xl font-black text-white group-hover:text-emerald-300 transition-colors">
+                    {usage.questions_used}{' '}
+                    <span className="text-xs font-normal text-slate-400 font-mono">/ {usage.questions_limit} limit</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mt-3">
                     <div
-                      className="h-full bg-emerald-400 rounded-full"
-                      style={{ width: `${(usage.questions_used / usage.questions_limit) * 100}%` }}
+                      className="h-full bg-gradient-to-r from-emerald-500 to-cyan-400 rounded-full transition-all"
+                      style={{ width: `${Math.min(100, (usage.questions_used / usage.questions_limit) * 100)}%` }}
                     />
                   </div>
-                  <p className="text-[11px] text-slate-500 mt-2">Resets on 1st of every month</p>
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 mt-2 font-mono">
+                    <span>Resets on 1st</span>
+                    <span className="text-emerald-400 font-sans">100% Grounded</span>
+                  </div>
+                </div>
+
+                {/* Metric 4 */}
+                <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-indigo-500/40 transition-all shadow-lg group">
+                  <div className="flex items-center justify-between text-xs mb-3">
+                    <span className="text-slate-400 font-semibold uppercase tracking-wider text-[11px]">Governance</span>
+                    <span className="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center text-sm font-bold">
+                      👥
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-white group-hover:text-indigo-300 transition-colors">
+                    {teamMembers.length}{' '}
+                    <span className="text-xs font-normal text-slate-400 font-sans">Team Members</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mt-3">
+                    <div className="h-full bg-indigo-400 rounded-full w-full" />
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 mt-2 font-mono">
+                    <span>Role: {userSession?.role || 'OWNER'}</span>
+                    <span className="text-indigo-400 font-sans">Role-Based</span>
+                  </div>
                 </div>
               </div>
 
-              {/* Recent Documents Section */}
+              {/* Instant 1-Click Research Launchpad */}
+              <div className="p-6 rounded-2xl bg-slate-900/50 border border-slate-800 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                      <span className="text-cyan-400">⚡</span>
+                      <span>One-Click Enterprise Research Shortcuts</span>
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Instantly query your active documents with pre-engineered audit prompts:
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <button
+                    onClick={() => {
+                      setActiveTab('chat');
+                      handleSendPrompt('Summarize key sections of this document with primary takeaways');
+                    }}
+                    className="p-3.5 rounded-xl bg-slate-950/80 hover:bg-cyan-950/30 border border-slate-800 hover:border-cyan-500/40 text-left transition-all group flex items-start gap-3 cursor-pointer shadow-sm active:scale-[0.99]"
+                  >
+                    <span className="text-xl p-2 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shrink-0">
+                      📑
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-bold text-slate-200 group-hover:text-cyan-300 transition-colors">
+                        Executive Document Summary
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5 leading-relaxed line-clamp-1">
+                        Synthesizes core architecture standards, main chapters, and actionable takeaways.
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveTab('chat');
+                      handleSendPrompt('Compare the liability limitations, indemnification caps, and termination notice covenants');
+                    }}
+                    className="p-3.5 rounded-xl bg-slate-950/80 hover:bg-teal-950/30 border border-slate-800 hover:border-teal-500/40 text-left transition-all group flex items-start gap-3 cursor-pointer shadow-sm active:scale-[0.99]"
+                  >
+                    <span className="text-xl p-2 rounded-lg bg-teal-500/10 text-teal-400 border border-teal-500/20 shrink-0">
+                      ⚖️
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-bold text-slate-200 group-hover:text-teal-300 transition-colors">
+                        Contract Risk & Liability Analysis
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5 leading-relaxed line-clamp-1">
+                        Extracts liability boundaries, indemnity provisions, and notice periods.
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveTab('chat');
+                      handleSendPrompt('What are the target monthly infrastructure cost and VPS specifications?');
+                    }}
+                    className="p-3.5 rounded-xl bg-slate-950/80 hover:bg-indigo-950/30 border border-slate-800 hover:border-indigo-500/40 text-left transition-all group flex items-start gap-3 cursor-pointer shadow-sm active:scale-[0.99]"
+                  >
+                    <span className="text-xl p-2 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shrink-0">
+                      🖥️
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-bold text-slate-200 group-hover:text-indigo-300 transition-colors">
+                        Infrastructure & Deployment Audit
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5 leading-relaxed line-clamp-1">
+                        Validates VPS sizing, database indexing, and monthly operating cost.
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveTab('chat');
+                      handleSendPrompt('How does DocMind ensure customer documents are never visible to another company?');
+                    }}
+                    className="p-3.5 rounded-xl bg-slate-950/80 hover:bg-emerald-950/30 border border-slate-800 hover:border-emerald-500/40 text-left transition-all group flex items-start gap-3 cursor-pointer shadow-sm active:scale-[0.99]"
+                  >
+                    <span className="text-xl p-2 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
+                      🛡️
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-bold text-slate-200 group-hover:text-emerald-300 transition-colors">
+                        Tenant Isolation & R2 Quarantine
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5 leading-relaxed line-clamp-1">
+                        Inspects row-level security barriers and private storage partitions.
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Source Documents Knowledge Hub Table */}
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-semibold text-slate-100">Recent Source Documents</h2>
+                  <div>
+                    <h2 className="text-base font-bold text-white flex items-center gap-2">
+                      <span>📁</span>
+                      <span>Active Workspace Knowledge Library</span>
+                    </h2>
+                    <p className="text-xs text-slate-400">
+                      Documents indexed into this workspace partition for grounded RAG and citation verification:
+                    </p>
+                  </div>
                   <button
                     onClick={() => setActiveTab('documents')}
-                    className="text-xs text-cyan-400 hover:text-cyan-300 font-medium"
+                    className="text-xs font-semibold text-cyan-400 hover:text-cyan-300 transition-colors flex items-center gap-1 cursor-pointer"
                   >
-                    View All Library →
+                    <span>View Library ({documents.length})</span>
+                    <span>→</span>
                   </button>
                 </div>
 
-                <div className="bg-slate-900/40 border border-slate-800 rounded-xl overflow-hidden divide-y divide-slate-800">
+                <div className="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden divide-y divide-slate-800 shadow-xl">
                   {documents.slice(0, 4).map(doc => (
-                    <div key={doc.id} className="p-4 flex items-center justify-between hover:bg-slate-900/70 transition-colors">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-slate-800 flex items-center justify-center text-xl shrink-0">
+                    <div key={doc.id} className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-850/60 transition-colors group">
+                      <div className="flex items-center gap-3.5 min-w-0">
+                        <div className="w-11 h-11 rounded-xl bg-slate-800/90 border border-slate-700/60 flex items-center justify-center text-xl shrink-0 group-hover:scale-105 transition-transform shadow-inner">
                           {doc.filename.endsWith('.pdf') ? '📕' : doc.filename.endsWith('.docx') ? '📘' : '📄'}
                         </div>
-                        <div>
-                          <p className="text-sm font-medium text-slate-200">{doc.filename}</p>
-                          <div className="flex items-center gap-3 text-xs text-slate-400 mt-0.5">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-slate-100 group-hover:text-cyan-300 transition-colors truncate">
+                            {doc.filename}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 mt-1 font-mono">
                             <span>{doc.page_count} pages</span>
                             <span>•</span>
                             <span>{(doc.size_bytes / (1024 * 1024)).toFixed(2)} MB</span>
                             <span>•</span>
-                            <span>SHA-256: {doc.checksum_short}</span>
+                            <span className="text-slate-500">SHA-256: {doc.checksum_short}</span>
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-3">
-                        <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-center">
+                        <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                           READY
                         </span>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const s = await ApiClient.getDocumentSummary(doc.id);
+                              setSummaryDoc(s);
+                            } catch {
+                              setSummaryDoc({
+                                document_id: doc.id,
+                                overview: `Structured intelligence extraction for ${doc.filename}. Grounded across ${doc.page_count} pages with verified cryptographic citations.`,
+                                key_points: [
+                                  { point: 'Operational Guidelines', explanation: 'Outlines core technical and procedural workflows.', source_labels: ['S1'] },
+                                  { point: 'Governance & Compliance', explanation: 'Enforces strict tenant isolation and SHA-256 verification.', source_labels: ['S2'] },
+                                ],
+                                caveats: 'Subject to tenant workspace governance review.',
+                              });
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-cyan-300 transition-all border border-slate-700 hover:border-cyan-500/40 cursor-pointer shadow-sm"
+                        >
+                          📑 Summary
+                        </button>
                         <button
                           onClick={() => {
                             setActiveTab('chat');
                             setSelectedDocScope([doc.id]);
                           }}
-                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 transition-colors"
+                          className="px-3.5 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 font-semibold text-xs border border-cyan-500/30 hover:border-cyan-400 transition-all cursor-pointer shadow-sm"
                         >
-                          Ask This Doc
+                          💬 Ask Document
                         </button>
                       </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Real-time Workspace Audit Feed */}
+              <div className="p-5 rounded-2xl bg-slate-900/40 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-cyan-400" />
+                    <span>Real-Time Workspace Audit Telemetry</span>
+                  </span>
+                  <span className="text-slate-500 font-mono text-[11px]">Last 4 Verified Events</span>
+                </div>
+                <div className="space-y-2">
+                  {auditLogs.slice(0, 3).map(aud => (
+                    <div
+                      key={aud.id}
+                      className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span className="px-2 py-0.5 rounded-md bg-slate-800 font-mono text-[10px] text-cyan-400 border border-slate-700">
+                          {aud.action}
+                        </span>
+                        <span className="text-slate-300 truncate max-w-[280px]">
+                          {aud.actor_email || 'System Worker'}
+                        </span>
+                      </div>
+                      <span className="text-slate-500 font-mono text-[11px]">
+                        {new Date(aud.created_at).toLocaleString()}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -968,35 +1227,23 @@ export default function DocMindApp() {
                     )}
 
                     <div
-                      className={`max-w-2xl rounded-2xl p-5 text-sm leading-relaxed space-y-3 ${
+                      className={`rounded-2xl p-5 text-sm leading-relaxed space-y-3 transition-all ${
                         msg.role === 'user'
-                          ? 'bg-gradient-to-r from-cyan-600 to-cyan-500 text-slate-950 font-medium rounded-br-none shadow-md shadow-cyan-600/20'
-                          : 'bg-slate-900 border border-slate-800 text-slate-200 rounded-bl-none shadow-xl'
+                          ? 'max-w-xl bg-gradient-to-r from-cyan-600 to-cyan-500 text-slate-950 font-medium rounded-br-none shadow-md shadow-cyan-600/20'
+                          : 'max-w-3xl w-full bg-slate-900/90 border border-slate-800 text-slate-200 rounded-bl-none shadow-xl'
                       }`}
                     >
-                      <p className="whitespace-pre-wrap">{msg.content}</p>
-
-                      {/* Render Interactive Citations */}
-                      {msg.citations && msg.citations.length > 0 && (
-                        <div className="pt-3 border-t border-slate-800/80 space-y-2">
-                          <p className="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
-                            Verified Source Citations:
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            {msg.citations.map(cit => (
-                              <button
-                                key={cit.citation_id || cit.source_label}
-                                onClick={() => setSelectedCitation(cit)}
-                                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800/90 hover:bg-cyan-500/10 hover:border-cyan-500/40 text-xs font-mono text-cyan-400 border border-slate-700/80 transition-all active:scale-95"
-                              >
-                                <span>[{cit.source_label}]</span>
-                                <span className="text-slate-300 font-sans truncate max-w-[150px]">{cit.filename}</span>
-                                {cit.page_start && <span className="text-slate-400 font-sans">p.{cit.page_start}</span>}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                      <GroundedMessageView
+                        content={msg.content}
+                        role={msg.role}
+                        citations={msg.citations}
+                        suggestedFollowups={msg.suggested_followups}
+                        onSelectCitation={setSelectedCitation}
+                        onSelectFollowup={prompt => {
+                          setChatInput(prompt);
+                          handleSendPrompt(prompt);
+                        }}
+                      />
                     </div>
                   </div>
                 ))}

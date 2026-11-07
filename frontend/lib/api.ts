@@ -95,6 +95,7 @@ export interface MessageDTO {
   content: string;
   status: string;
   citations: CitationDTO[];
+  suggested_followups?: string[];
   created_at: string;
 }
 
