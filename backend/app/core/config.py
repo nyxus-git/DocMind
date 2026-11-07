@@ -35,9 +35,9 @@ class Settings(BaseSettings):
     # Google Gemini AI
     GOOGLE_API_KEY: str = ""
     LLM_PROVIDER: str = "google"
-    LLM_MODEL: str = "gemini-3.8-flash"
+    LLM_MODEL: str = "gemini-1.5-flash"
     EMBEDDING_PROVIDER: str = "google"
-    EMBEDDING_MODEL: str = "gemini-embedding-2"
+    EMBEDDING_MODEL: str = "text-embedding-004"
     EMBEDDING_DIMENSION: int = 768
 
     # Governance & Budget Controls

@@ -154,3 +154,25 @@ class ChunkRepository:
                         break
 
         return results
+
+    async def get_leading_chunks(
+        self,
+        workspace_id: uuid.UUID,
+        document_ids: List[uuid.UUID],
+        limit: int = 5
+    ) -> List[Tuple[DocumentChunk, Document]]:
+        """Returns the opening sequential chunks of specified documents for global synthesis & summaries."""
+        if not document_ids:
+            return []
+        stmt = (
+            select(DocumentChunk, Document)
+            .join(Document, DocumentChunk.document_id == Document.id)
+            .where(
+                DocumentChunk.workspace_id == workspace_id,
+                DocumentChunk.document_id.in_(document_ids)
+            )
+            .order_by(DocumentChunk.document_id, DocumentChunk.chunk_index.asc())
+            .limit(limit)
+        )
+        res = await self.db.execute(stmt)
+        return list(res.all())

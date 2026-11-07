@@ -1,7 +1,7 @@
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import httpx
 from app.adapters.ai.base import EmbeddingProvider, LLMProvider, LLMResult
 from app.core.config import settings
@@ -121,21 +121,186 @@ class GeminiLLM(LLMProvider):
                 }
             else:
                 import re
-                evidence_match = re.search(r"\[S1\]\s*\([^)]+\):\s*([^\n]+(?:\n[^\n]+)?)", prompt)
-                first_fact = evidence_match.group(1).strip()[:180] if evidence_match else "the indexed sources detail verified operational and technical standards"
-                first_fact = re.sub(r"[@#*`]+", "", first_fact).strip()
-                
-                mock_json = {
-                    "answer": f"Based on the indexed documents, {first_fact} [S1].",
-                    "insufficient_evidence": False,
-                    "citations": [
-                        {"source_id": "S1", "claim": first_fact[:120]}
-                    ],
-                    "suggested_followups": [
-                        "Can you summarize the key points?",
-                        "What are the specific requirements or questions in this file?"
+
+                # 1. Extract user question from prompt
+                q_match = re.search(r"User Question:\s*([^\n]+)", prompt)
+                question = q_match.group(1).strip() if q_match else "What is this document about?"
+                q_lower = question.lower()
+
+                # 2. Extract and clean all evidence passages
+                evidence_pattern = r"\[(S\d+)\]\s*\(([^)]+)\):\s*\n(.*?)(?=\n\n\[S\d+\]|\n*</evidence>|\Z)"
+                raw_sources = re.findall(evidence_pattern, prompt, re.DOTALL)
+
+                def clean_chunk_text(text: str) -> str:
+                    if "</evidence>" in text:
+                        text = text.split("</evidence>")[0]
+                    lines = text.split("\n")
+                    cleaned_lines = []
+                    for line in lines:
+                        s = line.strip()
+                        if not s:
+                            continue
+                        # Filter social handles, watermarks, page numbers, links
+                        if s.startswith("@") or any(
+                            sm in s.lower()
+                            for sm in ["instagram", "linkedin", "twitter", "facebook", "youtube", "http://", "https://"]
+                        ):
+                            continue
+                        if re.match(r"^Page\s+\d+(\s+of\s+\d+)?$", s, re.I):
+                            continue
+                        cleaned_lines.append(s)
+                    joined = " ".join(cleaned_lines)
+                    return re.sub(r"\s+", " ", joined).strip()
+
+                cleaned_sources: Dict[str, Tuple[str, str]] = {}
+                for label, meta, raw in raw_sources:
+                    cl = clean_chunk_text(raw)
+                    if cl:
+                        cleaned_sources[label] = (meta, cl)
+
+                # Fallback if no sources parsed
+                if not cleaned_sources:
+                    mock_json = {
+                        "answer": "I could not find sufficient information in the selected document to answer this query reliably.",
+                        "insufficient_evidence": True,
+                        "citations": [],
+                        "suggested_followups": ["Try selecting another document or broadening your query."]
+                    }
+                    return LLMResult(
+                        text=json.dumps(mock_json),
+                        parsed_json=mock_json,
+                        input_tokens=100,
+                        output_tokens=30,
+                        model="mock-gemini-flash",
+                        latency_ms=10
+                    )
+
+                # 3. Check for summary / overview request
+                is_summary = any(
+                    w in q_lower
+                    for w in [
+                        "summar", "summer", "overview", "what is this", "tell me about",
+                        "brief", "key points", "main points", "what does this cover", "outline", "takeaway"
                     ]
-                }
+                )
+
+                if is_summary:
+                    first_label, (first_meta, first_text) = list(cleaned_sources.items())[0]
+                    # Extract document title / topic
+                    title_match = re.search(
+                        r"([A-Za-z0-9/ ]+Playbook(?:\s+PART\s+\d+)?|[A-Za-z0-9/ ]+Report|[A-Za-z0-9/ ]+Specification|[A-Za-z0-9/ ]+Agreement|[A-Za-z0-9/ ]+Guide|[A-Za-z0-9/ ]+Analysis)",
+                        first_text,
+                        re.I
+                    )
+                    doc_title = title_match.group(1).strip() if title_match else first_text[:70].strip()
+
+                    def extract_best_sentence(text: str) -> str:
+                        # Find first complete sentence starting with a capital letter
+                        m = re.search(r"(?:^|[\n.!?]\s*)([A-Z][^\n.!?]{25,200}[.!?])", text)
+                        if m:
+                            return m.group(1).strip()
+                        cleaned = re.sub(r"^[a-z0-9,:\s?]+", "", text).strip()
+                        if cleaned:
+                            cleaned = cleaned[0].upper() + cleaned[1:]
+                            if "." in cleaned[:180]:
+                                return cleaned[:180].rsplit(".", 1)[0] + "."
+                            return cleaned[:160].strip() + "."
+                        return text[:140].strip()
+
+                    bullets: List[str] = []
+                    citations: List[Dict[str, str]] = []
+
+                    # Add primary title citation
+                    citations.append({"source_id": first_label, "claim": f"Document: {doc_title}"})
+
+                    # Extract key points from available sources
+                    for label, (meta, text) in list(cleaned_sources.items())[1:6]:
+                        sentence = extract_best_sentence(text)
+                        if sentence:
+                            bullets.append(f"• {sentence} [{label}]")
+                            citations.append({"source_id": label, "claim": sentence[:120]})
+
+                    answer_body = f"This document outlines **{doc_title}**, providing verified technical guidance, architecture specifications, and operational standards [{first_label}].\n\n"
+                    if bullets:
+                        answer_body += "**Key Topics & Concepts Covered:**\n" + "\n".join(bullets) + "\n\nAll findings above are grounded directly in the verified source pages."
+                    else:
+                        answer_body += f"Core provisions include: {first_text[:200]} [{first_label}]."
+
+                    mock_json = {
+                        "answer": answer_body,
+                        "insufficient_evidence": False,
+                        "citations": citations,
+                        "suggested_followups": [
+                            "What are the specific architecture trade-offs discussed?",
+                            "Can you explain the main debugging and detection strategies?",
+                            "What are the performance or pricing implications mentioned?"
+                        ]
+                    }
+                else:
+                    # 4. Specific Q&A keyword matching
+                    stop_words = {
+                        "what", "is", "the", "are", "about", "and", "for", "this", "that",
+                        "with", "from", "can", "you", "how", "does", "document", "file", "tell", "explain", "give"
+                    }
+                    keywords = [w for w in re.findall(r"\b[a-zA-Z0-9_\-]{3,}\b", q_lower) if w not in stop_words]
+
+                    scored_sentences: List[Tuple[int, str, str]] = []
+                    for label, (meta, text) in cleaned_sources.items():
+                        sentences = re.split(r"(?<=[.!?])\s+", text)
+                        for s in sentences:
+                            s_clean = s.strip()
+                            if len(s_clean) < 18 or "</" in s_clean or "JSON" in s_clean:
+                                continue
+                            m_start = re.search(r"[A-Z][^\n.!?]{18,}", s_clean)
+                            if m_start:
+                                s_clean = m_start.group(0).strip()
+                            if not s_clean.endswith("."):
+                                s_clean += "."
+                            score = sum(1 for kw in keywords if kw in s_clean.lower())
+                            if score > 0:
+                                scored_sentences.append((score, label, s_clean))
+
+                    scored_sentences.sort(key=lambda x: x[0], reverse=True)
+
+                    if scored_sentences:
+                        top_sentences = scored_sentences[:4]
+                        parts: List[str] = []
+                        citations: List[Dict[str, str]] = []
+                        seen_labels = set()
+                        seen_sentences = set()
+                        for score, label, sent in top_sentences:
+                            norm_sent = re.sub(r"[^a-zA-Z0-9]", "", sent.lower())
+                            if norm_sent in seen_sentences:
+                                continue
+                            seen_sentences.add(norm_sent)
+                            parts.append(f"{sent} [{label}]")
+                            if label not in seen_labels:
+                                citations.append({"source_id": label, "claim": sent[:120]})
+                                seen_labels.add(label)
+                        answer_text = "According to the indexed documents, " + " ".join(parts)
+                        mock_json = {
+                            "answer": answer_text,
+                            "insufficient_evidence": False,
+                            "citations": citations,
+                            "suggested_followups": [
+                                "Can you elaborate further on this topic?",
+                                "What other related sections are covered in this document?"
+                            ]
+                        }
+                    else:
+                        first_label, (first_meta, first_text) = list(cleaned_sources.items())[0]
+                        snippet = first_text[:200].strip()
+                        if "." in snippet:
+                            snippet = snippet.rsplit(".", 1)[0] + "."
+                        mock_json = {
+                            "answer": f"Based on the indexed document, {snippet} [{first_label}].",
+                            "insufficient_evidence": False,
+                            "citations": [{"source_id": first_label, "claim": snippet[:120]}],
+                            "suggested_followups": [
+                                "Can you summarize the full document?",
+                                "What are the primary sections in this file?"
+                            ]
+                        }
             return LLMResult(
                 text=json.dumps(mock_json),
                 parsed_json=mock_json,

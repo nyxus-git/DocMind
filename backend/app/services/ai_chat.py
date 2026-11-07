@@ -124,6 +124,22 @@ class ChatService:
             rrf_k=60
         )
 
+        clean_lower = content.strip().lower()
+        is_summary_query = any(
+            w in clean_lower
+            for w in [
+                "summar", "summer", "overview", "what is this", "tell me about this",
+                "brief", "key points", "main points", "what does this cover", "outline"
+            ]
+        )
+        if is_summary_query and active_doc_ids:
+            # Augment with structural opening chunks to guarantee comprehensive summary coverage
+            seq_chunks = await self.chunk_repo.get_leading_chunks(workspace_id, active_doc_ids, limit=5)
+            existing_cids = {c[0].id for c in retrieved_items}
+            for sc, sd in seq_chunks:
+                if sc.id not in existing_cids:
+                    retrieved_items.append((sc, sd, 0.5))
+
         # 7. Check retrieval sufficiency
         if not retrieved_items:
             abstention_text = "I could not find enough information in the selected documents to answer this reliably."
