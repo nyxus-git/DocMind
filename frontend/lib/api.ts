@@ -61,6 +61,38 @@ export interface UsageSummaryDTO {
   questions_limit: number;
   billing_period_reset_date: string;
   ai_features_enabled: boolean;
+  tier?: string;
+  tier_name?: string;
+  max_file_mb?: number;
+  max_pages?: number;
+  concurrent_uploads_limit?: number;
+  max_members_limit?: number;
+}
+
+export interface TierSpecDTO {
+  tier: string;
+  name: string;
+  max_docs: number;
+  max_storage_mb: number;
+  monthly_questions: number;
+  max_file_mb: number;
+  max_pages: number;
+  concurrent_uploads: number;
+  max_members: number;
+  priority: string;
+  features: string[];
+}
+
+export interface AuditEventDTO {
+  id: string;
+  workspace_id: string;
+  actor_user_id?: string;
+  actor_email?: string;
+  action: string;
+  target_type: string;
+  target_id?: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface CompareMatrixRow {
@@ -99,6 +131,7 @@ export interface WorkspaceDetailDTO {
   id: string;
   name: string;
   slug: string;
+  tier?: string;
   role: string;
   created_at: string;
   member_count: number;
@@ -392,5 +425,20 @@ export class ApiClient {
       method: 'POST',
       body: JSON.stringify({ preset_id }),
     });
+  }
+
+  static async updateWorkspaceTier(workspaceId: string, tier: string): Promise<WorkspaceDetailDTO> {
+    return this.request<WorkspaceDetailDTO>(`/workspaces/${workspaceId}/tier`, {
+      method: 'PATCH',
+      body: JSON.stringify({ tier }),
+    });
+  }
+
+  static async getWorkspaceAuditLogs(workspaceId: string, limit: number = 50): Promise<AuditEventDTO[]> {
+    return this.request<AuditEventDTO[]>(`/workspaces/${workspaceId}/audit-logs?limit=${limit}`);
+  }
+
+  static async getTiers(): Promise<TierSpecDTO[]> {
+    return this.request<TierSpecDTO[]>('/tiers');
   }
 }

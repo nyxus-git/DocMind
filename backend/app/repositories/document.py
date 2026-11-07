@@ -153,3 +153,16 @@ class DocumentRepository:
         )
         row = result.one()
         return int(row[0]), int(row[1])
+
+    async def count_user_active_uploads(self, user_id: uuid.UUID) -> int:
+        result = await self.db.execute(
+            select(func.count(Document.id)).where(
+                Document.uploaded_by == user_id,
+                Document.status.in_([
+                    DocumentStatus.UPLOADING.value,
+                    DocumentStatus.QUEUED.value,
+                    DocumentStatus.PROCESSING.value
+                ])
+            )
+        )
+        return int(result.scalar_one_or_none() or 0)

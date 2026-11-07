@@ -7,17 +7,23 @@ from app.api.v1.dependencies import get_current_user
 from app.core.exceptions import CrossTenantAccessException, DocMindException
 from app.db.session import get_db
 from app.models.entities import User
-from app.models.enums import WorkspaceRole
+from app.models.enums import WorkspaceRole, WorkspaceTier
+from app.repositories.audit import AuditRepository
+from app.repositories.document import DocumentRepository
+from app.repositories.usage import UsageRepository
 from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.workspace import (
+    AuditEventDTO,
     CreateCompanyWorkspaceRequest,
     InviteMemberRequest,
     InviteMemberResponse,
     UpdateMemberRoleRequest,
+    UpdateWorkspaceTierRequest,
     WorkspaceDetailDTO,
     WorkspaceMemberDTO,
 )
+from app.services.quota import QuotaService
 
 router = APIRouter(prefix="/workspaces", tags=["Workspaces"])
 
@@ -36,7 +42,7 @@ async def list_user_workspaces(
     """Lists all workspaces the authenticated user belongs to."""
     ws_repo = WorkspaceRepository(db)
     workspaces_with_role = await ws_repo.get_user_workspaces(current_user.id)
-    
+
     results = []
     for ws, role in workspaces_with_role:
         count = await ws_repo.count_workspace_members(ws.id)
@@ -45,6 +51,7 @@ async def list_user_workspaces(
                 id=ws.id,
                 name=ws.name,
                 slug=ws.slug,
+                tier=ws.tier,
                 role=role,
                 created_at=ws.created_at,
                 member_count=count
@@ -59,8 +66,9 @@ async def create_company_workspace(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Creates a new company / organization workspace with the caller as OWNER."""
+    """Creates a new company / organization workspace with caller as OWNER."""
     ws_repo = WorkspaceRepository(db)
+    audit_repo = AuditRepository(db)
 
     slug = req.slug.strip() if req.slug else slugify(req.name)
     if not slug:
@@ -68,19 +76,33 @@ async def create_company_workspace(
 
     existing = await ws_repo.get_by_slug(slug)
     if existing:
-        # Append short random hex to preserve uniqueness
         slug = f"{slug}-{uuid.uuid4().hex[:4]}"
+
+    tier = req.tier.upper() if req.tier else WorkspaceTier.PRO.value
+    if tier not in [WorkspaceTier.STARTER.value, WorkspaceTier.PRO.value, WorkspaceTier.ENTERPRISE.value]:
+        tier = WorkspaceTier.PRO.value
 
     workspace = await ws_repo.create_workspace(
         name=req.name.strip(),
         slug=slug,
-        created_by=current_user.id
+        created_by=current_user.id,
+        tier=tier
+    )
+
+    await audit_repo.record_event(
+        workspace_id=workspace.id,
+        actor_user_id=current_user.id,
+        action="WORKSPACE_CREATED",
+        target_type="workspace",
+        target_id=workspace.id,
+        metadata={"name": workspace.name, "tier": workspace.tier}
     )
 
     return WorkspaceDetailDTO(
         id=workspace.id,
         name=workspace.name,
         slug=workspace.slug,
+        tier=workspace.tier,
         role=WorkspaceRole.OWNER.value,
         created_at=workspace.created_at,
         member_count=1
@@ -108,8 +130,63 @@ async def get_workspace_detail(
         id=ws.id,
         name=ws.name,
         slug=ws.slug,
+        tier=ws.tier,
         role=membership.role,
         created_at=ws.created_at,
+        member_count=count
+    )
+
+
+@router.patch("/{workspace_id}/tier", response_model=WorkspaceDetailDTO)
+async def update_workspace_tier(
+    workspace_id: uuid.UUID,
+    req: UpdateWorkspaceTierRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Updates the subscription tier for a workspace (restricted to OWNER)."""
+    ws_repo = WorkspaceRepository(db)
+    audit_repo = AuditRepository(db)
+
+    membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
+    if not membership or membership.role != WorkspaceRole.OWNER.value:
+        raise DocMindException(
+            status_code=403,
+            code="INSUFFICIENT_PERMISSIONS",
+            title="Forbidden",
+            detail="Only workspace Owners can modify subscription tiers."
+        )
+
+    target_tier = req.tier.upper()
+    if target_tier not in [WorkspaceTier.STARTER.value, WorkspaceTier.PRO.value, WorkspaceTier.ENTERPRISE.value]:
+        raise DocMindException(
+            status_code=400,
+            code="INVALID_TIER",
+            title="Bad Request",
+            detail="Tier must be one of: STARTER, PRO, ENTERPRISE."
+        )
+
+    updated = await ws_repo.update_tier(workspace_id, target_tier)
+    if not updated:
+        raise DocMindException(status_code=404, code="WORKSPACE_NOT_FOUND", title="Not Found", detail="Workspace does not exist.")
+
+    await audit_repo.record_event(
+        workspace_id=workspace_id,
+        actor_user_id=current_user.id,
+        action="WORKSPACE_TIER_UPDATED",
+        target_type="workspace",
+        target_id=workspace_id,
+        metadata={"new_tier": target_tier}
+    )
+
+    count = await ws_repo.count_workspace_members(workspace_id)
+    return WorkspaceDetailDTO(
+        id=updated.id,
+        name=updated.name,
+        slug=updated.slug,
+        tier=updated.tier,
+        role=membership.role,
+        created_at=updated.created_at,
         member_count=count
     )
 
@@ -145,9 +222,13 @@ async def invite_workspace_member(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Invites a team member to the company workspace."""
+    """Invites a team member to the workspace while enforcing tier limits."""
     ws_repo = WorkspaceRepository(db)
     user_repo = UserRepository(db)
+    doc_repo = DocumentRepository(db)
+    usage_repo = UsageRepository(db)
+    audit_repo = AuditRepository(db)
+    quota_service = QuotaService(doc_repo, usage_repo, ws_repo)
 
     membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
     if not membership or membership.role not in [WorkspaceRole.OWNER.value, WorkspaceRole.ADMIN.value]:
@@ -158,6 +239,9 @@ async def invite_workspace_member(
             detail="Only workspace Owners and Admins can invite team members."
         )
 
+    # Enforce tier member limits (Starter = 1, Pro = 25, Enterprise = 500)
+    await quota_service.check_member_invite_quota(workspace_id)
+
     # Validate target role
     target_role = req.role.upper()
     if target_role not in [WorkspaceRole.ADMIN.value, WorkspaceRole.MEMBER.value, WorkspaceRole.VIEWER.value]:
@@ -165,7 +249,7 @@ async def invite_workspace_member(
             status_code=400,
             code="INVALID_ROLE",
             title="Bad Request",
-            detail=f"Role must be one of: ADMIN, MEMBER, VIEWER."
+            detail="Role must be one of: ADMIN, MEMBER, VIEWER."
         )
 
     # Look up user by email
@@ -180,6 +264,14 @@ async def invite_workspace_member(
                 detail=f"User {req.email} is already a member of this workspace."
             )
         await ws_repo.add_member(workspace_id, target_user.id, target_role)
+        await audit_repo.record_event(
+            workspace_id=workspace_id,
+            actor_user_id=current_user.id,
+            action="MEMBER_ADDED",
+            target_type="user",
+            target_id=target_user.id,
+            metadata={"email": req.email, "role": target_role}
+        )
         return InviteMemberResponse(
             workspace_id=workspace_id,
             email=req.email,
@@ -188,7 +280,14 @@ async def invite_workspace_member(
             message=f"Added {req.email} directly to workspace as {target_role}."
         )
 
-    # User does not exist yet; return invite confirmation
+    # User does not exist yet; register invite and audit
+    await audit_repo.record_event(
+        workspace_id=workspace_id,
+        actor_user_id=current_user.id,
+        action="MEMBER_INVITED",
+        target_type="email",
+        metadata={"email": req.email, "role": target_role}
+    )
     return InviteMemberResponse(
         workspace_id=workspace_id,
         email=req.email,
@@ -208,6 +307,8 @@ async def update_member_role(
 ):
     """Updates the role of an existing workspace member."""
     ws_repo = WorkspaceRepository(db)
+    audit_repo = AuditRepository(db)
+
     membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
     if not membership or membership.role not in [WorkspaceRole.OWNER.value, WorkspaceRole.ADMIN.value]:
         raise DocMindException(
@@ -221,7 +322,6 @@ async def update_member_role(
     if not target_membership:
         raise DocMindException(status_code=404, code="MEMBER_NOT_FOUND", title="Not Found", detail="Member not found in workspace.")
 
-    # Cannot modify the role of an OWNER unless caller is OWNER
     if target_membership.role == WorkspaceRole.OWNER.value and membership.role != WorkspaceRole.OWNER.value:
         raise DocMindException(status_code=403, code="CANNOT_MODIFY_OWNER", title="Forbidden", detail="Only workspace Owners can modify Owner roles.")
 
@@ -232,6 +332,15 @@ async def update_member_role(
     updated = await ws_repo.update_member_role(workspace_id, target_user_id, new_role)
     if not updated:
         raise DocMindException(status_code=404, code="MEMBER_NOT_FOUND", title="Not Found", detail="Member not found in workspace.")
+
+    await audit_repo.record_event(
+        workspace_id=workspace_id,
+        actor_user_id=current_user.id,
+        action="MEMBER_ROLE_UPDATED",
+        target_type="user",
+        target_id=target_user_id,
+        metadata={"new_role": new_role}
+    )
 
     user_repo = UserRepository(db)
     target_user = await user_repo.get_by_id(target_user_id)
@@ -253,11 +362,12 @@ async def remove_workspace_member(
 ):
     """Removes a team member from the workspace."""
     ws_repo = WorkspaceRepository(db)
+    audit_repo = AuditRepository(db)
+
     membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
     if not membership:
         raise CrossTenantAccessException()
 
-    # Allowed if caller is OWNER, ADMIN, or removing self
     is_admin = membership.role in [WorkspaceRole.OWNER.value, WorkspaceRole.ADMIN.value]
     is_self = current_user.id == target_user_id
 
@@ -272,5 +382,51 @@ async def remove_workspace_member(
         raise DocMindException(status_code=400, code="CANNOT_REMOVE_OWNER", title="Bad Request", detail="Cannot remove workspace Owner. Transfer ownership first.")
 
     await ws_repo.remove_member(workspace_id, target_user_id)
+
+    await audit_repo.record_event(
+        workspace_id=workspace_id,
+        actor_user_id=current_user.id,
+        action="MEMBER_REMOVED",
+        target_type="user",
+        target_id=target_user_id,
+        metadata={"removed_by": str(current_user.id)}
+    )
     return None
 
+
+@router.get("/{workspace_id}/audit-logs", response_model=List[AuditEventDTO])
+async def list_workspace_audit_logs(
+    workspace_id: uuid.UUID,
+    limit: int = 50,
+    offset: int = 0,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Lists recent audit events for the workspace (restricted to OWNER and ADMIN)."""
+    ws_repo = WorkspaceRepository(db)
+    audit_repo = AuditRepository(db)
+
+    membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
+    if not membership or membership.role not in [WorkspaceRole.OWNER.value, WorkspaceRole.ADMIN.value]:
+        raise DocMindException(
+            status_code=403,
+            code="INSUFFICIENT_PERMISSIONS",
+            title="Forbidden",
+            detail="Only workspace Owners and Admins can view audit logs."
+        )
+
+    events = await audit_repo.list_events(workspace_id, limit=limit, offset=offset)
+    return [
+        AuditEventDTO(
+            id=event.id,
+            workspace_id=event.workspace_id,
+            actor_user_id=event.actor_user_id,
+            actor_email=actor_email,
+            action=event.action,
+            target_type=event.target_type,
+            target_id=event.target_id,
+            metadata=event.audit_metadata,
+            created_at=event.created_at
+        )
+        for event, actor_email in events
+    ]

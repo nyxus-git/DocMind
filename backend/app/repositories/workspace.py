@@ -3,17 +3,18 @@ from typing import List, Optional, Tuple
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.entities import User, Workspace, WorkspaceMember
-from app.models.enums import WorkspaceRole
+from app.models.enums import WorkspaceRole, WorkspaceTier
 
 
 class WorkspaceRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def create_workspace(self, name: str, slug: str, created_by: uuid.UUID) -> Workspace:
+    async def create_workspace(self, name: str, slug: str, created_by: uuid.UUID, tier: str = WorkspaceTier.STARTER.value) -> Workspace:
         workspace = Workspace(
             name=name,
             slug=slug,
+            tier=tier,
             created_by=created_by
         )
         self.db.add(workspace)
@@ -95,3 +96,11 @@ class WorkspaceRepository:
         await self.db.delete(member)
         await self.db.flush()
         return True
+
+    async def update_tier(self, workspace_id: uuid.UUID, tier: str) -> Optional[Workspace]:
+        ws = await self.get_by_id(workspace_id)
+        if not ws:
+            return None
+        ws.tier = tier
+        await self.db.flush()
+        return ws

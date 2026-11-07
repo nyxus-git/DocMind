@@ -1,12 +1,13 @@
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, Optional
 from pydantic import BaseModel, EmailStr, Field
 
 
 class CreateCompanyWorkspaceRequest(BaseModel):
     name: str = Field(min_length=2, max_length=128)
     slug: Optional[str] = Field(None, min_length=2, max_length=128)
+    tier: Optional[str] = Field(default="PRO", description="STARTER, PRO, ENTERPRISE")
 
 
 class WorkspaceMemberDTO(BaseModel):
@@ -33,11 +34,27 @@ class UpdateMemberRoleRequest(BaseModel):
     role: str
 
 
+class UpdateWorkspaceTierRequest(BaseModel):
+    tier: str = Field(description="STARTER, PRO, ENTERPRISE")
+
+
 class WorkspaceDetailDTO(BaseModel):
     id: uuid.UUID
     name: str
     slug: str
+    tier: str = "STARTER"
     role: str
     created_at: datetime
     member_count: int = 1
 
+
+class AuditEventDTO(BaseModel):
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    actor_user_id: Optional[uuid.UUID]
+    actor_email: Optional[str] = None
+    action: str
+    target_type: str
+    target_id: Optional[uuid.UUID]
+    metadata: Optional[Dict[str, Any]] = None
+    created_at: datetime

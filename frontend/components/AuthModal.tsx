@@ -8,6 +8,7 @@ export interface UserSession {
   fullName: string;
   workspaceName: string;
   workspaceSlug: string;
+  workspaceId?: string;
   isCompany: boolean;
   role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
   token?: string;

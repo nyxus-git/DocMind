@@ -15,6 +15,12 @@ class WorkspaceRole(str, enum.Enum):
     VIEWER = "VIEWER"
 
 
+class WorkspaceTier(str, enum.Enum):
+    STARTER = "STARTER"
+    PRO = "PRO"
+    ENTERPRISE = "ENTERPRISE"
+
+
 class DocumentStatus(str, enum.Enum):
     UPLOADING = "UPLOADING"
     QUEUED = "QUEUED"

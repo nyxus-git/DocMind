@@ -10,9 +10,11 @@ from app.core.config import settings
 from app.core.exceptions import DocMindException, EntityNotFoundException
 from app.models.entities import Document, DocumentChunk, DocumentSummary
 from app.models.enums import DocumentStatus
+from app.repositories.audit import AuditRepository
 from app.repositories.chunk import ChunkRepository
 from app.repositories.document import DocumentRepository
 from app.repositories.usage import UsageRepository
+from app.repositories.workspace import WorkspaceRepository
 from app.schemas.chat import CitationDTO
 from app.schemas.intelligence import (
     CompareDocumentsResponse,
@@ -21,6 +23,7 @@ from app.schemas.intelligence import (
     ExtractionResponse,
     KeyPointItem,
 )
+from app.services.quota import QuotaService
 
 logger = logging.getLogger("docmind.intelligence")
 
@@ -36,6 +39,9 @@ class IntelligenceService:
         self.doc_repo = DocumentRepository(db)
         self.chunk_repo = ChunkRepository(db)
         self.usage_repo = UsageRepository(db)
+        self.workspace_repo = WorkspaceRepository(db)
+        self.audit_repo = AuditRepository(db)
+        self.quota_service = QuotaService(self.doc_repo, self.usage_repo, self.workspace_repo)
         self.llm = llm or get_llm_provider()
         self.embedder = embedder or get_embedding_provider()
 
@@ -232,7 +238,11 @@ class IntelligenceService:
         focus_topic: Optional[str] = None,
         user_id: Optional[uuid.UUID] = None
     ) -> CompareDocumentsResponse:
-        # 1. Enforce document count limits: 2 to 5 distinct documents
+        # 1. Enforce tier quota check if user authenticated
+        if user_id:
+            await self.quota_service.check_question_quota(workspace_id, user_id)
+
+        # 2. Enforce document count limits: 2 to 5 distinct documents
         unique_ids = list(dict.fromkeys(document_ids))
         if len(unique_ids) < 2 or len(unique_ids) > 5:
             raise DocMindException(
@@ -441,6 +451,13 @@ class IntelligenceService:
                     provider="gemini",
                     model=res.model,
                     units=res.input_tokens + res.output_tokens
+                )
+                await self.audit_repo.record_event(
+                    workspace_id=workspace_id,
+                    actor_user_id=user_id,
+                    action="COMPARISON_RUN",
+                    target_type="documents",
+                    metadata={"document_count": len(unique_ids), "focus_topic": focus_topic}
                 )
             except Exception as e:
                 logger.warning(f"Failed to record usage event: {e}")

@@ -20,7 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
 
 from app.db.session import Base
-from app.models.enums import DocumentErrorCode, DocumentStatus, JobStatus, JobType, UserStatus, WorkspaceRole
+from app.models.enums import DocumentErrorCode, DocumentStatus, JobStatus, JobType, UserStatus, WorkspaceRole, WorkspaceTier
 
 
 @compiles(TSVECTOR, "sqlite")
@@ -58,6 +58,7 @@ class Workspace(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     slug: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    tier: Mapped[str] = mapped_column(String(32), default=WorkspaceTier.STARTER.value, nullable=False)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)

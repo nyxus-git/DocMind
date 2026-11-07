@@ -15,6 +15,26 @@ class UsageSummaryDTO(BaseModel):
     questions_limit: int
     billing_period_reset_date: datetime
     ai_features_enabled: bool
+    tier: str = "STARTER"
+    tier_name: str = "Starter"
+    max_file_mb: int = 20
+    max_pages: int = 200
+    concurrent_uploads_limit: int = 2
+    max_members_limit: int = 1
+
+
+class TierSpecDTO(BaseModel):
+    tier: str
+    name: str
+    max_docs: int
+    max_storage_mb: int
+    monthly_questions: int
+    max_file_mb: int
+    max_pages: int
+    concurrent_uploads: int
+    max_members: int
+    priority: str
+    features: List[str]
 
 
 class JobDTO(BaseModel):

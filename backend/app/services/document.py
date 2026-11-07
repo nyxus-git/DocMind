@@ -7,9 +7,11 @@ from app.core.exceptions import DocMindException, EntityNotFoundException
 from app.ingestion.validator import validate_file_metadata
 from app.models.entities import Document
 from app.models.enums import DocumentErrorCode, DocumentStatus, JobType
+from app.repositories.audit import AuditRepository
 from app.repositories.document import DocumentRepository
 from app.repositories.job import JobRepository
 from app.repositories.usage import UsageRepository
+from app.repositories.workspace import WorkspaceRepository
 from app.schemas.document import DocumentDTO, SafeErrorDTO, UploadIntentResponse
 from app.services.quota import QuotaService
 
@@ -20,7 +22,9 @@ class DocumentService:
         self.doc_repo = DocumentRepository(db)
         self.job_repo = JobRepository(db)
         self.usage_repo = UsageRepository(db)
-        self.quota_service = QuotaService(self.doc_repo, self.usage_repo)
+        self.workspace_repo = WorkspaceRepository(db)
+        self.audit_repo = AuditRepository(db)
+        self.quota_service = QuotaService(self.doc_repo, self.usage_repo, self.workspace_repo)
         self.storage = storage or get_storage()
 
     async def create_upload_intent(
@@ -32,11 +36,11 @@ class DocumentService:
         size_bytes: int,
         checksum_sha256: str
     ) -> UploadIntentResponse:
-        # 1. Validate file metadata (whitelist, max 20 MB)
+        # 1. Validate file metadata (whitelist, max 20 MB base)
         validate_file_metadata(filename, declared_mime, size_bytes)
 
-        # 2. Check workspace quotas
-        await self.quota_service.check_upload_quota(workspace_id, size_bytes)
+        # 2. Check dynamic workspace tier quotas & user concurrent uploads
+        await self.quota_service.check_upload_quota(workspace_id, size_bytes, user_id=user_id)
 
         # 3. Generate opaque random UUID object key (never use user-supplied filename)
         object_key = f"raw/{workspace_id}/{uuid.uuid4()}.bin"
@@ -62,6 +66,15 @@ class DocumentService:
 
         from datetime import datetime, timedelta, timezone
         expires_at = (datetime.now(timezone.utc) + timedelta(seconds=300)).isoformat()
+
+        await self.audit_repo.record_event(
+            workspace_id=workspace_id,
+            actor_user_id=user_id,
+            action="DOCUMENT_UPLOAD_INTENT_CREATED",
+            target_type="document",
+            target_id=doc.id,
+            metadata={"filename": filename, "size_bytes": size_bytes}
+        )
 
         return UploadIntentResponse(
             document_id=doc.id,
@@ -152,6 +165,14 @@ class DocumentService:
             job_type=JobType.DELETE_DOCUMENT.value,
             payload={"document_id": str(doc.id)},
             idempotency_key=f"delete-{doc.id}"
+        )
+
+        await self.audit_repo.record_event(
+            workspace_id=workspace_id,
+            action="DOCUMENT_DELETED",
+            target_type="document",
+            target_id=doc.id,
+            metadata={"filename": doc.filename}
         )
 
     async def get_download_url(self, workspace_id: uuid.UUID, document_id: uuid.UUID) -> str:

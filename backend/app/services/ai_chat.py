@@ -17,6 +17,7 @@ from app.repositories.chunk import ChunkRepository
 from app.repositories.conversation import ConversationRepository
 from app.repositories.document import DocumentRepository
 from app.repositories.usage import UsageRepository
+from app.repositories.workspace import WorkspaceRepository
 from app.schemas.chat import (
     CitationDTO,
     SearchResultItemDTO,
@@ -38,7 +39,8 @@ class ChatService:
         self.doc_repo = DocumentRepository(db)
         self.chunk_repo = ChunkRepository(db)
         self.usage_repo = UsageRepository(db)
-        self.quota_service = QuotaService(self.doc_repo, self.usage_repo)
+        self.workspace_repo = WorkspaceRepository(db)
+        self.quota_service = QuotaService(self.doc_repo, self.usage_repo, self.workspace_repo)
         self.llm = llm or get_llm_provider()
         self.embedding = embedding or get_embedding_provider()
 
@@ -51,12 +53,8 @@ class ChatService:
         document_ids: Optional[List[uuid.UUID]] = None,
         idempotency_key: Optional[str] = None
     ) -> SendMessageResponse:
-        # 1. Check AI kill-switch (FR-044)
-        if not settings.AI_FEATURES_ENABLED:
-            raise ServiceDegradedException("AI features are currently disabled by administrator policy.")
-
-        # 2. Check question quota (FR-041)
-        await self.quota_service.check_question_quota(user_id)
+        # 1. Check AI kill-switch and dynamic tier question quota (FR-041, FR-044)
+        await self.quota_service.check_question_quota(workspace_id, user_id)
 
         # 3. Verify conversation ownership
         conv = await self.conv_repo.get_by_id(workspace_id, conversation_id)

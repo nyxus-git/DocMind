@@ -9,12 +9,14 @@ import { NavigationTab, Sidebar } from '../components/Sidebar';
 import { UploadModal } from '../components/UploadModal';
 import {
   ApiClient,
+  AuditEventDTO,
   CitationDTO,
   CompareResponse,
   ConversationDTO,
   DocumentDTO,
   DocumentSummaryResponse,
   MessageDTO,
+  TierSpecDTO,
   UsageSummaryDTO,
   WorkspaceMemberDTO,
 } from '../lib/api';
@@ -22,14 +24,59 @@ import {
 // Initial fallback mock data for instant preview and offline experience
 const INITIAL_USAGE: UsageSummaryDTO = {
   documents_count: 3,
-  documents_limit: 20,
+  documents_limit: 500,
   storage_bytes: 42 * 1024 * 1024,
-  storage_limit_bytes: 200 * 1024 * 1024,
+  storage_limit_bytes: 10 * 1024 * 1024 * 1024,
   questions_used: 14,
-  questions_limit: 100,
+  questions_limit: 2500,
   billing_period_reset_date: '2026-12-01T00:00:00Z',
   ai_features_enabled: true,
+  tier: 'PRO',
+  tier_name: 'Pro Company',
+  max_file_mb: 50,
+  max_pages: 500,
+  concurrent_uploads_limit: 5,
+  max_members_limit: 25,
 };
+
+const INITIAL_AUDIT_LOGS: AuditEventDTO[] = [
+  {
+    id: 'audit-001',
+    workspace_id: 'ws-001',
+    actor_email: 'admin@acme-corp.com',
+    action: 'WORKSPACE_CREATED',
+    target_type: 'workspace',
+    metadata: { tier: 'PRO', name: 'Acme Systems Corp' },
+    created_at: new Date(Date.now() - 3600000 * 24).toISOString(),
+  },
+  {
+    id: 'audit-002',
+    workspace_id: 'ws-001',
+    actor_email: 'admin@acme-corp.com',
+    action: 'DOCUMENT_UPLOAD_INTENT_CREATED',
+    target_type: 'document',
+    metadata: { filename: 'DocMind_PRD_Technical_Specification_v1.0.pdf' },
+    created_at: new Date(Date.now() - 3600000 * 12).toISOString(),
+  },
+  {
+    id: 'audit-003',
+    workspace_id: 'ws-001',
+    actor_email: 'admin@acme-corp.com',
+    action: 'MEMBER_INVITED',
+    target_type: 'email',
+    metadata: { email: 'sarah.analyst@acme-corp.com', role: 'ADMIN' },
+    created_at: new Date(Date.now() - 3600000 * 4).toISOString(),
+  },
+  {
+    id: 'audit-004',
+    workspace_id: 'ws-001',
+    actor_email: 'admin@acme-corp.com',
+    action: 'COMPARISON_RUN',
+    target_type: 'documents',
+    metadata: { document_count: 2, focus_topic: 'Security & Compliance' },
+    created_at: new Date(Date.now() - 3600000 * 1).toISOString(),
+  },
+];
 
 const INITIAL_DOCS: DocumentDTO[] = [
   {
@@ -166,6 +213,7 @@ export default function DocMindApp() {
       fullName: 'Elena Rostova',
       workspaceName: 'Acme Intelligence • Enterprise',
       workspaceSlug: 'acme-intelligence',
+      workspaceId: 'ws-001',
       isCompany: true,
       role: 'OWNER',
     };
@@ -223,6 +271,54 @@ export default function DocMindApp() {
   const [inviteRole, setInviteRole] = useState('MEMBER');
   const [inviteStatus, setInviteStatus] = useState<string | null>(null);
   const [isInviting, setIsInviting] = useState(false);
+
+  const [auditLogs, setAuditLogs] = useState<AuditEventDTO[]>(INITIAL_AUDIT_LOGS);
+  const [isUpdatingTier, setIsUpdatingTier] = useState(false);
+  const [tierStatus, setTierStatus] = useState<string | null>(null);
+
+  const handleUpgradeTier = async (newTier: string) => {
+    setIsUpdatingTier(true);
+    setTierStatus(null);
+    try {
+      if (userSession?.workspaceId) {
+        await ApiClient.updateWorkspaceTier(userSession.workspaceId, newTier);
+      }
+      const tierLimitsMap: Record<string, { docs: number; storage: number; questions: number; fileMb: number; members: number; name: string }> = {
+        STARTER: { docs: 20, storage: 200 * 1024 * 1024, questions: 100, fileMb: 20, members: 1, name: 'Starter Personal' },
+        PRO: { docs: 500, storage: 10000 * 1024 * 1024, questions: 2500, fileMb: 50, members: 25, name: 'Pro Company' },
+        ENTERPRISE: { docs: 5000, storage: 100000 * 1024 * 1024, questions: 25000, fileMb: 100, members: 500, name: 'Enterprise' },
+      };
+      const cfg = tierLimitsMap[newTier] || tierLimitsMap.PRO;
+      setUsage(prev => ({
+        ...prev,
+        tier: newTier,
+        tier_name: cfg.name,
+        documents_limit: cfg.docs,
+        storage_limit_bytes: cfg.storage,
+        questions_limit: cfg.questions,
+        max_file_mb: cfg.fileMb,
+        max_members_limit: cfg.members,
+      }));
+      setTierStatus(`Workspace successfully upgraded to ${cfg.name}!`);
+      setAuditLogs(prev => [
+        {
+          id: `audit-${Date.now()}`,
+          workspace_id: userSession?.workspaceId || 'ws-001',
+          actor_email: userSession?.email || 'admin@acme-corp.com',
+          action: 'WORKSPACE_TIER_UPDATED',
+          target_type: 'workspace',
+          metadata: { new_tier: newTier },
+          created_at: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+      setTimeout(() => setTierStatus(null), 3500);
+    } catch (err: unknown) {
+      setTierStatus(err instanceof Error ? err.message : 'Failed to update subscription tier.');
+    } finally {
+      setIsUpdatingTier(false);
+    }
+  };
 
   const handleInviteMember = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1165,6 +1261,104 @@ export default function DocMindApp() {
                   </button>
                 </div>
 
+                {/* SaaS Subscription Tier & Dynamic Quotas */}
+                <div className="pb-4 border-b border-slate-800 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <h3 className="text-sm font-semibold text-slate-200">Subscription Tier & Quota Enforcement</h3>
+                        <span className={`px-2.5 py-0.5 rounded-full font-mono text-xs font-bold ${
+                          usage.tier === 'ENTERPRISE'
+                            ? 'bg-purple-500/15 text-purple-300 border border-purple-500/30'
+                            : usage.tier === 'PRO'
+                            ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
+                            : 'bg-slate-800 text-slate-300 border border-slate-700'
+                        }`}>
+                          {usage.tier_name || usage.tier || 'Pro Company'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Dynamic per-tier bounds: documents, storage, concurrent uploads, and AI operations.
+                      </p>
+                    </div>
+
+                    {/* Tier Switcher Buttons */}
+                    <div className="flex items-center space-x-1.5 self-start sm:self-auto bg-slate-950 p-1 rounded-lg border border-slate-800">
+                      {(['STARTER', 'PRO', 'ENTERPRISE'] as const).map(tierKey => (
+                        <button
+                          key={tierKey}
+                          onClick={() => handleUpgradeTier(tierKey)}
+                          disabled={isUpdatingTier || usage.tier === tierKey}
+                          className={`px-3 py-1 rounded text-[11px] font-semibold transition-all ${
+                            usage.tier === tierKey
+                              ? 'bg-cyan-500 text-slate-950 font-bold shadow-sm'
+                              : 'text-slate-400 hover:text-white hover:bg-slate-900 disabled:opacity-40'
+                          }`}
+                        >
+                          {tierKey === 'STARTER' ? 'Starter' : tierKey === 'PRO' ? 'Pro' : 'Enterprise'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {tierStatus && (
+                    <div className="p-3 rounded-lg bg-cyan-950/40 border border-cyan-500/30 text-xs text-cyan-300 animate-in fade-in">
+                      {tierStatus}
+                    </div>
+                  )}
+
+                  {/* Quota meters grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 pt-1">
+                    <div className="p-3.5 rounded-lg bg-slate-950/70 border border-slate-800/80 space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-400">Active Documents</span>
+                        <span className="text-cyan-400 font-mono font-bold">
+                          {usage.documents_count} / {usage.documents_limit}
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-cyan-400 rounded-full"
+                          style={{ width: `${Math.min(100, (usage.documents_count / usage.documents_limit) * 100)}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] text-slate-500 block">Cap: max {usage.documents_limit} docs</span>
+                    </div>
+
+                    <div className="p-3.5 rounded-lg bg-slate-950/70 border border-slate-800/80 space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-400">Storage Capacity</span>
+                        <span className="text-teal-400 font-mono font-bold">
+                          {(usage.storage_bytes / (1024 * 1024)).toFixed(1)} / {(usage.storage_limit_bytes / (1024 * 1024)).toFixed(0)} MB
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-teal-400 rounded-full"
+                          style={{ width: `${Math.min(100, (usage.storage_bytes / usage.storage_limit_bytes) * 100)}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] text-slate-500 block">File size limit: {usage.max_file_mb || 50} MB/doc</span>
+                    </div>
+
+                    <div className="p-3.5 rounded-lg bg-slate-950/70 border border-slate-800/80 space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-400">AI Operations / Mo</span>
+                        <span className="text-emerald-400 font-mono font-bold">
+                          {usage.questions_used} / {usage.questions_limit}
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-400 rounded-full"
+                          style={{ width: `${Math.min(100, (usage.questions_used / usage.questions_limit) * 100)}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] text-slate-500 block">Concurrent slots: {usage.concurrent_uploads_limit || 5} active</span>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="flex items-center justify-between pb-4 border-b border-slate-800">
                   <div>
                     <h3 className="text-sm font-semibold text-slate-200">Spend Protection & Kill-Switch</h3>
@@ -1258,6 +1452,58 @@ export default function DocMindApp() {
                                   Remove
                                 </button>
                               )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Audit Trail & Compliance Records (PRD Section 32) */}
+                <div className="pb-4 border-b border-slate-800 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-200">Audit Trail & Security Records</h3>
+                      <p className="text-xs text-slate-400">Append-only security log of workspace governance, access, and AI operations</p>
+                    </div>
+                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                      {auditLogs.length} Events
+                    </span>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-800/80 overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-950/80 text-slate-400 font-semibold border-b border-slate-800">
+                        <tr>
+                          <th className="p-2.5">Timestamp (UTC)</th>
+                          <th className="p-2.5">Action</th>
+                          <th className="p-2.5">Actor</th>
+                          <th className="p-2.5">Target / Metadata</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60 bg-slate-950/30 font-mono text-[11px]">
+                        {auditLogs.map(log => (
+                          <tr key={log.id} className="hover:bg-slate-900/40">
+                            <td className="p-2.5 text-slate-400">
+                              {new Date(log.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </td>
+                            <td className="p-2.5">
+                              <span className={`px-2 py-0.5 rounded font-bold text-[10px] ${
+                                log.action.includes('TIER')
+                                  ? 'bg-purple-500/15 text-purple-300 border border-purple-500/30'
+                                  : log.action.includes('INVITED') || log.action.includes('ADDED')
+                                  ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30'
+                                  : log.action.includes('DELETE')
+                                  ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
+                                  : 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
+                              }`}>
+                                {log.action}
+                              </span>
+                            </td>
+                            <td className="p-2.5 text-slate-300">{log.actor_email || 'system'}</td>
+                            <td className="p-2.5 text-slate-400 max-w-xs truncate">
+                              {log.metadata ? Object.entries(log.metadata).map(([k, v]) => `${k}=${v}`).join(', ') : log.target_type}
                             </td>
                           </tr>
                         ))}

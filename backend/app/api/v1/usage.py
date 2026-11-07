@@ -1,4 +1,5 @@
 import uuid
+from typing import List
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.dependencies import WorkspaceContext, get_current_workspace
@@ -8,8 +9,9 @@ from app.repositories.conversation import ConversationRepository
 from app.repositories.document import DocumentRepository
 from app.repositories.job import JobRepository
 from app.repositories.usage import UsageRepository
+from app.repositories.workspace import WorkspaceRepository
 from app.schemas.chat import ConversationDTO
-from app.schemas.usage import DashboardDTO, JobDTO, UsageSummaryDTO
+from app.schemas.usage import DashboardDTO, JobDTO, TierSpecDTO, UsageSummaryDTO
 from app.services.document import DocumentService
 from app.services.quota import QuotaService
 
@@ -23,8 +25,15 @@ async def get_usage_metrics(
 ):
     doc_repo = DocumentRepository(db)
     usage_repo = UsageRepository(db)
-    quota_service = QuotaService(doc_repo, usage_repo)
+    ws_repo = WorkspaceRepository(db)
+    quota_service = QuotaService(doc_repo, usage_repo, ws_repo)
     return await quota_service.get_usage_summary(ctx.workspace.id, ctx.user.id)
+
+
+@router.get("/tiers", response_model=List[TierSpecDTO])
+async def get_tier_catalogue():
+    """Returns the full SaaS subscription tier specification catalogue."""
+    return QuotaService.get_tier_catalogue()
 
 
 @router.get("/dashboard/summary", response_model=DashboardDTO)
@@ -35,8 +44,9 @@ async def get_dashboard_summary(
     doc_repo = DocumentRepository(db)
     usage_repo = UsageRepository(db)
     conv_repo = ConversationRepository(db)
+    ws_repo = WorkspaceRepository(db)
     doc_service = DocumentService(db)
-    quota_service = QuotaService(doc_repo, usage_repo)
+    quota_service = QuotaService(doc_repo, usage_repo, ws_repo)
 
     usage = await quota_service.get_usage_summary(ctx.workspace.id, ctx.user.id)
     recent_docs = await doc_service.list_documents(ctx.workspace.id, limit=5)
