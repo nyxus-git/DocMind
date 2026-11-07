@@ -506,35 +506,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             )}
           </button>
         </form>
-
-        {/* Quick Demo Sandbox Access */}
-        <div className="p-6 border-t border-slate-800/80 bg-slate-950/40">
-          <div className="text-center mb-3">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-              Or Explore Instantly with Preloaded Sandbox
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2.5">
-            <button
-              type="button"
-              onClick={() => handleQuickDemo('company')}
-              className="px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 text-xs text-slate-200 flex items-center justify-center gap-1.5 transition-colors"
-            >
-              <span>🏢</span>
-              <span>Demo Company (Enterprise)</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleQuickDemo('personal')}
-              className="px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 text-xs text-slate-200 flex items-center justify-center gap-1.5 transition-colors"
-            >
-              <span>👤</span>
-              <span>Demo Solo Researcher</span>
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );
