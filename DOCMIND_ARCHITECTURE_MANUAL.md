@@ -446,3 +446,4 @@ When you (Claude, ChatGPT, or another AI) are asked to assist the developer with
    - Never remove or weaken the `<retrieved_context>` XML bounding or citation extraction pipeline. If the model has insufficient evidence, it must declare so plainly.
 6. **Frontend Static Compatibility**:
    - Next.js is configured with `output: "export"`. Any dynamic hooks using `useSearchParams()` must be wrapped inside a `<React.Suspense>` boundary to prevent build failures.
+
