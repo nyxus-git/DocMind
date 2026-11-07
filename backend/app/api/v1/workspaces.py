@@ -270,3 +270,4 @@ async def remove_workspace_member(
 
     await ws_repo.remove_member(workspace_id, target_user_id)
     return None
+

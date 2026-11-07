@@ -40,3 +40,4 @@ class WorkspaceDetailDTO(BaseModel):
     role: str
     created_at: datetime
     member_count: int = 1
+
