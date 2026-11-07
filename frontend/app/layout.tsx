@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DocMind | Enterprise Document Intelligence & Grounded RAG Workspace",
-  description: "Secure upload, grounded Q&A, verified citations, summaries, and comparison.",
+  title: "DocMind | Enterprise Document Intelligence Platform",
+  description: "Enterprise-grade document search, grounded synthesis, verified citations, and cross-file intelligence with zero data leakage.",
 };
 
 export default function RootLayout({

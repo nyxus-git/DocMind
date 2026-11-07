@@ -73,8 +73,8 @@ function AuthActionContent() {
       <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-8 relative z-10">
         {/* Brand Header */}
         <div className="flex flex-col items-center justify-center text-center mb-6">
-          <Logo size="lg" showBadge={true} badgeText="Identity" className="justify-center mb-2" />
-          <p className="text-xs text-slate-400 mt-1">Ground-truth citation intelligence</p>
+          <Logo size="lg" showBadge={false} className="justify-center mb-2" />
+          <p className="text-xs text-slate-400 mt-1">Enterprise Document Intelligence Platform</p>
         </div>
 
         {/* Action 1: Email Verification */}

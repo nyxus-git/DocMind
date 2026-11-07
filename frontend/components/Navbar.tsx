@@ -13,7 +13,7 @@ interface NavbarProps {
   onOpenAuth: (mode: 'signin' | 'signup', isCompany?: boolean) => void;
   onSwitchView: (mode: 'landing' | 'app') => void;
   onOpenAdmin?: () => void;
-  onLaunchRecruiterSandbox?: () => void;
+  onLaunchDemo?: () => void;
   onSignOut: () => void;
 }
 
@@ -25,7 +25,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenAuth,
   onSwitchView,
   onOpenAdmin,
-  onLaunchRecruiterSandbox,
+  onLaunchDemo,
   onSignOut,
 }) => {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -42,7 +42,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           onClick={() => onSwitchView('landing')}
           className="flex items-center gap-2 group text-left cursor-pointer"
         >
-          <Logo size="md" showText={true} showBadge={true} badgeText="SaaS 2.0" />
+          <Logo size="md" showText={true} showBadge={false} />
         </button>
 
         {/* If in app mode: Show active workspace badge & tenant isolation */}
@@ -59,10 +59,10 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
             </div>
 
-            {/* Cloudflare R2 Isolated Tenant Storage Indicator */}
+            {/* Zero-Trust Tenant Storage Indicator */}
             <div className="hidden xl:flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900/60 border border-slate-800/80 text-[11px] text-slate-400">
               <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-              <span>Cloudflare R2: Tenant Isolated</span>
+              <span>Zero-Trust Vault • Isolated</span>
             </div>
           </>
         )}
@@ -72,19 +72,19 @@ export const Navbar: React.FC<NavbarProps> = ({
       {viewMode === 'landing' && (
         <nav className="hidden lg:flex items-center gap-7 text-xs font-medium text-slate-300">
           <a href="#what-is-docmind" className="hover:text-cyan-400 transition-colors">
-            Overview
+            Platform
           </a>
           <a href="#services" className="hover:text-cyan-400 transition-colors">
-            Services Suite
+            Capabilities
           </a>
           <a href="#security" className="hover:text-cyan-400 transition-colors">
-            Cloudflare R2 Security
+            Security &amp; Governance
           </a>
           <a href="#demo" className="hover:text-cyan-400 transition-colors">
-            Live Sandbox
+            Interactive Demo
           </a>
           <a href="#pricing" className="hover:text-cyan-400 transition-colors">
-            Pricing & Quotas
+            Pricing
           </a>
           <a href="#faq" className="hover:text-cyan-400 transition-colors">
             FAQ
@@ -122,16 +122,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                 className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-xs font-semibold text-cyan-300 transition-all hover:border-cyan-500/50 shadow-sm cursor-pointer"
               >
                 <span>🏢</span>
-                <span>Company Workspace</span>
+                <span>Create Workspace</span>
               </button>
 
               <button
-                onClick={onLaunchRecruiterSandbox || (() => onOpenAuth('signin'))}
-                className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-500/15 via-teal-500/15 to-emerald-500/15 hover:from-cyan-500/25 hover:to-teal-500/25 border border-cyan-500/40 text-cyan-300 font-semibold text-xs transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
-                title="Instant 1-Click Evaluation Sandbox for Recruiters & Hiring Managers"
+                onClick={onLaunchDemo || (() => onOpenAuth('signin'))}
+                className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-400 hover:from-cyan-400 hover:to-teal-300 text-slate-950 font-bold text-xs transition-all shadow-md shadow-cyan-500/20 flex items-center gap-1.5 cursor-pointer"
+                title="Instant Interactive Evaluation Workspace"
               >
-                <span className="text-cyan-400">⚡</span>
-                <span>Recruiter Sandbox</span>
+                <span className="text-slate-950">⚡</span>
+                <span>Try Live Demo</span>
               </button>
             </>
           )

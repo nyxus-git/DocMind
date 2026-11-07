@@ -120,14 +120,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         })}
       </div>
 
-      {/* Cloudflare R2 Privacy & Security Shield */}
+      {/* Enterprise Vault Privacy & Security Shield */}
       <div className="p-3.5 rounded-2xl bg-gradient-to-b from-slate-900/80 to-slate-950 border border-slate-800/80 text-xs space-y-2">
         <div className="flex items-center gap-2 text-cyan-400 font-semibold">
           <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-          <span>Cloudflare R2 Storage</span>
+          <span>Enterprise Vault Security</span>
         </div>
         <p className="text-slate-400 text-[11px] leading-relaxed">
-          Zero cross-tenant leakage. Customer documents are isolated in dedicated workspace partitions.
+          Zero cross-tenant leakage. Multi-tenant physical quarantine with strict row-level governance.
         </p>
       </div>
     </aside>

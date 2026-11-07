@@ -23,7 +23,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
   const faqs = [
     {
       q: 'How does DocMind guarantee that documents are NEVER visible to other companies?',
-      a: 'DocMind implements complete architectural multi-tenancy. Every company receives an isolated workspace ID. Uploaded documents are saved to dedicated Cloudflare R2 partitioned paths (workspaces/[workspace_id]/...). Database queries enforce strict WHERE workspace_id = :authenticated_workspace_id. It is mathematically impossible for one company to access, view, or search another company\'s files.',
+      a: 'DocMind implements complete architectural zero-trust multi-tenancy. Every company receives an isolated workspace ID. Uploaded documents are encrypted at rest with AES-256 and saved to isolated tenant storage partitions. Database queries strictly enforce parameter-bound tenant scoping derived from cryptographic JWT tokens. It is architecturally impossible for one organization to access, view, or search another company\'s files.',
     },
     {
       q: 'How does DocMind guarantee zero AI hallucinations?',
@@ -63,9 +63,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
           <div className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-slate-900/90 border border-cyan-500/30 text-xs font-semibold text-cyan-300 shadow-xl shadow-cyan-500/10 mb-8 backdrop-blur-xl hover:border-cyan-400/60 transition-all cursor-pointer">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
             <span className="uppercase text-[10px] tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono">
-              Cloudflare R2 + pgvector
+              Enterprise Document Intelligence
             </span>
-            <span>Zero Cross-Tenant Leakage & Verifiable Citations</span>
+            <span>Verifiable Citations • Zero Hallucinations • Enterprise Privacy</span>
             <span className="text-cyan-400">&rarr;</span>
           </div>
 
@@ -79,9 +79,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
 
           {/* Subtitle */}
           <p className="text-base sm:text-lg text-slate-300 max-w-3xl mx-auto leading-relaxed mb-10">
-            Upload complex contracts, financial filings, and technical specifications. Every claim is verified with{' '}
-            <b className="text-cyan-300">exact page citations [S1]</b>. Each company’s files are physically quarantined on{' '}
-            <b className="text-white">Cloudflare R2</b> with zero cross-tenant visibility.
+            Search, synthesize, and analyze complex contracts, financial filings, and technical documentation with complete confidence. Every answer is backed by <b className="text-cyan-300">verifiable inline page citations [S1]</b> with zero hallucinations and complete enterprise data privacy.
           </p>
 
           {/* CTAs */}
@@ -97,31 +95,31 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
             <button
               onClick={onLaunchApp}
               className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-cyan-500/30 hover:border-cyan-400 text-white font-semibold text-sm transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 cursor-pointer group"
-              title="Instant pre-seeded enterprise evaluation workspace for hiring teams and reviewers"
+              title="Instant interactive evaluation workspace"
             >
               <span className="text-cyan-400 group-hover:scale-110 transition-transform">⚡</span>
-              <span>Recruiter 1-Click Sandbox</span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 font-mono border border-cyan-500/30">Reviewer Mode</span>
+              <span>Experience Interactive Demo</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 font-mono border border-cyan-500/30">Live Workspace</span>
             </button>
           </div>
 
           {/* Trust Badges */}
           <div className="flex flex-wrap items-center justify-center gap-6 sm:gap-10 text-xs text-slate-400 font-medium">
             <div className="flex items-center gap-2">
-              <span className="text-emerald-400 text-base">🔒</span>
-              <span>Cloudflare R2 Tenant Isolation</span>
+              <span className="text-emerald-400 text-base">🛡️</span>
+              <span>Zero Model Training Policy</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-cyan-400 text-base">🛡️</span>
-              <span>Argon2id Memory-Hard Hashing</span>
+              <span className="text-cyan-400 text-base">🔒</span>
+              <span>AES-256 &amp; TLS 1.3 Encryption</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-teal-400 text-base">⚡</span>
-              <span>768-Dim pgvector Hybrid Search</span>
+              <span className="text-teal-400 text-base">🏢</span>
+              <span>Multi-Tenant Tenant Isolation</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-indigo-400 text-base">🚫</span>
-              <span>Zero AI Model Training Policy</span>
+              <span className="text-indigo-400 text-base">⚡</span>
+              <span>Verifiable Ground-Truth Citations</span>
             </div>
           </div>
         </section>
@@ -152,7 +150,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
               </div>
               <div className="hidden sm:flex items-center gap-2 text-[11px]">
                 <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-medium">
-                  Cloudflare R2 Encrypted
+                  AES-256 Encrypted
                 </span>
                 <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
                   Tenant-Isolated
@@ -271,20 +269,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
                 {/* Card Bottom CTA */}
                 <div className="pt-5 mt-5 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-3">
                   <div className="text-xs text-slate-400 text-center sm:text-left">
-                    <span className="text-white font-medium">Ready to explore with your documents?</span> Try our 1-click recruiter sandbox or create a company workspace.
+                    <span className="text-white font-medium">Ready to explore with your documents?</span> Experience our interactive demo or request an enterprise architecture session.
                   </div>
                   <div className="flex items-center gap-2.5">
                     <button
-                      onClick={() => onOpenAuth('signin')}
+                      onClick={onLaunchApp}
                       className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-400 text-slate-950 font-bold text-xs hover:opacity-95 transition-all shadow-md shadow-cyan-500/20 cursor-pointer"
                     >
-                      Fast-Pass Demo →
+                      Experience Live Demo →
                     </button>
                     <button
                       onClick={() => setSovereignModalOpen(true)}
                       className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 font-medium text-xs border border-slate-800 transition-colors cursor-pointer"
                     >
-                      BYOS Inquiry
+                      Talk to Sales
                     </button>
                   </div>
                 </div>
@@ -293,17 +291,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
           </div>
         </section>
 
-        {/* SECURITY & CLOUDFLARE R2 ISOLATION SHOWCASE */}
+        {/* SECURITY & GOVERNANCE SHOWCASE */}
         <section id="security" className="py-20 px-6 max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20">
-              Architectural Security
+              Enterprise Trust &amp; Security
             </span>
             <h2 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight mt-4">
               Your Company Documents Are Never Exposed to Anyone Else
             </h2>
             <p className="text-sm sm:text-base text-slate-400 max-w-2xl mx-auto mt-2">
-              DocMind guarantees multi-tenant quarantine from the physical storage bucket to database row filters.
+              DocMind guarantees multi-tenant quarantine, zero model training, and cryptographic access control at every layer.
             </p>
           </div>
 
@@ -313,11 +311,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
               <div className="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 flex items-center justify-center text-2xl">
                 ☁️
               </div>
-              <h3 className="text-base font-bold text-white">Cloudflare R2 Path Isolation</h3>
+              <h3 className="text-base font-bold text-white">Physical Storage Quarantine</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Files are partitioned into dedicated workspace paths:{' '}
-                <code className="text-cyan-300 text-[11px]">workspaces/[ws_id]/documents/[id]/[sha256].bin</code>. Presigned PUT/GET URLs
-                expire in 120 seconds and require active workspace authentication.
+                Files are partitioned into dedicated, cryptographically isolated workspace object paths. Short-lived signed URLs expire in 120 seconds with strict workspace token verification.
               </p>
             </div>
 
@@ -325,9 +321,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
               <div className="w-12 h-12 rounded-xl bg-teal-500/10 border border-teal-500/30 text-teal-400 flex items-center justify-center text-2xl">
                 🛡️
               </div>
-              <h3 className="text-base font-bold text-white">Row-Level Database Guard</h3>
+              <h3 className="text-base font-bold text-white">Row-Level Access Governance</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Every query to PostgreSQL and pgvector strictly checks <code className="text-teal-300 text-[11px]">WHERE workspace_id = :active_workspace_id</code> derived from cryptographic JWT claims. IDOR tampering is rejected with an immediate 403 Forbidden.
+                Every database query and vector similarity search strictly enforces authenticated tenant constraints derived from verified JWT tokens. Cross-tenant queries are blocked at the kernel layer.
               </p>
             </div>
 
@@ -335,9 +331,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
               <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 flex items-center justify-center text-2xl">
                 🔐
               </div>
-              <h3 className="text-base font-bold text-white">Zero Model Training</h3>
+              <h3 className="text-base font-bold text-white">Zero Model Training Guarantee</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Your company contracts, balance sheets, and intellectual property are never sent to train or fine-tune public foundation models. Your data remains strictly your own.
+                Your enterprise contracts, intellectual property, and research are never retained, logged, or used to fine-tune foundation models. Your data remains strictly your own.
               </p>
             </div>
           </div>
@@ -406,9 +402,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
               Transparent Pricing
             </span>
             <h2 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight mt-4">
-              Predictable SaaS Tiers for Every Team
+              Flexible Plans for Growing Organizations and Enterprises
             </h2>
-            <p className="text-sm text-slate-400 mt-2">Zero hidden charges. Scale seamlessly as your document volume grows.</p>
+            <p className="text-sm text-slate-400 mt-2">Zero hidden charges. Scale seamlessly as your document intelligence needs grow.</p>
 
             {/* Monthly / Annual Switcher */}
             <div className="mt-8 inline-flex items-center gap-3 p-1.5 rounded-2xl bg-slate-900 border border-slate-800">
@@ -442,7 +438,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
                 <p className="text-xs text-slate-400">Ideal for individual researchers, testing, and compliance pilots.</p>
                 <div className="border-t border-slate-800 pt-4 space-y-2.5 text-xs text-slate-300">
                   <div className="flex items-center gap-2">✓ 20 Documents Max</div>
-                  <div className="flex items-center gap-2">✓ 200 MB Cloudflare R2 Storage</div>
+                  <div className="flex items-center gap-2">✓ 200 MB Encrypted Cloud Storage</div>
                   <div className="flex items-center gap-2">✓ 100 Questions / month</div>
                   <div className="flex items-center gap-2">✓ Strict [S1] Citation Grounding</div>
                   <div className="flex items-center gap-2">✓ 1 User Seat</div>
@@ -471,7 +467,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
                 <p className="text-xs text-slate-400">Comprehensive legal and compliance document workspace.</p>
                 <div className="border-t border-slate-800 pt-4 space-y-2.5 text-xs text-slate-200">
                   <div className="flex items-center gap-2 text-cyan-300">✓ 500 Documents Max</div>
-                  <div className="flex items-center gap-2 text-cyan-300">✓ 10 GB Cloudflare R2 Storage</div>
+                  <div className="flex items-center gap-2 text-cyan-300">✓ 10 GB Encrypted Cloud Storage</div>
                   <div className="flex items-center gap-2 text-cyan-300">✓ 2,500 Questions / month</div>
                   <div className="flex items-center gap-2">✓ Cross-Doc Comparative Matrix (2-5 docs)</div>
                   <div className="flex items-center gap-2">✓ Automated OCR Fallback for Scans</div>
@@ -498,7 +494,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
                 <p className="text-xs text-slate-400">Dedicated OCR fleet, audit logs, and custom compliance SLA.</p>
                 <div className="border-t border-slate-800 pt-4 space-y-2.5 text-xs text-slate-300">
                   <div className="flex items-center gap-2 text-amber-300">✓ 5,000 Documents Max</div>
-                  <div className="flex items-center gap-2 text-amber-300">✓ 100 GB Cloudflare R2 Storage</div>
+                  <div className="flex items-center gap-2 text-amber-300">✓ 100 GB Dedicated Encrypted Storage</div>
                   <div className="flex items-center gap-2 text-amber-300">✓ 25,000 Questions / month</div>
                   <div className="flex items-center gap-2">✓ 500 Team Member Seats</div>
                   <div className="flex items-center gap-2">✓ Full Audit Event Log Stream</div>
@@ -728,16 +724,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
         {/* FOOTER */}
         <footer className="border-t border-slate-800/80 py-12 px-6 max-w-7xl mx-auto text-xs text-slate-500 flex flex-col sm:flex-row items-center justify-between gap-6">
           <Logo size="sm" showBadge={false} />
-          <div className="flex items-center gap-6 text-[11px] text-slate-400">
-            <span>Cloudflare R2 Encrypted</span>
+          <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6 text-[11px] text-slate-400">
+            <span>Enterprise Security</span>
             <span>•</span>
-            <span>pgvector 768-Dim</span>
+            <span>SOC 2 Ready Architecture</span>
             <span>•</span>
-            <span>Gmail SMTP Verified</span>
+            <span>Zero Model Training</span>
             <span>•</span>
-            <span>Argon2id Hashed</span>
+            <span>Full Audit Telemetry</span>
           </div>
-          <p>© 2026 DocMind Enterprise SaaS. All rights reserved.</p>
+          <p>© 2026 DocMind Technologies Inc. All rights reserved.</p>
         </footer>
       </div>
     </div>

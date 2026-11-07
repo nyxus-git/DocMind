@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 
 interface LogoProps {
@@ -11,8 +13,8 @@ interface LogoProps {
 export const Logo: React.FC<LogoProps> = ({
   size = 'md',
   showText = true,
-  showBadge = true,
-  badgeText = 'AI RAG',
+  showBadge = false,
+  badgeText = 'Enterprise',
   className = '',
 }) => {
   const iconDimensions = {
@@ -37,109 +39,131 @@ export const Logo: React.FC<LogoProps> = ({
   }[size];
 
   return (
-    <div className={`flex items-center gap-2.5 select-none ${className}`}>
-      {/* Dynamic Animated Vector Glyph */}
-      <div className={`relative ${iconDimensions} flex items-center justify-center group`}>
-        {/* Ambient Glow */}
-        <div className="absolute inset-0 bg-gradient-to-tr from-cyan-500/40 via-teal-400/30 to-indigo-500/30 rounded-xl blur-md group-hover:blur-lg transition-all opacity-80 group-hover:opacity-100" />
+    <div className={`flex items-center gap-3 select-none ${className}`}>
+      {/* Modern Geometric Intelligence Glyph */}
+      <div className={`relative ${iconDimensions} flex items-center justify-center shrink-0 group`}>
+        {/* Ambient Volumetric Backlight */}
+        <div className="absolute inset-0 bg-gradient-to-tr from-cyan-500/30 via-indigo-500/25 to-teal-400/30 rounded-2xl blur-md group-hover:blur-xl transition-all duration-500 opacity-70 group-hover:opacity-100" />
 
-        {/* SVG Container */}
+        {/* SVG Monogram Mark */}
         <svg
           viewBox="0 0 48 48"
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
-          className="relative w-full h-full drop-shadow-md transition-transform duration-300 group-hover:scale-105"
+          className="relative w-full h-full drop-shadow-xl transition-transform duration-300 group-hover:scale-105"
         >
           <defs>
-            <linearGradient id="docmind-grad-primary" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#06b6d4" />
-              <stop offset="50%" stopColor="#0ea5e9" />
-              <stop offset="100%" stopColor="#14b8a6" />
+            {/* Top Plane: Radiant Electric Cyan to Indigo */}
+            <linearGradient id="dm-top-facet" x1="10" y1="14" x2="38" y2="14" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stopColor="#38bdf8" />
+              <stop offset="50%" stopColor="#06b6d4" />
+              <stop offset="100%" stopColor="#6366f1" />
             </linearGradient>
-            <linearGradient id="docmind-grad-accent" x1="0%" y1="100%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#6366f1" />
+
+            {/* Left Plane: Deep Obsidian with Cyan Edge */}
+            <linearGradient id="dm-left-facet" x1="10" y1="14" x2="24" y2="38" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stopColor="#0284c7" />
+              <stop offset="60%" stopColor="#0f172a" />
+              <stop offset="100%" stopColor="#030712" />
+            </linearGradient>
+
+            {/* Right Plane: Emerald to Teal Luster */}
+            <linearGradient id="dm-right-facet" x1="38" y1="14" x2="24" y2="38" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stopColor="#2dd4bf" />
+              <stop offset="50%" stopColor="#0d9488" />
+              <stop offset="100%" stopColor="#0f172a" />
+            </linearGradient>
+
+            {/* Neural Core Spark */}
+            <linearGradient id="dm-core-glow" x1="18" y1="18" x2="30" y2="30" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stopColor="#a5f3fc" />
               <stop offset="100%" stopColor="#06b6d4" />
             </linearGradient>
-            <linearGradient id="docmind-sheet-top" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#38bdf8" />
-              <stop offset="100%" stopColor="#0284c7" />
+
+            {/* Subtle Outer Frame Gradient */}
+            <linearGradient id="dm-border-glow" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.4" />
+              <stop offset="50%" stopColor="#6366f1" stopOpacity="0.2" />
+              <stop offset="100%" stopColor="#2dd4bf" stopOpacity="0.4" />
             </linearGradient>
           </defs>
 
-          {/* Background Rounded Shield */}
+          {/* Rounded Hexagonal Outer Shell */}
           <rect
-            x="3"
-            y="3"
-            width="42"
-            height="42"
-            rx="12"
-            fill="#090d16"
-            stroke="url(#docmind-grad-primary)"
-            strokeWidth="1.5"
+            x="2"
+            y="2"
+            width="44"
+            height="44"
+            rx="13"
+            fill="#050814"
+            stroke="url(#dm-border-glow)"
+            strokeWidth="1.2"
+          />
+
+          {/* Isometric Knowledge Crystal Facets */}
+          {/* 1. Left Isometric Facet */}
+          <path
+            d="M11 15.5L24 23.5V37L11 29V15.5Z"
+            fill="url(#dm-left-facet)"
+            stroke="#0284c7"
+            strokeWidth="0.8"
+            strokeOpacity="0.4"
+          />
+
+          {/* 2. Right Isometric Facet */}
+          <path
+            d="M37 15.5L24 23.5V37L37 29V15.5Z"
+            fill="url(#dm-right-facet)"
+            stroke="#2dd4bf"
+            strokeWidth="0.8"
+            strokeOpacity="0.4"
+          />
+
+          {/* 3. Top Isometric Facet */}
+          <path
+            d="M24 10L37 15.5L24 23.5L11 15.5L24 10Z"
+            fill="url(#dm-top-facet)"
+            stroke="#38bdf8"
+            strokeWidth="0.8"
             strokeOpacity="0.6"
           />
 
-          {/* Layer 1: Bottom Document Sheet */}
+          {/* Neural Ground-Truth Central Prism (Inner Crystal) */}
           <path
-            d="M13 15C13 13.8954 13.8954 13 15 13H27L33 19V33C33 34.1046 32.1046 35 31 35H15C13.8954 35 13 34.1046 13 33V15Z"
-            fill="url(#docmind-grad-accent)"
-            fillOpacity="0.25"
+            d="M24 16.5L30 20.2L24 24L18 20.2L24 16.5Z"
+            fill="url(#dm-core-glow)"
+            fillOpacity="0.95"
           />
 
-          {/* Layer 2: Main Document Sheet with Fold */}
-          <path
-            d="M16 11C16 9.89543 16.8954 9 18 9H29.5L36 15.5V31C36 32.1046 35.1046 33 34 33H18C16.8954 33 16 32.1046 16 31V11Z"
-            fill="#0f172a"
-            stroke="url(#docmind-grad-primary)"
-            strokeWidth="1.8"
-          />
-
-          {/* Folded Corner Accent */}
-          <path
-            d="M29.5 9V15.5H36"
-            stroke="url(#docmind-grad-primary)"
-            strokeWidth="1.8"
-            strokeLinejoin="round"
-          />
-
-          {/* Neural Grounding Lines / Document Data */}
-          <path
-            d="M20 18H28"
-            stroke="#38bdf8"
+          {/* Dynamic Laser Index Axis */}
+          <line
+            x1="24"
+            y1="24"
+            x2="24"
+            y2="33"
+            stroke="#a5f3fc"
             strokeWidth="1.8"
             strokeLinecap="round"
           />
-          <path
-            d="M20 22H31"
-            stroke="#94a3b8"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeOpacity="0.8"
-          />
-          <path
-            d="M20 26H26"
-            stroke="#94a3b8"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeOpacity="0.8"
-          />
 
-          {/* Neural Node Citation Dot with Glow */}
-          <circle cx="31" cy="26" r="2.5" fill="#06b6d4" />
-          <circle cx="31" cy="26" r="4.5" stroke="#06b6d4" strokeWidth="1" strokeOpacity="0.5" />
+          {/* Verifiable Anchor Pips */}
+          <circle cx="24" cy="16.5" r="1.5" fill="#ffffff" />
+          <circle cx="18" cy="20.2" r="1.2" fill="#38bdf8" />
+          <circle cx="30" cy="20.2" r="1.2" fill="#2dd4bf" />
+          <circle cx="24" cy="33" r="1.8" fill="#38bdf8" />
         </svg>
       </div>
 
-      {/* Brand Wordmark & Enterprise Badge */}
+      {/* Brand Wordmark */}
       {showText && (
-        <div className="flex items-center gap-2">
-          <div className={`font-extrabold tracking-tight text-white ${textSizes} leading-none flex items-center`}>
-            Doc<span className="bg-gradient-to-r from-cyan-400 via-teal-300 to-cyan-200 bg-clip-text text-transparent">Mind</span>
+        <div className="flex items-center gap-2.5">
+          <div className={`font-bold tracking-tight text-white ${textSizes} leading-none flex items-center`}>
+            Doc<span className="bg-gradient-to-r from-cyan-400 via-teal-300 to-cyan-100 bg-clip-text text-transparent">Mind</span>
           </div>
 
           {showBadge && (
             <span
-              className={`rounded-full font-semibold uppercase tracking-wider bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 shadow-sm shadow-cyan-500/10 ${badgeSizes}`}
+              className={`rounded-full font-medium tracking-wide bg-cyan-500/10 text-cyan-300 border border-cyan-500/25 shadow-sm ${badgeSizes}`}
             >
               {badgeText}
             </span>
@@ -149,4 +173,3 @@ export const Logo: React.FC<LogoProps> = ({
     </div>
   );
 };
-

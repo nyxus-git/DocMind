@@ -233,9 +233,9 @@ export default function DocMindApp() {
   const [conversations, setConversations] = useState<ConversationDTO[]>([INITIAL_CONVERSATION]);
   const [activeConv, setActiveConv] = useState<ConversationDTO>(INITIAL_CONVERSATION);
 
-  // Recruiter / Reviewer Fast-Pass Session Handler
-  const handleLaunchRecruiterSandbox = () => {
-    const sandboxSession: UserSession = {
+  // Interactive Demo Evaluation Workspace Handler
+  const handleLaunchDemoWorkspace = () => {
+    const demoSession: UserSession = {
       email: 'admin@acme-corp.com',
       fullName: 'Elena Rostova',
       workspaceName: 'Acme Intelligence • Enterprise',
@@ -245,9 +245,9 @@ export default function DocMindApp() {
       role: 'OWNER',
     };
     if (typeof window !== 'undefined') {
-      localStorage.setItem('docmind_user_session', JSON.stringify(sandboxSession));
+      localStorage.setItem('docmind_user_session', JSON.stringify(demoSession));
     }
-    setUserSession(sandboxSession);
+    setUserSession(demoSession);
     setViewMode('app');
     setActiveTab('dashboard');
   };
@@ -634,7 +634,7 @@ export default function DocMindApp() {
             setViewMode(mode);
           }
         }}
-        onLaunchRecruiterSandbox={handleLaunchRecruiterSandbox}
+        onLaunchDemo={handleLaunchDemoWorkspace}
         onOpenAdmin={() => {
           setViewMode('app');
           setActiveTab('admin');
@@ -657,7 +657,7 @@ export default function DocMindApp() {
             setAuthModalIsCompany(!!isCompany);
             setAuthModalOpen(true);
           }}
-          onLaunchApp={handleLaunchRecruiterSandbox}
+          onLaunchApp={handleLaunchDemoWorkspace}
         />
       ) : (
         <div className="flex flex-1 overflow-hidden h-[calc(100vh-4rem)]">
@@ -705,7 +705,7 @@ export default function DocMindApp() {
                     <div className="pt-1 flex flex-wrap items-center gap-3 text-[11px] text-slate-400">
                       <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/60 border border-slate-800">
                         <span className="text-cyan-400">🔒</span>
-                        <span>Cloudflare R2 Encrypted Partition</span>
+                        <span>Isolated Encrypted Storage</span>
                       </div>
                       <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/60 border border-slate-800">
                         <span className="text-emerald-400">🛡️</span>
@@ -771,7 +771,7 @@ export default function DocMindApp() {
                 {/* Metric 2 */}
                 <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-teal-500/40 transition-all shadow-lg group">
                   <div className="flex items-center justify-between text-xs mb-3">
-                    <span className="text-slate-400 font-semibold uppercase tracking-wider text-[11px]">Cloudflare R2</span>
+                    <span className="text-slate-400 font-semibold uppercase tracking-wider text-[11px]">Storage Vault</span>
                     <span className="w-7 h-7 rounded-lg bg-teal-500/10 text-teal-400 flex items-center justify-center text-sm font-bold">
                       ☁️
                     </span>
