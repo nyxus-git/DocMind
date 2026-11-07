@@ -33,3 +33,4 @@ class EmailProvider(Protocol):
         invite_link: str
     ) -> bool:
         ...
+

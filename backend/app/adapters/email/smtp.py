@@ -173,3 +173,4 @@ def get_email_provider() -> EmailProvider:
     if _email_provider is None:
         _email_provider = SMTPEmailProvider()
     return _email_provider
+

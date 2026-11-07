@@ -175,3 +175,4 @@ async def _run_test_auth_service_forgot_and_reset_password():
 
 def test_auth_service_forgot_and_reset_password():
     asyncio.run(_run_test_auth_service_forgot_and_reset_password())
+
