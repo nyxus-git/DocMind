@@ -163,6 +163,36 @@ export class ApiClient {
     }
   }
 
+  static async register(email: string, password: string): Promise<{ id: string; email: string; active_workspace: { id: string; name: string; slug: string; role: string } }> {
+    return this.request('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+  }
+
+  static async login(email: string, password: string): Promise<{ access_token: string; token_type: string; expires_in: number }> {
+    const res = await this.request<{ access_token: string; token_type: string; expires_in: number }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+    if (res.access_token) {
+      this.setToken(res.access_token);
+    }
+    return res;
+  }
+
+  static async logout(): Promise<void> {
+    try {
+      await this.request('/auth/logout', { method: 'POST' });
+    } catch {
+      // ignore
+    }
+    this.token = null;
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('docmind_token');
+    }
+  }
+
   static async getUsage(): Promise<UsageSummaryDTO> {
     return this.request<UsageSummaryDTO>('/usage');
   }

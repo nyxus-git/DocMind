@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { AuthModal, UserSession } from '../components/AuthModal';
 import { CitationDrawer } from '../components/CitationDrawer';
+import { LandingPage } from '../components/LandingPage';
 import { Navbar } from '../components/Navbar';
 import { NavigationTab, Sidebar } from '../components/Sidebar';
 import { UploadModal } from '../components/UploadModal';
@@ -142,6 +144,32 @@ const INITIAL_CONVERSATION: ConversationDTO = {
 };
 
 export default function DocMindApp() {
+  // SaaS view mode: 'landing' (public marketing showcase) or 'app' (document workspace)
+  const [viewMode, setViewMode] = useState<'landing' | 'app'>('landing');
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup'>('signin');
+  const [authModalIsCompany, setAuthModalIsCompany] = useState(false);
+  const [userSession, setUserSession] = useState<UserSession | null>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('docmind_user_session');
+      if (stored) {
+        try {
+          return JSON.parse(stored);
+        } catch {
+          // ignore
+        }
+      }
+    }
+    return {
+      email: 'admin@acme-corp.com',
+      fullName: 'Elena Rostova',
+      workspaceName: 'Acme Intelligence • Enterprise',
+      workspaceSlug: 'acme-intelligence',
+      isCompany: true,
+      role: 'OWNER',
+    };
+  });
+
   const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
   const [usage, setUsage] = useState<UsageSummaryDTO>(INITIAL_USAGE);
   const [documents, setDocuments] = useState<DocumentDTO[]>(INITIAL_DOCS);
@@ -342,24 +370,50 @@ export default function DocMindApp() {
   });
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-100 font-sans overflow-hidden">
-      {/* Sidebar Navigation */}
-      <Sidebar
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        documentCount={documents.length}
-        conversationCount={conversations.length}
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans flex flex-col">
+      {/* Universal Top Header */}
+      <Navbar
+        viewMode={viewMode}
+        usage={usage}
+        activeSession={userSession}
+        onOpenUpload={() => setIsUploadOpen(true)}
+        onOpenAuth={(mode, isCompany) => {
+          setAuthModalMode(mode);
+          setAuthModalIsCompany(!!isCompany);
+          setAuthModalOpen(true);
+        }}
+        onSwitchView={setViewMode}
+        onSignOut={() => {
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('docmind_user_session');
+          }
+          setUserSession(null);
+          setViewMode('landing');
+        }}
       />
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <Navbar
-          usage={usage}
-          onOpenUpload={() => setIsUploadOpen(true)}
-          activeWorkspaceName="Personal Workspace"
+      {viewMode === 'landing' ? (
+        <LandingPage
+          onOpenAuth={(mode, isCompany) => {
+            setAuthModalMode(mode);
+            setAuthModalIsCompany(!!isCompany);
+            setAuthModalOpen(true);
+          }}
+          onLaunchApp={() => setViewMode('app')}
         />
+      ) : (
+        <div className="flex flex-1 overflow-hidden h-[calc(100vh-4rem)]">
+          {/* Sidebar Navigation */}
+          <Sidebar
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            documentCount={documents.length}
+            conversationCount={conversations.length}
+          />
 
-        <main className="flex-1 overflow-y-auto p-8">
+          {/* Main Content Area */}
+          <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+            <main className="flex-1 overflow-y-auto p-8">
           {/* ==================== 1. DASHBOARD TAB ==================== */}
           {activeTab === 'dashboard' && (
             <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in duration-300">
@@ -865,11 +919,15 @@ export default function DocMindApp() {
               <div className="p-6 rounded-xl bg-slate-900/60 border border-slate-800 space-y-6">
                 <div className="flex items-center justify-between pb-4 border-b border-slate-800">
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-200">Active Tenant Workspace</h3>
-                    <p className="text-xs text-slate-400">Personal Workspace (Role: OWNER)</p>
+                    <h3 className="text-sm font-semibold text-slate-200">
+                      {userSession?.fullName || 'Elena Rostova'} ({userSession?.email || 'admin@acme-corp.com'})
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      {userSession?.workspaceName || 'Company Workspace'} (Role: {userSession?.role || 'OWNER'})
+                    </p>
                   </div>
                   <span className="px-3 py-1 rounded bg-slate-800 text-xs font-mono text-cyan-400 border border-slate-700">
-                    ws-personal-01
+                    ws-{userSession?.workspaceSlug || 'company-01'}
                   </span>
                 </div>
 
@@ -914,6 +972,20 @@ export default function DocMindApp() {
           )}
         </main>
       </div>
+    </div>
+  )}
+
+      {/* Auth & Company Onboarding Modal */}
+      <AuthModal
+        isOpen={authModalOpen}
+        initialMode={authModalMode}
+        initialIsCompany={authModalIsCompany}
+        onClose={() => setAuthModalOpen(false)}
+        onAuthSuccess={session => {
+          setUserSession(session);
+          setViewMode('app');
+        }}
+      />
 
       {/* Upload Modal */}
       <UploadModal
