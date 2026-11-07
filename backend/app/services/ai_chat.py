@@ -1,6 +1,7 @@
+import re
 import uuid
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.ai.base import EmbeddingProvider, LLMProvider
 from app.adapters.ai.gemini import get_embedding_provider, get_llm_provider
@@ -126,8 +127,19 @@ class ChatService:
             )
 
         evidence_text = "\n\n".join(evidence_bundle)
+        valid_source_labels = set(source_label_map.keys())
 
-        # 9. Anti-injection system policy & prompt assembly
+        # 9. Multi-turn conversation history bounding (last 4 messages)
+        history_lines = []
+        if conv.messages:
+            for m in conv.messages[-4:]:
+                history_lines.append(f"{m.role.capitalize()}: {m.content}")
+        history_block = (
+            f"<conversation_history>\n" + "\n".join(history_lines) + "\n</conversation_history>\n\n"
+            if history_lines else ""
+        )
+
+        # Anti-injection system policy & prompt assembly
         system_policy = (
             "You are DocMind, an enterprise document research assistant. "
             "You must answer user questions ONLY using the verified evidence passages provided inside <evidence> tags. "
@@ -139,6 +151,7 @@ class ChatService:
         )
 
         user_prompt = (
+            f"{history_block}"
             f"<evidence>\n{evidence_text}\n</evidence>\n\n"
             f"User Question: {content}\n\n"
             "Respond in JSON matching this exact structure:\n"
@@ -201,7 +214,13 @@ class ChatService:
                     })
 
             if not is_insufficient and raw_answer:
-                answer_text = raw_answer
+                # Strip hallucinated citations not present in the verified evidence bundle (PRD Section 16)
+                def strip_invalid_tags(match: re.Match) -> str:
+                    tag = match.group(1)
+                    return match.group(0) if tag in valid_source_labels else ""
+
+                sanitized = re.sub(r"\[(S\d+)\]", strip_invalid_tags, raw_answer)
+                answer_text = re.sub(r"\s+", " ", sanitized).strip()
 
         # 12. Persist assistant message and citations
         asst_msg = await self.conv_repo.create_message(

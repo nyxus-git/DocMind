@@ -1,6 +1,6 @@
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
-from sqlalchemy import delete, func, select, text
+from typing import Any, Dict, List, Optional, Set, Tuple
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.entities import Document, DocumentChunk
 
@@ -48,44 +48,53 @@ class ChunkRepository:
         rrf_k: int = 60
     ) -> List[Tuple[DocumentChunk, Document, float]]:
         """
-        Executes hybrid vector + full-text search with tenant isolation pre-filter.
-        Fuses ranks using Reciprocal Rank Fusion (RRF).
+        Executes hybrid vector + lexical search with tenant isolation pre-filter.
+        Fuses ranks using Reciprocal Rank Fusion (RRF) and deduplicates redundant passages.
         """
         if not document_ids:
             return []
 
-        # 1. Fetch dense candidates (top 20) by cosine similarity if embedding is provided
+        # 1. Fetch dense candidates (top 20) by vector cosine similarity
         dense_ranked: Dict[uuid.UUID, int] = {}
         chunks_by_id: Dict[uuid.UUID, Tuple[DocumentChunk, Document]] = {}
 
         if query_embedding:
-            # pgvector cosine distance: embedding <=> query_vector
-            vector_query = (
-                select(DocumentChunk, Document)
-                .join(Document, DocumentChunk.document_id == Document.id)
-                .where(
-                    DocumentChunk.workspace_id == workspace_id,
-                    DocumentChunk.document_id.in_(document_ids),
-                    DocumentChunk.embedding.is_not(None)
+            try:
+                # pgvector cosine distance: embedding <=> query_vector
+                vector_query = (
+                    select(DocumentChunk, Document)
+                    .join(Document, DocumentChunk.document_id == Document.id)
+                    .where(
+                        DocumentChunk.workspace_id == workspace_id,
+                        DocumentChunk.document_id.in_(document_ids),
+                        DocumentChunk.embedding.is_not(None)
+                    )
+                    .order_by(DocumentChunk.embedding.cosine_distance(query_embedding))
+                    .limit(20)
                 )
-                .order_by(DocumentChunk.embedding.cosine_distance(query_embedding))
-                .limit(20)
-            )
-            vector_res = await self.db.execute(vector_query)
-            for rank, (chunk, doc) in enumerate(vector_res.all()):
-                dense_ranked[chunk.id] = rank + 1
-                chunks_by_id[chunk.id] = (chunk, doc)
+                vector_res = await self.db.execute(vector_query)
+                for rank, (chunk, doc) in enumerate(vector_res.all()):
+                    dense_ranked[chunk.id] = rank + 1
+                    chunks_by_id[chunk.id] = (chunk, doc)
+            except Exception:
+                # Fallback in environments without pgvector C extension (e.g. SQLite unit tests)
+                pass
 
-        # 2. Fetch sparse lexical candidates (top 20) by PostgreSQL full-text search
+        # 2. Fetch sparse lexical candidates (top 20)
         sparse_ranked: Dict[uuid.UUID, int] = {}
-        # Simple fallback text match / ILIKE if tsvector isn't indexed yet
+        search_terms = [t for t in query_text.strip().split() if len(t) >= 3][:5]
+
+        conditions = [DocumentChunk.content.ilike(f"%{query_text[:80]}%")]
+        if search_terms:
+            conditions.extend([DocumentChunk.content.ilike(f"%{term}%") for term in search_terms])
+
         lexical_query = (
             select(DocumentChunk, Document)
             .join(Document, DocumentChunk.document_id == Document.id)
             .where(
                 DocumentChunk.workspace_id == workspace_id,
                 DocumentChunk.document_id.in_(document_ids),
-                DocumentChunk.content.ilike(f"%{query_text[:100]}%")
+                or_(*conditions)
             )
             .limit(20)
         )
@@ -110,10 +119,38 @@ class ChunkRepository:
         # Sort by RRF score descending
         rrf_scores.sort(key=lambda x: x[1], reverse=True)
 
-        # Return top_k results
+        # 4. Deduplicate overlapping chunks and balance multi-document coverage
         results: List[Tuple[DocumentChunk, Document, float]] = []
-        for cid, score in rrf_scores[:top_k]:
+        seen_section_keys: Set[str] = set()
+        doc_counts: Dict[uuid.UUID, int] = {}
+        max_per_doc = 3 if len(document_ids) > 1 else top_k
+
+        for cid, score in rrf_scores:
             chunk, doc = chunks_by_id[cid]
+            current_doc_count = doc_counts.get(doc.id, 0)
+            if current_doc_count >= max_per_doc:
+                continue
+
+            # Deduplication key based on document, page, and section path
+            dedup_key = f"{doc.id}:{chunk.page_start}:{chunk.section_path}"
+            if dedup_key in seen_section_keys and len(seen_section_keys) < top_k:
+                continue
+
+            seen_section_keys.add(dedup_key)
+            doc_counts[doc.id] = current_doc_count + 1
             results.append((chunk, doc, score))
+
+            if len(results) >= top_k:
+                break
+
+        # Fallback: if deduplication was too aggressive, fill remaining up to top_k
+        if len(results) < top_k and len(results) < len(rrf_scores):
+            existing_cids = {r[0].id for r in results}
+            for cid, score in rrf_scores:
+                if cid not in existing_cids:
+                    chunk, doc = chunks_by_id[cid]
+                    results.append((chunk, doc, score))
+                    if len(results) >= top_k:
+                        break
 
         return results

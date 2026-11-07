@@ -107,3 +107,4 @@ def ocr_image_bytes(
     except Exception as e:
         logger.warning(f"Unexpected error running OCR: {e}")
         return None
+
