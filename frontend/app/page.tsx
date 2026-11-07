@@ -48,7 +48,7 @@ const INITIAL_AUDIT_LOGS: AuditEventDTO[] = [
     action: 'WORKSPACE_CREATED',
     target_type: 'workspace',
     metadata: { tier: 'PRO', name: 'Acme Systems Corp' },
-    created_at: new Date(Date.now() - 3600000 * 24).toISOString(),
+    created_at: '2026-11-06T12:00:00Z',
   },
   {
     id: 'audit-002',
@@ -57,7 +57,7 @@ const INITIAL_AUDIT_LOGS: AuditEventDTO[] = [
     action: 'DOCUMENT_UPLOAD_INTENT_CREATED',
     target_type: 'document',
     metadata: { filename: 'DocMind_PRD_Technical_Specification_v1.0.pdf' },
-    created_at: new Date(Date.now() - 3600000 * 12).toISOString(),
+    created_at: '2026-11-06T18:00:00Z',
   },
   {
     id: 'audit-003',
@@ -66,7 +66,7 @@ const INITIAL_AUDIT_LOGS: AuditEventDTO[] = [
     action: 'MEMBER_INVITED',
     target_type: 'email',
     metadata: { email: 'sarah.analyst@acme-corp.com', role: 'ADMIN' },
-    created_at: new Date(Date.now() - 3600000 * 4).toISOString(),
+    created_at: '2026-11-07T08:00:00Z',
   },
   {
     id: 'audit-004',
@@ -75,7 +75,7 @@ const INITIAL_AUDIT_LOGS: AuditEventDTO[] = [
     action: 'COMPARISON_RUN',
     target_type: 'documents',
     metadata: { document_count: 2, focus_topic: 'Security & Compliance' },
-    created_at: new Date(Date.now() - 3600000 * 1).toISOString(),
+    created_at: '2026-11-07T14:00:00Z',
   },
 ];
 
@@ -198,19 +198,21 @@ export default function DocMindApp() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup'>('signin');
   const [authModalIsCompany, setAuthModalIsCompany] = useState(false);
-  const [userSession, setUserSession] = useState<UserSession | null>(() => {
-    if (typeof window !== 'undefined') {
+  const [userSession, setUserSession] = useState<UserSession | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  // Restore authenticated session after client hydration to prevent SSR mismatch
+  useEffect(() => {
+    setMounted(true);
+    try {
       const stored = localStorage.getItem('docmind_user_session');
       if (stored) {
-        try {
-          return JSON.parse(stored);
-        } catch {
-          // ignore
-        }
+        setUserSession(JSON.parse(stored));
       }
+    } catch {
+      // ignore
     }
-    return null;
-  });
+  }, []);
 
   // Sovereign / BYOS Custom Storage Configuration State
   const [byosEnabled, setByosEnabled] = useState(false);
@@ -601,7 +603,7 @@ export default function DocMindApp() {
       <Navbar
         viewMode={viewMode}
         usage={usage}
-        activeSession={userSession}
+        activeSession={mounted ? userSession : null}
         onOpenUpload={() => setIsUploadOpen(true)}
         onOpenAuth={(mode, isCompany) => {
           setAuthModalMode(mode);
@@ -632,7 +634,7 @@ export default function DocMindApp() {
         }}
       />
 
-      {viewMode === 'landing' || !userSession ? (
+      {viewMode === 'landing' || !mounted || !userSession ? (
         <LandingPage
           onOpenAuth={(mode, isCompany) => {
             setAuthModalMode(mode);
