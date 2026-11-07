@@ -261,6 +261,27 @@ export class ApiClient {
     });
   }
 
+  static async verifyEmail(token: string): Promise<{ message: string }> {
+    return this.request('/auth/verify-email', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+  }
+
+  static async forgotPassword(email: string): Promise<{ message: string }> {
+    return this.request('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  static async resetPassword(token: string, newPassword: string): Promise<void> {
+    return this.request('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, new_password: newPassword }),
+    });
+  }
+
   static async login(email: string, password: string): Promise<{ access_token: string; token_type: string; expires_in: number }> {
     const res = await this.request<{ access_token: string; token_type: string; expires_in: number }>('/auth/login', {
       method: 'POST',

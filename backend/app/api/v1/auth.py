@@ -122,15 +122,21 @@ async def logout(
 
 @router.post("/verify-email", response_model=MessageResponse)
 async def verify_email(req: VerifyEmailRequest, db: AsyncSession = Depends(get_db)):
-    return MessageResponse(message="Email verified successfully.")
+    auth_service = AuthService(db)
+    await auth_service.verify_email(req.token)
+    return MessageResponse(message="Email verified successfully. You may now log in to DocMind.")
 
 
 @router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED)
 async def forgot_password(req: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
     # Always return 202 Accepted to prevent user enumeration per PRD Page 27
+    auth_service = AuthService(db)
+    await auth_service.forgot_password(req.email)
     return {"message": "If an account exists, a password reset link has been dispatched."}
 
 
 @router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
 async def reset_password(req: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+    auth_service = AuthService(db)
+    await auth_service.reset_password(req.token, req.new_password)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

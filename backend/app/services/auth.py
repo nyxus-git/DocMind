@@ -1,14 +1,21 @@
+import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.adapters.email.base import EmailProvider
+from app.adapters.email.smtp import get_email_provider
 from app.core.config import settings
 from app.core.exceptions import DocMindException
 from app.core.security import (
     create_access_token,
+    create_email_verification_token,
+    create_password_reset_token,
+    decode_password_reset_token,
     generate_secure_token,
     hash_password,
     hash_token,
+    verify_email_verification_token,
     verify_password,
 )
 from app.models.entities import RefreshSession, User, Workspace
@@ -19,10 +26,11 @@ from app.schemas.auth import TokenResponse, UserSummaryDTO, WorkspaceSummaryDTO
 
 
 class AuthService:
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, email_provider: Optional[EmailProvider] = None):
         self.db = db
         self.user_repo = UserRepository(db)
         self.workspace_repo = WorkspaceRepository(db)
+        self.email_provider = email_provider or get_email_provider()
 
     async def register(self, email: str, password: str) -> Tuple[User, Workspace, str]:
         existing = await self.user_repo.get_by_email(email)
@@ -46,8 +54,102 @@ class AuthService:
             created_by=user.id
         )
 
-        verification_token = generate_secure_token(32)
+        verification_token = create_email_verification_token(str(user.id))
+        verification_link = f"{settings.PUBLIC_APP_URL}/auth?token={verification_token}&action=verify"
+        try:
+            await self.email_provider.send_verification_email(user.email, verification_link)
+        except Exception:
+            pass
+
         return user, workspace, verification_token
+
+    async def verify_email(self, token: str) -> User:
+        user_id_str = verify_email_verification_token(token)
+        if not user_id_str:
+            raise DocMindException(
+                status_code=400,
+                code="INVALID_OR_EXPIRED_TOKEN",
+                title="Invalid Token",
+                detail="Verification link is invalid or has expired."
+            )
+
+        try:
+            user_uuid = uuid.UUID(user_id_str)
+        except ValueError:
+            raise DocMindException(
+                status_code=400,
+                code="INVALID_TOKEN_PAYLOAD",
+                title="Invalid Token",
+                detail="Malformed token user identifier."
+            )
+
+        user = await self.user_repo.mark_verified(user_uuid)
+        if not user:
+            raise DocMindException(
+                status_code=404,
+                code="USER_NOT_FOUND",
+                title="User Not Found",
+                detail="No account found associated with this token."
+            )
+        return user
+
+    async def forgot_password(self, email: str) -> None:
+        user = await self.user_repo.get_by_email(email)
+        if not user:
+            # Prevent user enumeration per PRD
+            return
+
+        token = create_password_reset_token(str(user.id), user.password_hash)
+        reset_link = f"{settings.PUBLIC_APP_URL}/auth?token={token}&action=reset"
+        try:
+            await self.email_provider.send_password_reset_email(user.email, reset_link)
+        except Exception:
+            pass
+
+    async def reset_password(self, token: str, new_password: str) -> None:
+        payload = decode_password_reset_token(token)
+        if not payload:
+            raise DocMindException(
+                status_code=400,
+                code="INVALID_OR_EXPIRED_TOKEN",
+                title="Invalid Reset Token",
+                detail="Password reset token is invalid or has expired."
+            )
+
+        user_id_str = payload.get("sub")
+        pwhash_prefix = payload.get("pwhash")
+
+        try:
+            user_uuid = uuid.UUID(str(user_id_str))
+        except (ValueError, TypeError):
+            raise DocMindException(
+                status_code=400,
+                code="INVALID_TOKEN_PAYLOAD",
+                title="Invalid Reset Token",
+                detail="Malformed reset token payload."
+            )
+
+        user = await self.user_repo.get_by_id(user_uuid)
+        if not user:
+            raise DocMindException(
+                status_code=404,
+                code="USER_NOT_FOUND",
+                title="User Not Found",
+                detail="Account associated with this token was not found."
+            )
+
+        current_fingerprint = hashlib.sha256(user.password_hash.encode("utf-8")).hexdigest()[:24]
+        if current_fingerprint != pwhash_prefix:
+            raise DocMindException(
+                status_code=400,
+                code="TOKEN_ALREADY_USED",
+                title="Reset Link Invalidated",
+                detail="This password reset link has already been used or invalidated. Please request a new link."
+            )
+
+        new_password_hash = hash_password(new_password)
+        await self.user_repo.update_password(user.id, new_password_hash)
+        await self.user_repo.revoke_all_user_sessions(user.id)
 
     async def login(self, email: str, password: str) -> Tuple[TokenResponse, str, UserSummaryDTO]:
         user = await self.user_repo.get_by_email(email)

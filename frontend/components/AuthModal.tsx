@@ -29,7 +29,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   onAuthSuccess,
 }) => {
-  const [mode, setMode] = useState<'signin' | 'signup'>(initialMode);
+  const [mode, setMode] = useState<'signin' | 'signup' | 'forgot'>(initialMode);
   const [isCompany, setIsCompany] = useState<boolean>(initialIsCompany);
 
   // Form fields
@@ -64,6 +64,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setLoading(true);
 
     try {
+      if (mode === 'forgot') {
+        if (!email) {
+          throw new Error('Please enter your email address.');
+        }
+        try {
+          await ApiClient.forgotPassword(email);
+        } catch {
+          // Handled gracefully
+        }
+        setLoading(false);
+        setSuccessNotice('If an account is associated with this email, a password reset link has been dispatched.');
+        return;
+      }
+
       if (mode === 'signup') {
         if (!email || !password || !fullName) {
           throw new Error('Please fill in all required fields.');
@@ -180,12 +194,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
             <div>
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                {mode === 'signin' ? 'Sign In to DocMind' : 'Create DocMind Workspace'}
+                {mode === 'signin'
+                  ? 'Sign In to DocMind'
+                  : mode === 'signup'
+                  ? 'Create DocMind Workspace'
+                  : 'Reset Your Password'}
               </h3>
               <p className="text-xs text-slate-400">
                 {mode === 'signin'
                   ? 'Access your private enterprise document intelligence'
-                  : 'Get started with verifiable citation RAG and private storage'}
+                  : mode === 'signup'
+                  ? 'Get started with verifiable citation RAG and private storage'
+                  : 'Enter your email to receive a single-use password reset link'}
               </p>
             </div>
           </div>
@@ -199,36 +219,52 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Mode & Workspace Switcher Tabs */}
         <div className="px-6 pt-5 pb-2">
-          <div className="grid grid-cols-2 p-1 rounded-xl bg-slate-950 border border-slate-800">
+          {mode === 'forgot' ? (
             <button
               type="button"
               onClick={() => {
                 setMode('signin');
                 setError(null);
+                setSuccessNotice(null);
               }}
-              className={`py-2 text-xs font-semibold rounded-lg transition-all ${
-                mode === 'signin'
-                  ? 'bg-slate-800 text-cyan-400 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
+              className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1.5 transition-colors font-medium"
             >
-              Sign In
+              <span>&larr;</span> Back to Sign In
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setMode('signup');
-                setError(null);
-              }}
-              className={`py-2 text-xs font-semibold rounded-lg transition-all ${
-                mode === 'signup'
-                  ? 'bg-slate-800 text-cyan-400 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Create Account
-            </button>
-          </div>
+          ) : (
+            <div className="grid grid-cols-2 p-1 rounded-xl bg-slate-950 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('signin');
+                  setError(null);
+                  setSuccessNotice(null);
+                }}
+                className={`py-2 text-xs font-semibold rounded-lg transition-all ${
+                  mode === 'signin'
+                    ? 'bg-slate-800 text-cyan-400 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('signup');
+                  setError(null);
+                  setSuccessNotice(null);
+                }}
+                className={`py-2 text-xs font-semibold rounded-lg transition-all ${
+                  mode === 'signup'
+                    ? 'bg-slate-800 text-cyan-400 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Create Account
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Form Body */}
@@ -375,52 +411,60 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             />
           </div>
 
-          {/* Password */}
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-xs font-medium text-slate-300">
-                Password <span className="text-cyan-400">*</span>
-              </label>
-              {mode === 'signin' && (
-                <button
-                  type="button"
-                  onClick={() => alert('Password reset link will be sent to your email.')}
-                  className="text-xs text-cyan-400 hover:text-cyan-300"
-                >
-                  Forgot password?
-                </button>
+          {/* Password (only in signin and signup) */}
+          {mode !== 'forgot' && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-medium text-slate-300">
+                  Password <span className="text-cyan-400">*</span>
+                </label>
+                {mode === 'signin' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('forgot');
+                      setError(null);
+                      setSuccessNotice(null);
+                    }}
+                    className="text-xs text-cyan-400 hover:text-cyan-300"
+                  >
+                    Forgot password?
+                  </button>
+                )}
+              </div>
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="••••••••••••"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 focus:border-cyan-500 focus:outline-none text-sm text-slate-200 placeholder:text-slate-600 transition-colors"
+              />
+              {mode === 'signup' && (
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Minimum 8 characters. Passwords are securely hashed with Argon2id.
+                </p>
               )}
             </div>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="••••••••••••"
-              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 focus:border-cyan-500 focus:outline-none text-sm text-slate-200 placeholder:text-slate-600 transition-colors"
-            />
-            {mode === 'signup' && (
-              <p className="text-[11px] text-slate-500 mt-1">
-                Minimum 8 characters. Passwords are securely hashed with Argon2id.
-              </p>
-            )}
-          </div>
+          )}
 
           {/* Remember me & security notice */}
-          <div className="flex items-center justify-between pt-1">
-            <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-400">
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                onChange={e => setRememberMe(e.target.checked)}
-                className="rounded border-slate-800 bg-slate-950 text-cyan-500 focus:ring-0"
-              />
-              <span>Remember this session for 30 days</span>
-            </label>
-            <span className="text-[11px] text-slate-500 flex items-center gap-1">
-              <span>🔒</span> TLS 1.3
-            </span>
-          </div>
+          {mode !== 'forgot' && (
+            <div className="flex items-center justify-between pt-1">
+              <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={e => setRememberMe(e.target.checked)}
+                  className="rounded border-slate-800 bg-slate-950 text-cyan-500 focus:ring-0"
+                />
+                <span>Remember this session for 30 days</span>
+              </label>
+              <span className="text-[11px] text-slate-500 flex items-center gap-1">
+                <span>🔒</span> TLS 1.3
+              </span>
+            </div>
+          )}
 
           {/* Submit Button */}
           <button
@@ -431,12 +475,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             {loading ? (
               <>
                 <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                <span>Authenticating...</span>
+                <span>Processing...</span>
               </>
             ) : mode === 'signin' ? (
               <span>Sign In to Workspace &rarr;</span>
-            ) : (
+            ) : mode === 'signup' ? (
               <span>Create {isCompany ? 'Company' : 'Personal'} Workspace &rarr;</span>
+            ) : (
+              <span>Send Password Reset Link &rarr;</span>
             )}
           </button>
         </form>

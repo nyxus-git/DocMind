@@ -56,5 +56,16 @@ class Settings(BaseSettings):
     VERIFICATION_TOKEN_EXPIRE_HOURS: int = 24
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 60
 
+    # Transactional Email & SMTP
+    EMAIL_ENABLED: bool = True
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = "docmindofficial@gmail.com"
+    SMTP_FROM_NAME: str = "DocMind Support"
+    SMTP_USE_TLS: bool = True
+    SMTP_USE_SSL: bool = False
+
 
 settings = Settings()
