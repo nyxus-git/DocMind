@@ -44,12 +44,27 @@ def parse_docx(data: bytes) -> ParsedDocument:
         blocks.append(block)
         total_chars += len(cleaned)
 
-    # Extract tables in document
+    # Extract tables in document with labeled row semantics (PRD Section 13)
     for table_idx, table in enumerate(doc.tables, 1):
+        if not table.rows:
+            continue
+
         table_rows = []
-        for row in table.rows:
-            row_text = [normalize_text(cell.text) for cell in row.cells]
-            table_rows.append(" | ".join(row_text))
+        headers = [normalize_text(cell.text) for cell in table.rows[0].cells]
+        has_headers = any(bool(h.strip()) for h in headers)
+
+        if has_headers and len(table.rows) > 1:
+            for row_idx, row in enumerate(table.rows[1:], 2):
+                row_vals = [normalize_text(cell.text) for cell in row.cells]
+                fields = []
+                for c_idx, val in enumerate(row_vals):
+                    col_header = headers[c_idx] if c_idx < len(headers) and headers[c_idx] else f"Col {c_idx+1}"
+                    fields.append(f"{col_header} = {val}")
+                table_rows.append(f"Table {table_idx} / Row {row_idx}: " + " | ".join(fields))
+        else:
+            for row_idx, row in enumerate(table.rows, 1):
+                row_vals = [normalize_text(cell.text) for cell in row.cells]
+                table_rows.append(f"Table {table_idx} / Row {row_idx}: " + " | ".join(row_vals))
 
         table_content = "\n".join(table_rows)
         if table_content.strip():
