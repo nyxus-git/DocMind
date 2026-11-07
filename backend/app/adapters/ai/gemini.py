@@ -78,21 +78,61 @@ class GeminiLLM(LLMProvider):
             )
 
     def _mock_generate(self, prompt: str, response_schema: Optional[Dict[str, Any]]) -> LLMResult:
-        """Deterministic fallback when no API key is present."""
+        """Deterministic fallback when no API key is present or in offline test environments."""
         if response_schema:
-            mock_json = {
-                "answer": "Based on the selected documents, the information indicates verified compliance with the specified guidelines [S1].",
-                "insufficient_evidence": False,
-                "citations": [
-                    {"source_id": "S1", "claim": "Verified compliance with specified guidelines."}
-                ],
-                "suggested_followups": ["What are the next compliance steps?"]
-            }
+            prompt_lower = prompt.lower()
+            if "compare" in prompt_lower or "matrix" in prompt_lower:
+                mock_json = {
+                    "narrative_summary": "Comparative analysis across selected files demonstrates consistent baseline terms with distinct provisions regarding liability caps and operational SLAs.",
+                    "matrix": [
+                        {
+                            "attribute": "Liability Limitation",
+                            "per_document_values": {"doc-1.pdf": "Capped at 12 months fees paid", "doc-2.pdf": "Capped at 6 months fees paid"},
+                            "differences_summary": "doc-1 provides twice the liability protection compared to doc-2.",
+                            "source_labels": ["S1", "S2"]
+                        },
+                        {
+                            "attribute": "Termination Notice",
+                            "per_document_values": {"doc-1.pdf": "30 days prior written notice", "doc-2.pdf": "60 days written notice"},
+                            "differences_summary": "doc-2 requires a longer notice period for termination for convenience.",
+                            "source_labels": ["S1"]
+                        }
+                    ],
+                    "limitations": "Comparison is scoped to extracted contractual terms."
+                }
+            elif "extract" in prompt_lower or "preset" in prompt_lower:
+                mock_json = {
+                    "extracted_data": {
+                        "entities": ["Acme Corp", "DocMind Systems LLC"],
+                        "dates": ["2026-11-01", "2027-10-31"],
+                        "metrics": ["$100,000 ARR", "99.9% Uptime"]
+                    },
+                    "confidence_note": "Extracted with high confidence from primary document sections.",
+                    "source_labels": ["S1"]
+                }
+            elif "summary" in prompt_lower or "key_points" in prompt_lower:
+                mock_json = {
+                    "overview": "Comprehensive document outlining operational terms, technical standards, and governance policies.",
+                    "key_points": [
+                        {"point": "Strict Data Isolation", "explanation": "Workspace tenancy verified by cryptographic tokens.", "source_labels": ["Chunk 1"]},
+                        {"point": "SLA Commitments", "explanation": "Guarantees 99.9% uptime with service credits.", "source_labels": ["Chunk 2"]}
+                    ],
+                    "caveats": "Subject to annual regulatory compliance review."
+                }
+            else:
+                mock_json = {
+                    "answer": "Based on the selected documents, the information indicates verified compliance with the specified guidelines [S1].",
+                    "insufficient_evidence": False,
+                    "citations": [
+                        {"source_id": "S1", "claim": "Verified compliance with specified guidelines."}
+                    ],
+                    "suggested_followups": ["What are the next compliance steps?"]
+                }
             return LLMResult(
                 text=json.dumps(mock_json),
                 parsed_json=mock_json,
                 input_tokens=150,
-                output_tokens=65,
+                output_tokens=75,
                 model="mock-gemini-flash",
                 latency_ms=10
             )

@@ -188,11 +188,11 @@ export default function DocMindApp() {
   const [selectedDocScope, setSelectedDocScope] = useState<string[]>([]);
 
   // Compare state
-  const [compareDocA, setCompareDocA] = useState<string>('doc-001');
-  const [compareDocB, setCompareDocB] = useState<string>('doc-002');
+  const [selectedCompareDocs, setSelectedCompareDocs] = useState<string[]>(['doc-001', 'doc-002']);
   const [compareTopic, setCompareTopic] = useState<string>('Security & Compliance Requirements');
   const [compareResult, setCompareResult] = useState<CompareResponse | null>(null);
   const [isComparing, setIsComparing] = useState(false);
+  const [isCopiedMatrix, setIsCopiedMatrix] = useState(false);
 
   // Document Library filter
   const [docFilter, setDocFilter] = useState<string>('ALL');
@@ -358,49 +358,99 @@ export default function DocMindApp() {
     }
   };
 
+  const handleToggleCompareDoc = (docId: string) => {
+    setSelectedCompareDocs(prev => {
+      if (prev.includes(docId)) {
+        return prev.filter(id => id !== docId);
+      }
+      if (prev.length >= 5) {
+        return prev;
+      }
+      return [...prev, docId];
+    });
+  };
+
+  const handleCopyMatrixMarkdown = () => {
+    if (!compareResult) return;
+    const allDocNames = Array.from(new Set(compareResult.matrix.flatMap(m => Object.keys(m.per_document_values))));
+    const header = `| Attribute | ${allDocNames.join(' | ')} | Discrepancies & Contrast | Citations |\n| --- | ${allDocNames.map(() => '---').join(' | ')} | --- | --- |`;
+    const rows = compareResult.matrix.map(m => {
+      const vals = allDocNames.map(d => m.per_document_values[d] || 'Not specified').join(' | ');
+      const sources = (m.source_labels || []).join(', ') || 'N/A';
+      return `| **${m.attribute}** | ${vals} | ${m.differences_summary} | ${sources} |`;
+    }).join('\n');
+    const md = `# Document Comparison Matrix\n\n**Executive Synthesis:**\n${compareResult.narrative_summary}\n\n${header}\n${rows}\n\n${compareResult.limitations ? `**Limitations:** ${compareResult.limitations}` : ''}`;
+    navigator.clipboard.writeText(md);
+    setIsCopiedMatrix(true);
+    setTimeout(() => setIsCopiedMatrix(false), 2000);
+  };
+
   const handleRunCompare = async () => {
-    if (!compareDocA || !compareDocB || compareDocA === compareDocB) return;
+    if (selectedCompareDocs.length < 2 || selectedCompareDocs.length > 5) return;
     setIsComparing(true);
     try {
-      const res = await ApiClient.compareDocuments([compareDocA, compareDocB], compareTopic);
+      const res = await ApiClient.compareDocuments(selectedCompareDocs, compareTopic);
       setCompareResult(res);
     } catch {
       // Offline comparative simulation
       setTimeout(() => {
-        const docAName = documents.find(d => d.id === compareDocA)?.filename || 'Document A';
-        const docBName = documents.find(d => d.id === compareDocB)?.filename || 'Document B';
+        const selectedDocs = documents.filter(d => selectedCompareDocs.includes(d.id));
+        const docNames = selectedDocs.map(d => d.filename);
+        const perDocVals1: Record<string, string> = {};
+        const perDocVals2: Record<string, string> = {};
+        const perDocVals3: Record<string, string> = {};
+
+        selectedDocs.forEach((d, i) => {
+          perDocVals1[d.filename] = i === 0
+            ? 'Technical architecture & ₹500/mo VPS budget bounds'
+            : 'Operational liabilities & third-party audit verification';
+          perDocVals2[d.filename] = i === 0
+            ? 'Immediate soft-hide + async R2 bucket deletion'
+            : '7-year regulatory retention requirement';
+          perDocVals3[d.filename] = i === 0
+            ? 'Gemini Embedding 2 (768-dim) + HNSW pgvector'
+            : 'N/A (Standard tabular financial reporting)';
+        });
+
+        const mockCitations: CitationDTO[] = selectedDocs.map((d, i) => ({
+          citation_id: `cite-${i + 1}`,
+          document_id: d.id,
+          filename: d.filename,
+          page_start: i + 1,
+          page_end: i + 1,
+          section: 'Section 4.2 - Terms & Compliance',
+          excerpt: `Verified operational and legal terms extracted for ${d.filename} regarding ${compareTopic || 'general compliance'}.`,
+          source_label: `S${i + 1}`,
+        }));
+
         setCompareResult({
-          document_ids: [compareDocA, compareDocB],
-          narrative_summary: `Comparative review between ${docAName} and ${docBName} regarding "${compareTopic}". Both documents enforce strict data boundary isolation, though ${docAName} details single-slot worker execution while ${docBName} governs contractual compliance liabilities.`,
+          document_ids: selectedCompareDocs,
+          narrative_summary: `Comparative review across ${docNames.join(', ')} regarding "${compareTopic || 'General Terms'}". The files demonstrate consistent baseline operational boundaries, with notable variations in liability caps and SLA downtime penalties.`,
           matrix: [
             {
               attribute: 'Primary Governance Scope',
-              per_document_values: {
-                [docAName]: 'Technical architecture & ₹500/mo VPS budget bounds',
-                [docBName]: 'Operational liabilities & third-party audit verification',
-              },
+              per_document_values: perDocVals1,
               differences_summary: 'Different lifecycle domains: engineering spec vs business audit contract.',
+              source_labels: ['S1', 'S2'],
             },
             {
               attribute: 'Data Retention & Purge',
-              per_document_values: {
-                [docAName]: 'Immediate soft-hide + async R2 bucket deletion',
-                [docBName]: '7-year regulatory retention requirement',
-              },
+              per_document_values: perDocVals2,
               differences_summary: 'DocMind supports immediate deletion requests per tenant privacy policy.',
+              source_labels: ['S1'],
             },
             {
               attribute: 'Vector & Indexing Strategy',
-              per_document_values: {
-                [docAName]: 'Gemini Embedding 2 (768-dim) + HNSW pgvector',
-                [docBName]: 'N/A (Standard tabular financial reporting)',
-              },
+              per_document_values: perDocVals3,
               differences_summary: 'Direct algorithmic contrast in knowledge retrieval capabilities.',
+              source_labels: ['S2'],
             },
           ],
+          citations: mockCitations,
+          limitations: 'Direct comparison is scoped to core operational and commercial sections.',
         });
         setIsComparing(false);
-      }, 800);
+      }, 700);
     }
   };
 
@@ -864,64 +914,97 @@ export default function DocMindApp() {
           {/* ==================== 4. COMPARE FILES TAB ==================== */}
           {activeTab === 'compare' && (
             <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in duration-300">
-              <div>
-                <h1 className="text-2xl font-bold text-white">Multi-Document Comparison</h1>
-                <p className="text-sm text-slate-400">
-                  Select 2 to 5 READY documents to synthesize side-by-side matrices of commonalities, discrepancies, and unique attributes.
-                </p>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                  <h1 className="text-2xl font-bold text-white">Multi-Document Comparison</h1>
+                  <p className="text-sm text-slate-400">
+                    Select 2 to 5 READY documents to synthesize side-by-side matrices of commonalities, discrepancies, and unique attributes.
+                  </p>
+                </div>
+                {compareResult && (
+                  <button
+                    onClick={handleCopyMatrixMarkdown}
+                    className="self-start sm:self-auto px-4 py-2 rounded-lg bg-slate-900 border border-slate-700 hover:border-cyan-500/50 text-xs font-medium text-slate-200 transition-all flex items-center space-x-2"
+                  >
+                    <span>{isCopiedMatrix ? '✓ Copied Markdown' : '📋 Copy Matrix as Markdown'}</span>
+                  </button>
+                )}
               </div>
 
               {/* Comparison Config Card */}
-              <div className="p-6 rounded-xl bg-slate-900/60 border border-slate-800 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">
-                      First Document
+              <div className="p-6 rounded-xl bg-slate-900/60 border border-slate-800 space-y-5">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                      Select Documents to Compare (2 to 5 documents)
                     </label>
-                    <select
-                      value={compareDocA}
-                      onChange={e => setCompareDocA(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-slate-200 focus:border-cyan-500"
-                    >
-                      {documents.map(d => (
-                        <option key={d.id} value={d.id}>{d.filename}</option>
-                      ))}
-                    </select>
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                      selectedCompareDocs.length >= 2 && selectedCompareDocs.length <= 5
+                        ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30'
+                        : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                    }`}>
+                      {selectedCompareDocs.length} of 5 selected {selectedCompareDocs.length < 2 ? '(Min 2 required)' : ''}
+                    </span>
                   </div>
 
-                  <div>
-                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">
-                      Second Document
-                    </label>
-                    <select
-                      value={compareDocB}
-                      onChange={e => setCompareDocB(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-slate-200 focus:border-cyan-500"
-                    >
-                      {documents.map(d => (
-                        <option key={d.id} value={d.id}>{d.filename}</option>
-                      ))}
-                    </select>
+                  {/* Multi-Select Document Selector */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-1">
+                    {documents.map(d => {
+                      const isSelected = selectedCompareDocs.includes(d.id);
+                      const isReady = d.status === 'READY';
+                      return (
+                        <button
+                          key={d.id}
+                          type="button"
+                          disabled={!isReady}
+                          onClick={() => handleToggleCompareDoc(d.id)}
+                          className={`flex items-start text-left p-3 rounded-lg border text-xs transition-all ${
+                            isSelected
+                              ? 'bg-cyan-950/40 border-cyan-500/60 text-white shadow-sm shadow-cyan-500/10'
+                              : 'bg-slate-950/60 border-slate-800/80 text-slate-300 hover:border-slate-700'
+                          } ${!isReady ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+                        >
+                          <div className={`w-4 h-4 rounded mt-0.5 mr-2.5 flex items-center justify-center border text-[10px] ${
+                            isSelected
+                              ? 'bg-cyan-500 border-cyan-400 text-slate-950 font-bold'
+                              : 'border-slate-700 bg-slate-900'
+                          }`}>
+                            {isSelected ? '✓' : ''}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium truncate">{d.filename}</p>
+                            <div className="flex items-center space-x-2 text-[10px] text-slate-400 mt-0.5">
+                              <span>{Math.round(d.size_bytes / 1024)} KB</span>
+                              <span>•</span>
+                              <span className={d.status === 'READY' ? 'text-emerald-400' : 'text-amber-400'}>{d.status}</span>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
                 <div>
                   <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">
-                    Focus Topic / Analysis Goal
+                    Focus Topic / Analysis Goal (Optional)
                   </label>
                   <input
                     type="text"
                     value={compareTopic}
                     onChange={e => setCompareTopic(e.target.value)}
-                    placeholder="e.g. Liability Caps, Payment Terms, Technical Requirements"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-slate-200 focus:border-cyan-500"
+                    placeholder="e.g. Liability Caps, Payment Terms, Technical Requirements, SLA Commitments"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
                   />
                 </div>
 
-                <div className="flex justify-end pt-2">
+                <div className="flex items-center justify-between pt-2">
+                  <p className="text-xs text-slate-400">
+                    Runs cross-document passage synthesis across selected files with server-side source attribution.
+                  </p>
                   <button
                     onClick={handleRunCompare}
-                    disabled={isComparing || compareDocA === compareDocB}
+                    disabled={isComparing || selectedCompareDocs.length < 2 || selectedCompareDocs.length > 5}
                     className="px-6 py-2.5 rounded-lg bg-gradient-to-r from-cyan-500 to-teal-400 text-slate-950 font-semibold text-sm hover:opacity-90 disabled:opacity-50 transition-all shadow-md shadow-cyan-500/10 active:scale-95"
                   >
                     {isComparing ? 'Synthesizing Matrix...' : 'Run Comparative Analysis'}
@@ -932,43 +1015,116 @@ export default function DocMindApp() {
               {/* Comparison Results */}
               {compareResult && (
                 <div className="space-y-6">
+                  {/* Limitations Banner if present */}
+                  {compareResult.limitations && (
+                    <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start space-x-3 text-xs text-amber-200">
+                      <span className="text-base leading-none">⚠️</span>
+                      <div className="space-y-0.5">
+                        <span className="font-semibold text-amber-300">Analysis Scope & Limitations:</span>
+                        <p className="text-amber-200/90 leading-relaxed">{compareResult.limitations}</p>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Narrative Summary */}
                   <div className="p-6 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
-                    <h3 className="text-sm font-semibold text-cyan-400 uppercase tracking-wider">Executive Synthesis</h3>
-                    <p className="text-sm leading-relaxed text-slate-300">{compareResult.narrative_summary}</p>
+                    <h3 className="text-xs font-semibold text-cyan-400 uppercase tracking-wider">Executive Synthesis</h3>
+                    <p className="text-sm leading-relaxed text-slate-200">{compareResult.narrative_summary}</p>
                   </div>
 
                   {/* Comparative Matrix Table */}
-                  <div className="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden">
-                    <table className="w-full text-left text-sm">
-                      <thead className="bg-slate-950/80 text-xs uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                  <div className="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden shadow-xl shadow-black/40">
+                    <table className="w-full text-left text-sm border-collapse">
+                      <thead className="bg-slate-950 text-xs uppercase tracking-wider text-slate-400 border-b border-slate-800">
                         <tr>
-                          <th className="p-4">Attribute / Scope</th>
-                          <th className="p-4">Document Details</th>
-                          <th className="p-4">Contrast & Discrepancies</th>
+                          <th className="p-4 w-1/4">Attribute / Scope</th>
+                          <th className="p-4 w-2/5">Document Details</th>
+                          <th className="p-4 w-1/4">Discrepancies & Contrast</th>
+                          <th className="p-4 w-1/12 text-right">Citations</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800">
                         {compareResult.matrix.map((row, idx) => (
-                          <tr key={idx} className="hover:bg-slate-900/40">
-                            <td className="p-4 font-semibold text-slate-200 align-top w-1/4">
-                              {row.attribute}
+                          <tr key={idx} className="hover:bg-slate-900/40 transition-colors">
+                            <td className="p-4 font-semibold text-slate-200 align-top">
+                              <span className="text-white block">{row.attribute}</span>
                             </td>
-                            <td className="p-4 text-xs text-slate-300 space-y-1 align-top w-2/5">
+                            <td className="p-4 text-xs text-slate-300 space-y-2 align-top">
                               {Object.entries(row.per_document_values).map(([fname, val]) => (
-                                <div key={fname}>
-                                  <span className="text-cyan-400 font-medium">{fname}:</span> {val}
+                                <div key={fname} className="p-2 rounded bg-slate-950/60 border border-slate-800/80">
+                                  <span className="text-cyan-400 font-semibold block mb-0.5 truncate">{fname}</span>
+                                  <span className="text-slate-300 leading-relaxed">{val}</span>
                                 </div>
                               ))}
                             </td>
-                            <td className="p-4 text-xs text-slate-300 align-top">
+                            <td className="p-4 text-xs text-slate-300 align-top leading-relaxed">
                               {row.differences_summary}
+                            </td>
+                            <td className="p-4 text-xs align-top text-right space-y-1">
+                              {row.source_labels && row.source_labels.length > 0 ? (
+                                <div className="flex flex-wrap gap-1 justify-end">
+                                  {row.source_labels.map(lbl => {
+                                    const matchCite = (compareResult.citations || []).find(c => c.source_label === lbl);
+                                    return (
+                                      <button
+                                        key={lbl}
+                                        onClick={() => {
+                                          if (matchCite) {
+                                            setSelectedCitation(matchCite);
+                                          }
+                                        }}
+                                        title={matchCite ? `Click to view source from ${matchCite.filename}` : lbl}
+                                        className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-cyan-950 text-cyan-400 border border-cyan-500/40 hover:bg-cyan-900/60 hover:border-cyan-400 transition-colors cursor-pointer"
+                                      >
+                                        [{lbl}]
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <span className="text-slate-500 text-[11px]">—</span>
+                              )}
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Verified Citations List if available */}
+                  {compareResult.citations && compareResult.citations.length > 0 && (
+                    <div className="p-5 rounded-xl bg-slate-900/40 border border-slate-800/80 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center space-x-2">
+                          <span>Grounding Evidence Records</span>
+                          <span className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 text-[10px] font-mono">
+                            {compareResult.citations.length} verified citations
+                          </span>
+                        </h4>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {compareResult.citations.map((c, i) => (
+                          <div
+                            key={i}
+                            onClick={() => setSelectedCitation(c)}
+                            className="p-3 rounded-lg bg-slate-950/80 border border-slate-800 hover:border-cyan-500/40 transition-all cursor-pointer space-y-1 group"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-semibold text-cyan-400 group-hover:underline truncate">
+                                [{c.source_label}] {c.filename}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                p.{c.page_start} • {c.section}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed italic">
+                              &ldquo;{c.excerpt}&rdquo;
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

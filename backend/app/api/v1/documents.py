@@ -14,7 +14,7 @@ from app.schemas.document import (
     UploadIntentRequest,
     UploadIntentResponse,
 )
-from app.schemas.intelligence import DocumentSummaryResponse
+from app.schemas.intelligence import DocumentSummaryResponse, ExtractionPresetRequest, ExtractionResponse
 from app.services.ai_intelligence import IntelligenceService
 from app.services.document import DocumentService
 
@@ -143,6 +143,22 @@ async def get_document_summary(
 ):
     intel_service = IntelligenceService(db)
     return await intel_service.get_or_generate_summary(ctx.workspace.id, document_id)
+
+
+@router.post("/{document_id}/extract", response_model=ExtractionResponse)
+async def extract_document_preset(
+    document_id: uuid.UUID,
+    req: ExtractionPresetRequest,
+    ctx: WorkspaceContext = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db)
+):
+    intel_service = IntelligenceService(db)
+    return await intel_service.extract_preset(
+        workspace_id=ctx.workspace.id,
+        document_id=document_id,
+        preset_id=req.preset_id,
+        user_id=ctx.user.id
+    )
 
 
 # Local mock storage upload/download handler for development & integration tests

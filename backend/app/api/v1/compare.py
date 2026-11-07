@@ -18,5 +18,6 @@ async def compare_documents(
     return await intel_service.compare_documents(
         workspace_id=ctx.workspace.id,
         document_ids=req.document_ids,
-        focus_topic=req.focus_topic
+        focus_topic=req.focus_topic,
+        user_id=ctx.user.id
     )

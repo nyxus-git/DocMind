@@ -74,7 +74,16 @@ export interface CompareResponse {
   document_ids: string[];
   matrix: CompareMatrixRow[];
   narrative_summary: string;
+  citations?: CitationDTO[];
   limitations?: string;
+}
+
+export interface ExtractionResponse {
+  document_id: string;
+  preset_id: string;
+  extracted_data: Record<string, unknown>;
+  confidence_note: string;
+  citations: CitationDTO[];
 }
 
 export interface DocumentSummaryResponse {
@@ -375,6 +384,13 @@ export class ApiClient {
     return this.request<CompareResponse>('/documents/compare', {
       method: 'POST',
       body: JSON.stringify({ document_ids, focus_topic }),
+    });
+  }
+
+  static async extractPreset(document_id: string, preset_id: string): Promise<ExtractionResponse> {
+    return this.request<ExtractionResponse>(`/documents/${document_id}/extract`, {
+      method: 'POST',
+      body: JSON.stringify({ preset_id }),
     });
   }
 }
