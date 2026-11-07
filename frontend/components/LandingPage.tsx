@@ -866,3 +866,4 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
     </div>
   );
 };
+

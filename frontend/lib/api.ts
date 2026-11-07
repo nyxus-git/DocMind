@@ -86,10 +86,54 @@ export interface DocumentSummaryResponse {
   is_cached?: boolean;
 }
 
+export interface WorkspaceDetailDTO {
+  id: string;
+  name: string;
+  slug: string;
+  role: string;
+  created_at: string;
+  member_count: number;
+}
+
+export interface WorkspaceMemberDTO {
+  user_id: string;
+  email: string;
+  role: string;
+  joined_at: string;
+}
+
+export interface InviteMemberResponse {
+  workspace_id: string;
+  email: string;
+  role: string;
+  status: string;
+  message: string;
+}
+
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api/v1';
 
 export class ApiClient {
   private static token: string | null = null;
+  private static activeWorkspaceId: string | null = null;
+
+  static setActiveWorkspaceId(id: string | null) {
+    this.activeWorkspaceId = id;
+    if (typeof window !== 'undefined') {
+      if (id) {
+        localStorage.setItem('docmind_active_ws_id', id);
+      } else {
+        localStorage.removeItem('docmind_active_ws_id');
+      }
+    }
+  }
+
+  static getActiveWorkspaceId(): string | null {
+    if (this.activeWorkspaceId) return this.activeWorkspaceId;
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('docmind_active_ws_id');
+    }
+    return null;
+  }
 
   static setToken(token: string) {
     this.token = token;
@@ -138,6 +182,11 @@ export class ApiClient {
 
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const wsId = this.getActiveWorkspaceId();
+    if (wsId) {
+      headers['X-Workspace-ID'] = wsId;
     }
 
     try {
@@ -191,6 +240,41 @@ export class ApiClient {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('docmind_token');
     }
+  }
+
+  static async listWorkspaces(): Promise<WorkspaceDetailDTO[]> {
+    return this.request<WorkspaceDetailDTO[]>('/workspaces');
+  }
+
+  static async createCompanyWorkspace(name: string, slug?: string): Promise<WorkspaceDetailDTO> {
+    return this.request<WorkspaceDetailDTO>('/workspaces/company', {
+      method: 'POST',
+      body: JSON.stringify({ name, slug }),
+    });
+  }
+
+  static async getWorkspaceMembers(workspaceId: string): Promise<WorkspaceMemberDTO[]> {
+    return this.request<WorkspaceMemberDTO[]>(`/workspaces/${workspaceId}/members`);
+  }
+
+  static async inviteWorkspaceMember(workspaceId: string, email: string, role: string = 'MEMBER'): Promise<InviteMemberResponse> {
+    return this.request<InviteMemberResponse>(`/workspaces/${workspaceId}/invites`, {
+      method: 'POST',
+      body: JSON.stringify({ email, role }),
+    });
+  }
+
+  static async updateMemberRole(workspaceId: string, userId: string, role: string): Promise<WorkspaceMemberDTO> {
+    return this.request<WorkspaceMemberDTO>(`/workspaces/${workspaceId}/members/${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    });
+  }
+
+  static async removeWorkspaceMember(workspaceId: string, userId: string): Promise<void> {
+    return this.request<void>(`/workspaces/${workspaceId}/members/${userId}`, {
+      method: 'DELETE',
+    });
   }
 
   static async getUsage(): Promise<UsageSummaryDTO> {

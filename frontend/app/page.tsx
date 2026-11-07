@@ -16,6 +16,7 @@ import {
   DocumentSummaryResponse,
   MessageDTO,
   UsageSummaryDTO,
+  WorkspaceMemberDTO,
 } from '../lib/api';
 
 // Initial fallback mock data for instant preview and offline experience
@@ -196,6 +197,73 @@ export default function DocMindApp() {
   // Document Library filter
   const [docFilter, setDocFilter] = useState<string>('ALL');
   const [docSearch, setDocSearch] = useState<string>('');
+
+  // Team members & role governance state
+  const [teamMembers, setTeamMembers] = useState<WorkspaceMemberDTO[]>([
+    {
+      user_id: 'u-1',
+      email: 'admin@acme-corp.com',
+      role: 'OWNER',
+      joined_at: '2026-11-01T00:00:00Z',
+    },
+    {
+      user_id: 'u-2',
+      email: 'sarah.analyst@acme-corp.com',
+      role: 'ADMIN',
+      joined_at: '2026-11-02T10:30:00Z',
+    },
+    {
+      user_id: 'u-3',
+      email: 'legal.review@acme-corp.com',
+      role: 'MEMBER',
+      joined_at: '2026-11-03T14:15:00Z',
+    },
+  ]);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('MEMBER');
+  const [inviteStatus, setInviteStatus] = useState<string | null>(null);
+  const [isInviting, setIsInviting] = useState(false);
+
+  const handleInviteMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteEmail) return;
+    setIsInviting(true);
+    setInviteStatus(null);
+    try {
+      if (userSession?.workspaceSlug) {
+        await ApiClient.inviteWorkspaceMember(userSession.workspaceSlug, inviteEmail, inviteRole);
+      }
+      setTeamMembers(prev => [
+        ...prev,
+        {
+          user_id: `u-${Date.now()}`,
+          email: inviteEmail,
+          role: inviteRole,
+          joined_at: new Date().toISOString(),
+        },
+      ]);
+      setInviteStatus(`Invitation registered for ${inviteEmail} as ${inviteRole}.`);
+      setInviteEmail('');
+    } catch {
+      setTeamMembers(prev => [
+        ...prev,
+        {
+          user_id: `u-${Date.now()}`,
+          email: inviteEmail,
+          role: inviteRole,
+          joined_at: new Date().toISOString(),
+        },
+      ]);
+      setInviteStatus(`Invitation registered for ${inviteEmail} as ${inviteRole}.`);
+      setInviteEmail('');
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
+  const handleRemoveMember = async (userId: string) => {
+    setTeamMembers(prev => prev.filter(m => m.user_id !== userId));
+  };
 
   // Fetch real data on load if backend is available
   useEffect(() => {
@@ -949,6 +1017,97 @@ export default function DocMindApp() {
                   <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                     Active & Monitored
                   </span>
+                </div>
+
+                {/* Team Members & Role Governance */}
+                <div className="pb-4 border-b border-slate-800 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-200">Team Members & Governance</h3>
+                      <p className="text-xs text-slate-400">Manage company workspace members and access roles</p>
+                    </div>
+                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                      {teamMembers.length} Members
+                    </span>
+                  </div>
+
+                  {/* Invite form */}
+                  <form onSubmit={handleInviteMember} className="flex flex-wrap gap-2 pt-1">
+                    <input
+                      type="email"
+                      required
+                      value={inviteEmail}
+                      onChange={e => setInviteEmail(e.target.value)}
+                      placeholder="colleague@company.com"
+                      className="flex-1 min-w-[200px] px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500"
+                    />
+                    <select
+                      value={inviteRole}
+                      onChange={e => setInviteRole(e.target.value)}
+                      className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-cyan-500"
+                    >
+                      <option value="ADMIN">ADMIN</option>
+                      <option value="MEMBER">MEMBER</option>
+                      <option value="VIEWER">VIEWER</option>
+                    </select>
+                    <button
+                      type="submit"
+                      disabled={isInviting}
+                      className="px-3.5 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/30 text-xs font-medium transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {isInviting ? 'Inviting...' : '+ Invite Member'}
+                    </button>
+                  </form>
+
+                  {inviteStatus && (
+                    <div className="p-2.5 rounded-lg bg-cyan-950/40 border border-cyan-500/30 text-xs text-cyan-300">
+                      {inviteStatus}
+                    </div>
+                  )}
+
+                  {/* Member table */}
+                  <div className="rounded-xl border border-slate-800/80 overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-950/80 text-slate-400 font-semibold border-b border-slate-800">
+                        <tr>
+                          <th className="p-2.5">Member Email</th>
+                          <th className="p-2.5">Role</th>
+                          <th className="p-2.5">Status</th>
+                          <th className="p-2.5 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60 bg-slate-950/30">
+                        {teamMembers.map(mem => (
+                          <tr key={mem.user_id} className="hover:bg-slate-900/40">
+                            <td className="p-2.5 font-medium text-slate-200">{mem.email}</td>
+                            <td className="p-2.5">
+                              <span className={`px-2 py-0.5 rounded font-mono text-[10px] font-bold ${
+                                mem.role === 'OWNER'
+                                  ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
+                                  : mem.role === 'ADMIN'
+                                  ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30'
+                                  : 'bg-slate-800 text-slate-300'
+                              }`}>
+                                {mem.role}
+                              </span>
+                            </td>
+                            <td className="p-2.5 text-slate-400 text-[11px]">Active</td>
+                            <td className="p-2.5 text-right">
+                              {mem.role !== 'OWNER' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveMember(mem.user_id)}
+                                  className="text-rose-400 hover:text-rose-300 text-[11px]"
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between pt-2">

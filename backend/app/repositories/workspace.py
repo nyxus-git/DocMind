@@ -1,8 +1,8 @@
 import uuid
 from typing import List, Optional, Tuple
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.entities import Workspace, WorkspaceMember
+from app.models.entities import User, Workspace, WorkspaceMember
 from app.models.enums import WorkspaceRole
 
 
@@ -32,6 +32,10 @@ class WorkspaceRepository:
         result = await self.db.execute(select(Workspace).where(Workspace.id == workspace_id))
         return result.scalar_one_or_none()
 
+    async def get_by_slug(self, slug: str) -> Optional[Workspace]:
+        result = await self.db.execute(select(Workspace).where(Workspace.slug == slug))
+        return result.scalar_one_or_none()
+
     async def get_user_membership(self, workspace_id: uuid.UUID, user_id: uuid.UUID) -> Optional[WorkspaceMember]:
         result = await self.db.execute(
             select(WorkspaceMember).where(
@@ -49,3 +53,45 @@ class WorkspaceRepository:
             .order_by(Workspace.created_at.asc())
         )
         return list(result.all())
+
+    async def count_workspace_members(self, workspace_id: uuid.UUID) -> int:
+        result = await self.db.execute(
+            select(func.count(WorkspaceMember.user_id)).where(WorkspaceMember.workspace_id == workspace_id)
+        )
+        return int(result.scalar_one_or_none() or 0)
+
+    async def get_members(self, workspace_id: uuid.UUID) -> List[Tuple[WorkspaceMember, str]]:
+        """Returns list of (WorkspaceMember, user_email)."""
+        result = await self.db.execute(
+            select(WorkspaceMember, User.email)
+            .join(User, WorkspaceMember.user_id == User.id)
+            .where(WorkspaceMember.workspace_id == workspace_id)
+            .order_by(WorkspaceMember.joined_at.asc())
+        )
+        return list(result.all())
+
+    async def add_member(self, workspace_id: uuid.UUID, user_id: uuid.UUID, role: str) -> WorkspaceMember:
+        member = WorkspaceMember(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            role=role
+        )
+        self.db.add(member)
+        await self.db.flush()
+        return member
+
+    async def update_member_role(self, workspace_id: uuid.UUID, user_id: uuid.UUID, role: str) -> Optional[WorkspaceMember]:
+        member = await self.get_user_membership(workspace_id, user_id)
+        if not member:
+            return None
+        member.role = role
+        await self.db.flush()
+        return member
+
+    async def remove_member(self, workspace_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+        member = await self.get_user_membership(workspace_id, user_id)
+        if not member:
+            return False
+        await self.db.delete(member)
+        await self.db.flush()
+        return True

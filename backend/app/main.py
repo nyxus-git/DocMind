@@ -9,6 +9,7 @@ from app.api.v1.health import router as health_router
 from app.api.v1.search import router as search_router
 from app.api.v1.usage import router as usage_router
 from app.api.v1.users import router as users_router
+from app.api.v1.workspaces import router as workspaces_router
 from app.core.config import settings
 from app.core.exceptions import DocMindException, docmind_exception_handler
 from app.core.logging import RequestLoggingMiddleware, setup_logging
@@ -47,6 +48,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
+app.include_router(workspaces_router, prefix="/api/v1")
 app.include_router(documents_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
 app.include_router(search_router, prefix="/api/v1")
