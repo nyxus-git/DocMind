@@ -216,8 +216,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </button>
         </div>
 
+        {/* Recruiter & Reviewer Fast-Pass Banner */}
+        <div className="mx-6 mt-4 p-3 rounded-xl bg-gradient-to-r from-cyan-500/10 via-teal-500/10 to-emerald-500/10 border border-cyan-500/30 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className="text-base text-cyan-400 animate-pulse">⚡</span>
+            <div>
+              <div className="text-[11px] font-bold text-white flex items-center gap-1.5">
+                <span>Hiring Manager or Reviewer?</span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono">1-Click Access</span>
+              </div>
+              <div className="text-[10px] text-slate-400">Instant test-drive with preloaded Acme Corp Enterprise PRD &amp; citations</div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleQuickDemo('company')}
+            className="px-3.5 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition-all shadow-sm active:scale-95 shrink-0 cursor-pointer"
+          >
+            Fast-Pass &rarr;
+          </button>
+        </div>
+
         {/* Mode & Workspace Switcher Tabs */}
-        <div className="px-6 pt-5 pb-2">
+        <div className="px-6 pt-4 pb-2">
           {mode === 'forgot' ? (
             <button
               type="button"

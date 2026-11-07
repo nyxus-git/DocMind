@@ -13,6 +13,7 @@ interface NavbarProps {
   onOpenAuth: (mode: 'signin' | 'signup', isCompany?: boolean) => void;
   onSwitchView: (mode: 'landing' | 'app') => void;
   onOpenAdmin?: () => void;
+  onLaunchRecruiterSandbox?: () => void;
   onSignOut: () => void;
 }
 
@@ -24,6 +25,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenAuth,
   onSwitchView,
   onOpenAdmin,
+  onLaunchRecruiterSandbox,
   onSignOut,
 }) => {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -93,30 +95,46 @@ export const Navbar: React.FC<NavbarProps> = ({
       {/* Right Actions */}
       <div className="flex items-center gap-3">
         {viewMode === 'landing' ? (
-          <>
-            <button
-              onClick={() => onOpenAuth('signin')}
-              className="px-3.5 py-2 text-xs font-semibold text-slate-300 hover:text-white transition-colors"
-            >
-              Sign In
-            </button>
+          activeSession ? (
+            <div className="flex items-center gap-3">
+              <span className="hidden sm:inline-block text-xs font-medium text-slate-300 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg">
+                🏢 {activeSession.workspaceName}
+              </span>
+              <button
+                onClick={() => onSwitchView('app')}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-400 hover:from-cyan-400 hover:to-teal-300 text-slate-950 font-bold text-xs transition-all shadow-md shadow-cyan-500/25 active:scale-95 flex items-center gap-1.5 cursor-pointer"
+              >
+                <span>Go to Workspace</span>
+                <span>&rarr;</span>
+              </button>
+            </div>
+          ) : (
+            <>
+              <button
+                onClick={() => onOpenAuth('signin')}
+                className="px-3.5 py-2 text-xs font-semibold text-slate-300 hover:text-white transition-colors cursor-pointer"
+              >
+                Sign In
+              </button>
 
-            <button
-              onClick={() => onOpenAuth('signup', true)}
-              className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-xs font-semibold text-cyan-300 transition-all hover:border-cyan-500/50 shadow-sm"
-            >
-              <span>🏢</span>
-              <span>Company Workspace</span>
-            </button>
+              <button
+                onClick={() => onOpenAuth('signup', true)}
+                className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-xs font-semibold text-cyan-300 transition-all hover:border-cyan-500/50 shadow-sm cursor-pointer"
+              >
+                <span>🏢</span>
+                <span>Company Workspace</span>
+              </button>
 
-            <button
-              onClick={() => onSwitchView('app')}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-400 hover:from-cyan-400 hover:to-teal-300 text-slate-950 font-bold text-xs transition-all shadow-md shadow-cyan-500/25 active:scale-95 flex items-center gap-1.5"
-            >
-              <span>Launch App</span>
-              <span>&rarr;</span>
-            </button>
-          </>
+              <button
+                onClick={onLaunchRecruiterSandbox || (() => onOpenAuth('signin'))}
+                className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-500/15 via-teal-500/15 to-emerald-500/15 hover:from-cyan-500/25 hover:to-teal-500/25 border border-cyan-500/40 text-cyan-300 font-semibold text-xs transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                title="Instant 1-Click Evaluation Sandbox for Recruiters & Hiring Managers"
+              >
+                <span className="text-cyan-400">⚡</span>
+                <span>Recruiter Sandbox</span>
+              </button>
+            </>
+          )
         ) : (
           /* App Workspace Mode */
           <>

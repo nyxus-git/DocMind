@@ -145,6 +145,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
   const [isAnnual, setIsAnnual] = useState(true);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
 
+  // Sovereign / BYOS Custom Modal State
+  const [sovereignModalOpen, setSovereignModalOpen] = useState(false);
+  const [sovereignEmail, setSovereignEmail] = useState('');
+  const [sovereignCompany, setSovereignCompany] = useState('');
+  const [sovereignStorage, setSovereignStorage] = useState('AWS S3 (Private Bucket)');
+  const [sovereignCompliance, setSovereignCompliance] = useState('SOC-2 & ISO 27001');
+  const [sovereignSubmitted, setSovereignSubmitted] = useState(false);
+
   const faqs = [
     {
       q: 'How does DocMind guarantee that documents are NEVER visible to other companies?',
@@ -161,6 +169,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
     {
       q: 'Can DocMind handle scanned PDF documents, invoices, or complex tables?',
       a: 'Yes! DocMind includes an automated OCR fallback engine powered by Tesseract. When scanned pages or images without a selectable text layer are detected, it runs OCR extraction. Furthermore, multi-column tables are reconstructed into structured Markdown pipe tables so financial metrics and contract terms are preserved with relational precision.',
+    },
+    {
+      q: 'Can we store all documents on our own private servers / AWS S3 rather than DocMind\'s cloud?',
+      a: 'Yes! Under our Enterprise Sovereign (BYOS) plan, documents never leave your corporate infrastructure. You can connect your private AWS S3, Cloudflare R2, MinIO, or internal on-premise storage. DocMind operates strictly as an intelligence layer or can be deployed entirely inside your private VPC as an air-gapped Docker container.',
     },
     {
       q: 'How does the Cross-Document Comparative Matrix work?',
@@ -217,10 +229,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
 
             <button
               onClick={onLaunchApp}
-              className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 hover:border-cyan-500/50 text-white font-semibold text-sm transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-cyan-500/30 hover:border-cyan-400 text-white font-semibold text-sm transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 cursor-pointer group"
+              title="Instant pre-seeded enterprise evaluation workspace for hiring teams and reviewers"
             >
-              <span>Explore Instant Sandbox</span>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 font-mono">Demo</span>
+              <span className="text-cyan-400 group-hover:scale-110 transition-transform">⚡</span>
+              <span>Recruiter 1-Click Sandbox</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 font-mono border border-cyan-500/30">Reviewer Mode</span>
             </button>
           </div>
 
@@ -576,7 +590,184 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
               </button>
             </div>
           </div>
+
+          {/* SOVEREIGN / BYOS ENTERPRISE SOLUTION CARD */}
+          <div className="mt-10 rounded-3xl bg-gradient-to-r from-slate-900 via-slate-900 to-indigo-950/40 border-2 border-indigo-500/40 p-8 sm:p-10 shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="relative z-10 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-8">
+              <div className="space-y-3 max-w-2xl">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 font-mono text-[11px] font-bold uppercase tracking-wider">
+                  <span>🛡️</span>
+                  <span>Enterprise Sovereign &bull; Zero Data Retention (ZDR)</span>
+                </div>
+                <h3 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                  Need Documents Stored On Your Own Server or Private Cloud?
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                  For regulated industries (Banks, Defense, Healthcare, Global Law Firms), DocMind delivers a pure sovereign deployment: <strong className="text-white font-semibold">raw documents never touch DocMind servers</strong>.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-xs text-slate-300">
+                  <div className="flex items-center gap-2">
+                    <span className="text-indigo-400 font-bold">✓</span>
+                    <span><strong>Bring Your Own Storage (BYOS):</strong> AWS S3, Cloudflare R2, MinIO, or NAS</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-indigo-400 font-bold">✓</span>
+                    <span><strong>Bring Your Own Key / Model (BYOK):</strong> Private Azure OpenAI or local Ollama/vLLM</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-indigo-400 font-bold">✓</span>
+                    <span><strong>Air-Gapped VPC:</strong> Full Docker &amp; Helm chart deployment behind your firewall</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-indigo-400 font-bold">✓</span>
+                    <span><strong>SOC-2 &amp; HIPAA Ready:</strong> Dedicated Solutions Architect &amp; 99.99% SLA</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="w-full lg:w-auto flex flex-col items-center lg:items-end gap-3 shrink-0">
+                <div className="text-right">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-indigo-400">Custom Deployment</div>
+                  <div className="text-2xl sm:text-3xl font-extrabold text-white">Starts at $1,499 <span className="text-xs text-slate-400 font-normal">/ mo</span></div>
+                  <div className="text-[11px] text-slate-400">or Annual On-Prem License</div>
+                </div>
+                <button
+                  onClick={() => setSovereignModalOpen(true)}
+                  className="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-400 hover:to-cyan-400 text-white font-bold text-xs transition-all shadow-lg shadow-indigo-500/25 active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <span>Request Sovereign On-Prem Demo</span>
+                  <span>&rarr;</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </section>
+
+        {/* SOVEREIGN EVALUATION REQUEST MODAL */}
+        {sovereignModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
+            <div className="w-full max-w-lg bg-slate-900 border border-indigo-500/30 rounded-2xl shadow-2xl p-6 sm:p-8 relative">
+              <button
+                onClick={() => {
+                  setSovereignModalOpen(false);
+                  setSovereignSubmitted(false);
+                }}
+                className="absolute top-5 right-5 text-slate-400 hover:text-white text-lg"
+              >
+                ✕
+              </button>
+
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/40 text-indigo-400 flex items-center justify-center text-lg">
+                  🛡️
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Enterprise Sovereign (BYOS) Evaluation</h3>
+                  <p className="text-xs text-slate-400">Zero-Data-Retention on-premise &amp; private cloud deployment</p>
+                </div>
+              </div>
+
+              {sovereignSubmitted ? (
+                <div className="py-8 text-center space-y-4">
+                  <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center text-2xl mx-auto">
+                    ✓
+                  </div>
+                  <h4 className="text-base font-bold text-white">Evaluation Request Registered!</h4>
+                  <p className="text-xs text-slate-300 max-w-sm mx-auto leading-relaxed">
+                    Our Solutions Engineering team will reach out to <strong className="text-cyan-400">{sovereignEmail}</strong> within 4 business hours with the DocMind Docker VPC installation bundle and S3/R2 connector guide.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setSovereignModalOpen(false);
+                      setSovereignSubmitted(false);
+                    }}
+                    className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition-all"
+                  >
+                    Close Window
+                  </button>
+                </div>
+              ) : (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (sovereignEmail && sovereignCompany) {
+                      setSovereignSubmitted(true);
+                    }
+                  }}
+                  className="space-y-4 pt-2"
+                >
+                  <div>
+                    <label className="text-xs font-medium text-slate-300 block mb-1">Work Email</label>
+                    <input
+                      type="email"
+                      required
+                      value={sovereignEmail}
+                      onChange={(e) => setSovereignEmail(e.target.value)}
+                      placeholder="ciso@yourcompany.com"
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-medium text-slate-300 block mb-1">Company / Organization Name</label>
+                    <input
+                      type="text"
+                      required
+                      value={sovereignCompany}
+                      onChange={(e) => setSovereignCompany(e.target.value)}
+                      placeholder="e.g. Meridian Financial Partners"
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-medium text-slate-300 block mb-1">Your Storage Platform</label>
+                      <select
+                        value={sovereignStorage}
+                        onChange={(e) => setSovereignStorage(e.target.value)}
+                        className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="AWS S3 (Private Bucket)">AWS S3 (Private Bucket)</option>
+                        <option value="Cloudflare R2 (BYOS)">Cloudflare R2 (BYOS)</option>
+                        <option value="MinIO / On-Premise S3">MinIO / On-Premise S3</option>
+                        <option value="Google Cloud Storage">Google Cloud Storage</option>
+                        <option value="Azure Blob Storage">Azure Blob Storage</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-medium text-slate-300 block mb-1">Primary Compliance Standard</label>
+                      <select
+                        value={sovereignCompliance}
+                        onChange={(e) => setSovereignCompliance(e.target.value)}
+                        className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="SOC-2 & ISO 27001">SOC-2 &amp; ISO 27001</option>
+                        <option value="HIPAA (Healthcare)">HIPAA (Healthcare)</option>
+                        <option value="FINRA / SEC (Banking)">FINRA / SEC (Banking)</option>
+                        <option value="GDPR (EU Data Residency)">GDPR (EU Data Residency)</option>
+                        <option value="ITAR / Defense">ITAR / Defense</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-[11px] text-indigo-300 leading-relaxed">
+                    🔒 <strong>Strict Zero-Data Guarantee:</strong> All document indexing and vector embedding will run inside your VPC or connector. No customer documents are retained on DocMind SaaS infrastructure.
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-400 hover:to-cyan-400 text-white font-bold text-xs transition-all shadow-md shadow-indigo-500/20 active:scale-95"
+                  >
+                    Submit Sovereign Architecture Request &rarr;
+                  </button>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* FAQ ACCORDION */}
         <section id="faq" className="py-20 px-6 max-w-4xl mx-auto border-t border-slate-800/80">
