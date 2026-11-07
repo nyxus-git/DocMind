@@ -89,8 +89,9 @@ class DocumentRepository:
         }
         if page_count is not None:
             values["page_count"] = page_count
-        if status == DocumentStatus.READY.value:
-            values["ready_at"] = datetime.now(timezone.utc)
+        if status in [DocumentStatus.READY.value, DocumentStatus.QUEUED.value]:
+            if status == DocumentStatus.READY.value:
+                values["ready_at"] = datetime.now(timezone.utc)
             values["error_code"] = None
             values["error_message"] = None
         if error_code is not None:

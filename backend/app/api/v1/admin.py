@@ -1,14 +1,14 @@
 import uuid
 from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.dependencies import get_current_user
 from app.core.config import settings
 from app.core.exceptions import DocMindException
 from app.db.session import get_db
-from app.models.entities import AuditEvent, Document, DocumentChunk, Job, Message, User, Workspace, WorkspaceMember
-from app.models.enums import DocumentStatus, JobStatus, JobType, WorkspaceRole, WorkspaceTier
+from app.models.entities import AuditEvent, Document, DocumentChunk, Message, User, Workspace, WorkspaceMember
+from app.models.enums import DocumentStatus, JobType, WorkspaceRole, WorkspaceTier
 from app.repositories.audit import AuditRepository
 from app.repositories.document import DocumentRepository
 from app.repositories.job import JobRepository
@@ -32,15 +32,25 @@ async def get_admin_overview(
     """Retrieves platform-wide metrics, tenant counts, and service statuses."""
     total_workspaces = await db.scalar(select(func.count(Workspace.id))) or 0
     total_users = await db.scalar(select(func.count(User.id))) or 0
-    total_documents = await db.scalar(select(func.count(Document.id))) or 0
+    total_documents = await db.scalar(
+        select(func.count(Document.id)).where(Document.status != DocumentStatus.DELETED.value)
+    ) or 0
     total_chunks = await db.scalar(select(func.count(DocumentChunk.id))) or 0
-    total_storage = await db.scalar(select(func.coalesce(func.sum(Document.size_bytes), 0))) or 0
+    total_storage = await db.scalar(
+        select(func.coalesce(func.sum(Document.size_bytes), 0)).where(Document.status != DocumentStatus.DELETED.value)
+    ) or 0
     total_questions = await db.scalar(select(func.count(Message.id)).where(Message.role == "user")) or 0
 
     tier_rows = (await db.execute(select(Workspace.tier, func.count(Workspace.id)).group_by(Workspace.tier))).all()
     active_tiers: Dict[str, int] = {str(tier): int(count) for tier, count in tier_rows}
 
-    status_rows = (await db.execute(select(Document.status, func.count(Document.id)).group_by(Document.status))).all()
+    status_rows = (
+        await db.execute(
+            select(Document.status, func.count(Document.id))
+            .where(Document.status != DocumentStatus.DELETED.value)
+            .group_by(Document.status)
+        )
+    ).all()
     doc_status: Dict[str, int] = {str(status_val): int(count) for status_val, count in status_rows}
 
     r2_status = (
@@ -102,11 +112,17 @@ async def list_admin_workspaces(
         ) or 0
 
         doc_count = await db.scalar(
-            select(func.count(Document.id)).where(Document.workspace_id == ws.id)
+            select(func.count(Document.id)).where(
+                Document.workspace_id == ws.id,
+                Document.status != DocumentStatus.DELETED.value
+            )
         ) or 0
 
         storage_bytes = await db.scalar(
-            select(func.coalesce(func.sum(Document.size_bytes), 0)).where(Document.workspace_id == ws.id)
+            select(func.coalesce(func.sum(Document.size_bytes), 0)).where(
+                Document.workspace_id == ws.id,
+                Document.status != DocumentStatus.DELETED.value
+            )
         ) or 0
 
         results.append(
@@ -166,10 +182,16 @@ async def admin_override_workspace_tier(
         select(func.count(WorkspaceMember.user_id)).where(WorkspaceMember.workspace_id == updated_ws.id)
     ) or 0
     doc_count = await db.scalar(
-        select(func.count(Document.id)).where(Document.workspace_id == updated_ws.id)
+        select(func.count(Document.id)).where(
+            Document.workspace_id == updated_ws.id,
+            Document.status != DocumentStatus.DELETED.value
+        )
     ) or 0
     storage_bytes = await db.scalar(
-        select(func.coalesce(func.sum(Document.size_bytes), 0)).where(Document.workspace_id == updated_ws.id)
+        select(func.coalesce(func.sum(Document.size_bytes), 0)).where(
+            Document.workspace_id == updated_ws.id,
+            Document.status != DocumentStatus.DELETED.value
+        )
     ) or 0
 
     return AdminWorkspaceSummaryDTO(
@@ -200,6 +222,8 @@ async def list_admin_documents(
     )
     if status_filter:
         query = query.where(Document.status == status_filter.upper())
+    else:
+        query = query.where(Document.status != DocumentStatus.DELETED.value)
 
     rows = (await db.execute(query)).all()
     return [

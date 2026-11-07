@@ -59,3 +59,4 @@ class AdminSystemDiagnosticsDTO(BaseModel):
     worker_concurrency: int
     public_app_url: str
     api_base_url: str
+
