@@ -289,10 +289,23 @@ export class ApiClient {
     }
 
     try {
-      const res = await fetch(`${API_BASE}${endpoint}`, {
+      let res = await fetch(`${API_BASE}${endpoint}`, {
         ...options,
         headers,
       });
+
+      if (res.status === 401 && !endpoint.startsWith('/auth/')) {
+        // Expired or invalid token: clear local cache and re-authenticate demo session
+        this.setToken('');
+        const freshToken = await this.ensureSession();
+        if (freshToken) {
+          headers['Authorization'] = `Bearer ${freshToken}`;
+          res = await fetch(`${API_BASE}${endpoint}`, {
+            ...options,
+            headers,
+          });
+        }
+      }
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));

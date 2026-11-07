@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://docmind:docmind@localhost:5432/docmind"
     SYNC_DATABASE_URL: str = "postgresql+psycopg2://docmind:docmind@localhost:5432/docmind"
     PUBLIC_APP_URL: str = "http://localhost:3001"
-    API_BASE_URL: str = "http://localhost:8001"
+    API_BASE_URL: str = "http://localhost:8000"
     CORS_ALLOWED_ORIGINS: List[str] = Field(
         default_factory=lambda: [
             "http://localhost:3000",
