@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { ApiClient } from '../lib/api';
+import { Logo } from './Logo';
 
 export interface UserSession {
   email: string;
@@ -189,9 +190,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* Modal Header */}
         <div className="p-6 border-b border-slate-800/80 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-teal-400 flex items-center justify-center font-bold text-slate-950 shadow-md shadow-cyan-500/20">
-              D
-            </div>
+            <Logo size="md" showText={false} />
             <div>
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 {mode === 'signin'

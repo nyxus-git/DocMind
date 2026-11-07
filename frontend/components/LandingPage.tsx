@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { CitationDTO } from '../lib/api';
+import { Logo } from './Logo';
 
 interface LandingPageProps {
   onOpenAuth: (mode: 'signin' | 'signup', isCompany?: boolean) => void;
@@ -20,11 +21,11 @@ interface DemoScenario {
 const DEMO_SCENARIOS: DemoScenario[] = [
   {
     id: 'compliance',
-    title: 'Tenant Security & Encryption',
+    title: 'Cloudflare R2 & Multi-Tenancy',
     documentScope: ['DocMind_PRD_Technical_Specification_v1.0.pdf'],
-    question: 'How does DocMind guarantee tenant isolation and protect stored passwords?',
+    question: 'How does DocMind ensure customer documents are never visible to another company?',
     answer:
-      'DocMind enforces cryptographic tenant isolation at both the database and object storage layers. Every request strictly derives the user identity and active workspace from trusted server-side JWT claims [S1]. Passwords are never stored in cleartext; they are hashed using the memory-hard Argon2id algorithm [S2]. Furthermore, object storage paths are partitioned by workspace ID and accessed only via short-lived ephemeral signed URLs [S3].',
+      'DocMind enforces strict tenant boundaries at every layer of the infrastructure. Documents are stored in encrypted, isolated Cloudflare R2 object partitions under workspaces/[workspace_id]/ [S1]. Every database query enforces row-level workspace constraints derived exclusively from verified JWT server state [S2]. Passwords use memory-hard Argon2id hashing, and documents are never used for AI model training [S3].',
     citations: [
       {
         citation_id: 'cit-demo-1',
@@ -34,29 +35,29 @@ const DEMO_SCENARIOS: DemoScenario[] = [
         page_end: 10,
         section: '09 / Identity and workspaces',
         excerpt:
-          'FR-002: Hash passwords with Argon2id; never store or log cleartext passwords. FR-007: Every request resolves user and active workspace from trusted server state.',
+          'FR-007: Every request resolves user and active workspace strictly from trusted server state. Cross-tenant access attempts immediately fail with HTTP 403 Forbidden.',
         source_label: 'S1',
       },
       {
         citation_id: 'cit-demo-2',
         document_id: 'doc-prd-01',
         filename: 'DocMind_PRD_Technical_Specification_v1.0.pdf',
-        page_start: 10,
-        page_end: 10,
-        section: '09 / FR-002 Security Policy',
+        page_start: 12,
+        page_end: 12,
+        section: '11 / Cloudflare R2 Object Storage',
         excerpt:
-          'DB contains only encoded password hash; logs contain no password or authorization tokens under any circumstances.',
+          'Direct browser-to-R2 upload with ephemeral presigned URLs; private workspace prefixing ensures cross-tenant data inference or discovery is impossible.',
         source_label: 'S2',
       },
       {
         citation_id: 'cit-demo-3',
         document_id: 'doc-prd-01',
         filename: 'DocMind_PRD_Technical_Specification_v1.0.pdf',
-        page_start: 12,
-        page_end: 12,
-        section: '11 / Upload and Object Storage',
+        page_start: 10,
+        page_end: 10,
+        section: '09 / FR-002 Security Policy',
         excerpt:
-          'Direct browser-to-R2 upload with ephemeral presigned URLs; private workspace prefixing ensures cross-tenant data inference is impossible.',
+          'Argon2id password hashing with time_cost=2 and 64MB memory. Zero model training policy on customer reference documents.',
         source_label: 'S3',
       },
     ],
@@ -71,62 +72,62 @@ const DEMO_SCENARIOS: DemoScenario[] = [
     citations: [
       {
         citation_id: 'cit-demo-4',
-        document_id: 'doc-msa-a',
+        document_id: 'doc-vendor-a',
         filename: 'Vendor_A_MSA_2026.pdf',
-        page_start: 18,
-        page_end: 19,
-        section: 'Section 12.2 Limitation of Liability',
+        page_start: 8,
+        page_end: 8,
+        section: 'Section 12.1: Limitation of Liability',
         excerpt:
-          'Neither party liability under this Agreement shall exceed the total fees paid during the prior twelve (12) month period preceding the claim.',
+          'Except for breach of confidentiality, neither party liability shall exceed the total amount paid by Customer in the preceding twelve (12) months or $250,000.',
         source_label: 'S1',
       },
       {
         citation_id: 'cit-demo-5',
-        document_id: 'doc-msa-b',
+        document_id: 'doc-vendor-b',
         filename: 'Vendor_B_MSA_2026.pdf',
         page_start: 14,
-        page_end: 14,
-        section: 'Section 9.4 Super-cap exceptions',
+        page_end: 15,
+        section: 'Section 16: Indemnification Obligations',
         excerpt:
-          'The liability cap in Section 9.1 shall not apply to breach of Section 7 (Confidentiality) or indemnification obligations under Section 11.',
+          'Supplier indemnification for third-party intellectual property claims and willful misconduct shall remain uncapped up to statutory damages limits.',
         source_label: 'S2',
       },
       {
         citation_id: 'cit-demo-6',
-        document_id: 'doc-msa-b',
+        document_id: 'doc-vendor-b',
         filename: 'Vendor_B_MSA_2026.pdf',
         page_start: 22,
         page_end: 22,
-        section: 'Section 16 Governing Law',
+        section: 'Section 24: Dispute Resolution and Governing Law',
         excerpt:
-          'This Agreement shall be governed by the laws of the State of New York with exclusive venue in the Borough of Manhattan.',
+          'Any dispute arising hereunder shall be finally settled under the Rules of Arbitration of the American Arbitration Association in New York County, New York.',
         source_label: 'S3',
       },
     ],
   },
   {
-    id: 'summary',
-    title: 'Financial Audit Summarization',
-    documentScope: ['Q3_Consolidated_Financial_Audit.pdf'],
-    question: 'Summarize the primary revenue drivers and critical audit risk caveats for Q3.',
+    id: 'financial',
+    title: 'Financial Audit & Balance Sheet Analysis',
+    documentScope: ['Meridian_Q3_Financials.pdf', 'Q3_Consolidated_Audit.pdf'],
+    question: 'Extract Q3 ARR growth, operating margins, and outstanding auditor caveats.',
     answer:
-      'Q3 consolidated recurring revenue expanded by 34.2% YoY, driven primarily by enterprise SaaS contract renewals and expansion in APAC healthcare accounts [S1]. However, the independent auditor noted two critical caveats: rising short-term foreign exchange currency exposure and a pending uncollected receivables reserve of $4.2M subject to reconciliation in Q4 [S2].',
+      'Q3 Enterprise ARR reached $48.6M, representing a 34.2% YoY acceleration with gross margins expanding to 81.4% [S1]. The independent auditor flagged $4.2M in aged cross-border receivables pending European regulatory clearance [S2].',
     citations: [
       {
         citation_id: 'cit-demo-7',
-        document_id: 'doc-fin-03',
-        filename: 'Q3_Consolidated_Financial_Audit.pdf',
+        document_id: 'doc-fin-01',
+        filename: 'Meridian_Q3_Financials.pdf',
         page_start: 4,
         page_end: 5,
-        section: 'Item 2: Management Discussion',
+        section: 'Item 2: Management Discussion & Analysis',
         excerpt:
-          'Enterprise ARR reached $48.6M representing 34.2% YoY acceleration. APAC healthcare sector renewals accounted for 61% of expansion volume.',
+          'Enterprise ARR reached $48.6M representing 34.2% YoY acceleration. Cloud subscription gross margins expanded to 81.4% from 78.2% in Q3 prior year.',
         source_label: 'S1',
       },
       {
         citation_id: 'cit-demo-8',
-        document_id: 'doc-fin-03',
-        filename: 'Q3_Consolidated_Financial_Audit.pdf',
+        document_id: 'doc-fin-02',
+        filename: 'Q3_Consolidated_Audit.pdf',
         page_start: 28,
         page_end: 29,
         section: 'Note 14: Contingencies and Audit Caveats',
@@ -141,729 +142,490 @@ const DEMO_SCENARIOS: DemoScenario[] = [
 export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchApp }) => {
   const [activeScenario, setActiveScenario] = useState<DemoScenario>(DEMO_SCENARIOS[0]);
   const [activeCitation, setActiveCitation] = useState<CitationDTO | null>(null);
+  const [isAnnual, setIsAnnual] = useState(true);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
 
   const faqs = [
     {
+      q: 'How does DocMind guarantee that documents are NEVER visible to other companies?',
+      a: 'DocMind implements complete architectural multi-tenancy. Every company receives an isolated workspace ID. Uploaded documents are saved to dedicated Cloudflare R2 partitioned paths (workspaces/[workspace_id]/...). Database queries enforce strict WHERE workspace_id = :authenticated_workspace_id. It is mathematically impossible for one company to access, view, or search another company\'s files.',
+    },
+    {
       q: 'How does DocMind guarantee zero AI hallucinations?',
-      a: 'Unlike generic chatbots that guess when information is missing, DocMind employs a strict evidence-bounding protocol. Retrieval is performed using a hybrid dense (pgvector) + lexical (PostgreSQL FTS) engine. The LLM is constrained to synthesize answers only from the retrieved evidence chunks. If evidence is insufficient, it explicitly states what is missing instead of fabricating facts.',
+      a: 'Unlike generic chatbots that guess when facts are missing, DocMind employs strict evidence bounding. Retrieval uses a hybrid engine merging dense vector similarity (pgvector) and sparse lexical search (PostgreSQL FTS) via Reciprocal Rank Fusion. If evidence in the source documents is insufficient, the system explicitly declares so instead of inventing answers.',
     },
     {
-      q: 'Does DocMind train foundation models on our uploaded files?',
-      a: 'Never. DocMind has an absolute zero-training policy. Your documents and extracted text chunks are stored in private, workspace-isolated database tables and encrypted object storage. They are never exported, shared, or used to fine-tune or train any AI model.',
+      q: 'Does DocMind or Google Gemini train on our uploaded documents?',
+      a: 'Never. DocMind has an absolute zero-training policy. Customer documents, tables, and vector embeddings are stored strictly within private workspace partitions. Data is never shared, exported, or used to fine-tune any foundation model.',
     },
     {
-      q: 'How do Company Workspaces and role-based permissions work?',
-      a: 'When an organization creates a Company account, an isolated tenant container is initialized. Workspace owners can invite team members with specific roles: Owner (full billing & workspace administration), Admin (document and user management), Member (upload, chat, compare), and Viewer (read-only document Q&A).',
+      q: 'Can DocMind handle scanned PDF documents, invoices, or complex tables?',
+      a: 'Yes! DocMind includes an automated OCR fallback engine powered by Tesseract. When scanned pages or images without a selectable text layer are detected, it runs OCR extraction. Furthermore, multi-column tables are reconstructed into structured Markdown pipe tables so financial metrics and contract terms are preserved with relational precision.',
     },
     {
-      q: 'What file formats and sizes are supported?',
-      a: 'DocMind supports PDF, DOCX (Microsoft Word), TXT, and Markdown files up to 20 MB and 200 pages per document in the standard tier, with up to 200 MB storage per workspace. Enterprise tiers support custom file sizes up to 100 MB and multi-thousand-page documents.',
-    },
-    {
-      q: 'Can DocMind handle scanned paper documents or PDFs with images?',
-      a: 'Yes. DocMind includes an automated OCR pipeline. If a PDF contains image-only or scanned pages without a native text layer, the ingestion worker automatically activates an OCR fallback to extract textual data, preserving layout and page indices.',
+      q: 'How does the Cross-Document Comparative Matrix work?',
+      a: 'You can select between 2 and 5 documents simultaneously (such as 3 vendor proposals, annual audits, or MSAs). The engine retrieves parallel context across all files and prompts Gemini 2.5 Flash to generate a side-by-side comparison matrix with key clauses, differences, and risk flags.',
     },
   ];
 
   return (
-    <div className="min-h-screen bg-[#090d16] text-slate-100 selection:bg-cyan-500/30 selection:text-cyan-200">
-      {/* Background radial gradients */}
+    <div className="min-h-screen bg-[#030712] text-slate-100 selection:bg-cyan-500/30 selection:text-cyan-200 font-sans">
+      {/* Background Animated Gradient Mesh */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[1000px] h-[550px] bg-gradient-to-b from-cyan-500/15 via-teal-500/5 to-transparent blur-3xl opacity-60" />
-        <div className="absolute top-[40%] -left-40 w-[600px] h-[600px] bg-blue-600/10 blur-3xl rounded-full" />
-        <div className="absolute top-[60%] -right-40 w-[600px] h-[600px] bg-teal-500/10 blur-3xl rounded-full" />
+        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[1200px] h-[600px] bg-gradient-to-b from-cyan-500/15 via-teal-500/10 to-transparent blur-3xl opacity-70" />
+        <div className="absolute top-[35%] -left-60 w-[700px] h-[700px] bg-indigo-600/10 blur-3xl rounded-full" />
+        <div className="absolute top-[65%] -right-60 w-[700px] h-[700px] bg-teal-500/10 blur-3xl rounded-full" />
       </div>
 
-      {/* Main Content */}
       <div className="relative z-10">
         {/* HERO SECTION */}
-        <section className="pt-20 pb-20 px-6 max-w-7xl mx-auto text-center">
+        <section className="pt-24 pb-20 px-6 max-w-7xl mx-auto text-center">
           {/* Animated Announcement Pill */}
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-900/90 border border-cyan-500/30 text-xs font-medium text-cyan-300 shadow-lg shadow-cyan-500/10 mb-8 backdrop-blur-md hover:border-cyan-400 transition-all cursor-pointer">
+          <div className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-slate-900/90 border border-cyan-500/30 text-xs font-semibold text-cyan-300 shadow-xl shadow-cyan-500/10 mb-8 backdrop-blur-xl hover:border-cyan-400/60 transition-all cursor-pointer">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-            <span className="font-semibold tracking-wide uppercase text-[10px] bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded">
-              DocMind v1.0 Production
+            <span className="uppercase text-[10px] tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono">
+              Cloudflare R2 + pgvector
             </span>
-            <span>Enterprise Multi-Tenant Document Intelligence Platform</span>
+            <span>Zero Cross-Tenant Leakage & Verifiable Citations</span>
             <span className="text-cyan-400">&rarr;</span>
           </div>
 
-          {/* Main Headline */}
-          <h1 className="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight text-white max-w-5xl mx-auto leading-[1.12]">
-            Ask Your Documents Anything.{' '}
-            <span className="bg-gradient-to-r from-cyan-400 via-teal-300 to-blue-400 bg-clip-text text-transparent">
-              Verify Every Single Word.
+          {/* Headline */}
+          <h1 className="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight text-white max-w-5xl mx-auto leading-[1.1] mb-6">
+            Ground-Truth Document Intelligence with{' '}
+            <span className="bg-gradient-to-r from-cyan-400 via-teal-300 to-indigo-300 bg-clip-text text-transparent">
+              Zero Hallucinations
             </span>
           </h1>
 
           {/* Subtitle */}
-          <p className="mt-6 text-lg sm:text-xl text-slate-300 max-w-3xl mx-auto leading-relaxed font-light">
-            DocMind transforms high-stakes enterprise documents—contracts, financial audits, technical PRDs, and clinical filings—into a searchable, question-answerable knowledge base with <strong>verifiable page citations</strong>, <strong>cross-document comparative matrices</strong>, and <strong>zero AI hallucinations</strong>.
+          <p className="text-base sm:text-lg text-slate-300 max-w-3xl mx-auto leading-relaxed mb-10">
+            Upload complex contracts, financial filings, and technical specifications. Every claim is verified with{' '}
+            <b className="text-cyan-300">exact page citations [S1]</b>. Each company’s files are physically quarantined on{' '}
+            <b className="text-white">Cloudflare R2</b> with zero cross-tenant visibility.
           </p>
 
-          {/* Primary CTA Buttons */}
-          <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
+          {/* CTAs */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
             <button
               onClick={() => onOpenAuth('signup', true)}
-              className="px-8 py-4 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-400 hover:from-cyan-400 hover:to-teal-300 text-slate-950 font-bold text-base shadow-xl shadow-cyan-500/20 transition-all hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2"
+              className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-gradient-to-r from-cyan-500 to-teal-400 hover:from-cyan-400 hover:to-teal-300 text-slate-950 font-bold text-sm transition-all shadow-xl shadow-cyan-500/25 active:scale-95 flex items-center justify-center gap-2.5 cursor-pointer"
             >
-              <span>🏢</span>
-              <span>Create Company Account</span>
-              <span className="text-slate-950 font-extrabold">&rarr;</span>
+              <span>🏢 Create Company Workspace</span>
+              <span>&rarr;</span>
             </button>
 
             <button
               onClick={onLaunchApp}
-              className="px-7 py-4 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 hover:border-cyan-500/50 text-white font-semibold text-base transition-all hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2 backdrop-blur-md"
+              className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 hover:border-cyan-500/50 text-white font-semibold text-sm transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
             >
-              <span>⚡</span>
-              <span>Launch Live Workspace</span>
+              <span>Explore Instant Sandbox</span>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 font-mono">Demo</span>
             </button>
           </div>
 
-          {/* Trust Guarantees Bar */}
-          <div className="mt-14 pt-8 border-t border-slate-800/80 grid grid-cols-2 md:grid-cols-4 gap-6 max-w-4xl mx-auto text-left">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 font-bold text-sm">
-                ✓
-              </div>
-              <div>
-                <div className="text-xs font-bold text-white uppercase tracking-wider">Zero Training</div>
-                <div className="text-xs text-slate-400">Customer data never trains models</div>
+          {/* Trust Badges */}
+          <div className="flex flex-wrap items-center justify-center gap-6 sm:gap-10 text-xs text-slate-400 font-medium">
+            <div className="flex items-center gap-2">
+              <span className="text-emerald-400 text-base">🔒</span>
+              <span>Cloudflare R2 Tenant Isolation</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-cyan-400 text-base">🛡️</span>
+              <span>Argon2id Memory-Hard Hashing</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-teal-400 text-base">⚡</span>
+              <span>768-Dim pgvector Hybrid Search</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-indigo-400 text-base">🚫</span>
+              <span>Zero AI Model Training Policy</span>
+            </div>
+          </div>
+        </section>
+
+        {/* INTERACTIVE QUERY & CITATION PLAYGROUND */}
+        <section id="demo" className="py-16 px-6 max-w-6xl mx-auto">
+          <div className="text-center mb-10">
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+              Interactive Ground-Truth Playground
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-400 mt-2">
+              Experience verified citation grounding. Click any numbered badge <b className="text-cyan-400">[S1]</b> to inspect verbatim proof.
+            </p>
+          </div>
+
+          {/* Playground Container */}
+          <div className="rounded-3xl bg-slate-900/70 border border-slate-800 shadow-2xl backdrop-blur-2xl overflow-hidden p-6 sm:p-8">
+            {/* Scenario Switcher Tabs */}
+            <div className="flex flex-wrap gap-2.5 pb-6 border-b border-slate-800">
+              {DEMO_SCENARIOS.map(sc => (
+                <button
+                  key={sc.id}
+                  onClick={() => {
+                    setActiveScenario(sc);
+                    setActiveCitation(null);
+                  }}
+                  className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                    activeScenario.id === sc.id
+                      ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                      : 'bg-slate-950/80 text-slate-400 hover:text-white border border-slate-800'
+                  }`}
+                >
+                  {sc.title}
+                </button>
+              ))}
+            </div>
+
+            {/* Scope Bar */}
+            <div className="py-4 flex items-center gap-2 text-xs text-slate-400 border-b border-slate-800/60">
+              <span className="text-slate-500">Document Scope:</span>
+              {activeScenario.documentScope.map((doc, idx) => (
+                <span
+                  key={idx}
+                  className="px-2.5 py-1 rounded-lg bg-slate-950 text-cyan-300 font-mono text-[11px] border border-slate-800 flex items-center gap-1.5"
+                >
+                  <span>📄</span> {doc}
+                </span>
+              ))}
+            </div>
+
+            {/* User Question */}
+            <div className="py-6">
+              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">User Query</div>
+              <div className="text-base sm:text-lg font-semibold text-white bg-slate-950/80 p-4 rounded-2xl border border-slate-800/80">
+                &ldquo;{activeScenario.question}&rdquo;
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400 font-bold text-sm">
+            {/* Grounded AI Response */}
+            <div className="pb-6">
+              <div className="text-[11px] font-bold text-cyan-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                <span>🤖</span> DocMind Grounded Synthesis (Gemini 2.5 Flash)
+              </div>
+              <div className="text-sm leading-relaxed text-slate-200 bg-slate-950/90 p-5 rounded-2xl border border-cyan-500/30">
+                {activeScenario.answer.split(/(\[S\d+\])/g).map((segment, idx) => {
+                  const match = segment.match(/\[S(\d+)\]/);
+                  if (match) {
+                    const citIndex = parseInt(match[1], 10) - 1;
+                    const cit = activeScenario.citations[citIndex];
+                    const isSelected = activeCitation?.citation_id === cit?.citation_id;
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => setActiveCitation(cit || null)}
+                        className={`inline-flex items-center px-1.5 py-0.5 mx-1 rounded font-mono font-bold text-xs transition-all ${
+                          isSelected
+                            ? 'bg-cyan-400 text-slate-950 ring-2 ring-cyan-400 shadow-md shadow-cyan-400/30 scale-105'
+                            : 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 cursor-pointer'
+                        }`}
+                        title="Click to view verbatim excerpt proof"
+                      >
+                        {segment}
+                      </button>
+                    );
+                  }
+                  return <span key={idx}>{segment}</span>;
+                })}
+              </div>
+            </div>
+
+            {/* Verbatim Excerpt Drawer Preview */}
+            {activeCitation && (
+              <div className="p-5 rounded-2xl bg-cyan-950/30 border border-cyan-500/40 text-xs animate-in fade-in slide-in-from-bottom-2 duration-150">
+                <div className="flex items-center justify-between text-cyan-400 font-bold mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded bg-cyan-400 text-slate-950 text-[10px]">
+                      {activeCitation.source_label}
+                    </span>
+                    <span>
+                      {activeCitation.filename} • Page {activeCitation.page_start}
+                    </span>
+                  </div>
+                  <button onClick={() => setActiveCitation(null)} className="text-slate-400 hover:text-white">✕</button>
+                </div>
+                <div className="text-slate-400 text-[11px] mb-2 font-mono">
+                  Section: {activeCitation.section || 'General'}
+                </div>
+                <blockquote className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 font-mono text-[11px] leading-relaxed">
+                  &ldquo;{activeCitation.excerpt}&rdquo;
+                </blockquote>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* SECURITY & CLOUDFLARE R2 ISOLATION SHOWCASE */}
+        <section id="security" className="py-20 px-6 max-w-7xl mx-auto">
+          <div className="text-center mb-16">
+            <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20">
+              Architectural Security
+            </span>
+            <h2 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight mt-4">
+              Your Company Documents Are Never Exposed to Anyone Else
+            </h2>
+            <p className="text-sm sm:text-base text-slate-400 max-w-2xl mx-auto mt-2">
+              DocMind guarantees multi-tenant quarantine from the physical storage bucket to database row filters.
+            </p>
+          </div>
+
+          {/* 3 Pillars Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/40 transition-all space-y-4">
+              <div className="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 flex items-center justify-center text-2xl">
+                ☁️
+              </div>
+              <h3 className="text-base font-bold text-white">Cloudflare R2 Path Isolation</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Files are partitioned into dedicated workspace paths:{' '}
+                <code className="text-cyan-300 text-[11px]">workspaces/[ws_id]/documents/[id]/[sha256].bin</code>. Presigned PUT/GET URLs
+                expire in 120 seconds and require active workspace authentication.
+              </p>
+            </div>
+
+            <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/40 transition-all space-y-4">
+              <div className="w-12 h-12 rounded-xl bg-teal-500/10 border border-teal-500/30 text-teal-400 flex items-center justify-center text-2xl">
                 🛡️
               </div>
-              <div>
-                <div className="text-xs font-bold text-white uppercase tracking-wider">Multi-Tenant Isolation</div>
-                <div className="text-xs text-slate-400">Cryptographic database boundaries</div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 font-bold text-sm">
-                📑
-              </div>
-              <div>
-                <div className="text-xs font-bold text-white uppercase tracking-wider">Exact Page Citations</div>
-                <div className="text-xs text-slate-400">Clickable verbatim evidence proof</div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 font-bold text-sm">
-                ⚡
-              </div>
-              <div>
-                <div className="text-xs font-bold text-white uppercase tracking-wider">Fast Hybrid RAG</div>
-                <div className="text-xs text-slate-400">pgvector + Full-Text Search</div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* INTERACTIVE LIVE DEMO SANDBOX */}
-        <section id="demo" className="py-16 px-6 max-w-7xl mx-auto">
-          <div className="text-center mb-10">
-            <div className="inline-block px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-semibold uppercase tracking-wider mb-3">
-              Interactive Live Simulation
-            </div>
-            <h2 className="text-3xl sm:text-4xl font-bold text-white">
-              Experience Cryptographic Citation Grounding
-            </h2>
-            <p className="mt-3 text-slate-400 max-w-2xl mx-auto text-sm">
-              Select an enterprise scenario below to watch DocMind retrieve evidence chunks, enforce answer boundaries, and generate verifiable citations.
-            </p>
-          </div>
-
-          {/* Interactive Shell */}
-          <div className="bg-slate-900/90 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden backdrop-blur-xl">
-            {/* Scenario Picker Tabs */}
-            <div className="p-4 border-b border-slate-800 bg-slate-950/70 flex flex-wrap gap-2 items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-rose-500/80" />
-                <span className="w-3 h-3 rounded-full bg-amber-500/80" />
-                <span className="w-3 h-3 rounded-full bg-emerald-500/80" />
-                <span className="ml-3 text-xs font-mono text-slate-400">DocMind RAG Engine v1.0 &bull; Evidence Bounded</span>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                {DEMO_SCENARIOS.map(sc => (
-                  <button
-                    key={sc.id}
-                    onClick={() => {
-                      setActiveScenario(sc);
-                      setActiveCitation(null);
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                      activeScenario.id === sc.id
-                        ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
-                        : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 border border-transparent'
-                    }`}
-                  >
-                    {sc.title}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Simulated Chat Interface */}
-            <div className="p-6 sm:p-8 space-y-6">
-              {/* Document Scope Banner */}
-              <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
-                <div className="flex items-center gap-2 text-slate-300">
-                  <span className="text-cyan-400">📁 Document Scope:</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {activeScenario.documentScope.map((doc, idx) => (
-                      <span key={idx} className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[11px] border border-slate-700">
-                        {doc}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 text-emerald-400 font-mono text-[11px]">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>Evidence Verified (pgvector + FTS)</span>
-                </div>
-              </div>
-
-              {/* User Question */}
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-slate-800 text-slate-300 flex items-center justify-center font-bold text-xs shrink-0">
-                  You
-                </div>
-                <div className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700/60 text-sm text-slate-200 max-w-2xl">
-                  {activeScenario.question}
-                </div>
-              </div>
-
-              {/* Assistant Grounded Answer */}
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-500 to-teal-400 text-slate-950 flex items-center justify-center font-bold text-xs shrink-0 shadow-md shadow-cyan-500/20">
-                  AI
-                </div>
-                <div className="flex-1 space-y-4">
-                  <div className="p-5 rounded-2xl bg-slate-950 border border-slate-800 text-sm leading-relaxed text-slate-200">
-                    <p className="whitespace-pre-line">{activeScenario.answer}</p>
-
-                    {/* Citations Row */}
-                    <div className="mt-4 pt-4 border-t border-slate-800/80 flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider mr-1">
-                        Clickable Citations:
-                      </span>
-                      {activeScenario.citations.map(c => (
-                        <button
-                          key={c.citation_id}
-                          onClick={() => setActiveCitation(c)}
-                          className={`px-2.5 py-1 rounded-md text-xs font-mono font-bold transition-all flex items-center gap-1.5 ${
-                            activeCitation?.citation_id === c.citation_id
-                              ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
-                              : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/20'
-                          }`}
-                        >
-                          <span>[{c.source_label}]</span>
-                          <span className="font-sans font-normal text-[11px] text-slate-300">
-                            p.{c.page_start}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Active Citation Inspection Drawer (Inline Preview) */}
-                  {activeCitation && (
-                    <div className="p-5 rounded-2xl bg-cyan-950/20 border border-cyan-500/40 text-xs text-slate-300 space-y-3 animate-in fade-in duration-150">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded bg-cyan-400 text-slate-950 font-bold font-mono text-[10px]">
-                            [{activeCitation.source_label}] SOURCE VERIFIED
-                          </span>
-                          <span className="font-semibold text-white">{activeCitation.filename}</span>
-                          <span className="text-slate-400 font-mono">(Page {activeCitation.page_start})</span>
-                        </div>
-                        <button
-                          onClick={() => setActiveCitation(null)}
-                          className="text-slate-400 hover:text-white text-sm"
-                        >
-                          ✕
-                        </button>
-                      </div>
-
-                      <div className="p-3 rounded-xl bg-slate-950/90 border border-slate-800 text-xs italic font-serif text-slate-300">
-                        &ldquo;{activeCitation.excerpt}&rdquo;
-                      </div>
-
-                      <div className="flex items-center justify-between text-[11px] text-slate-400">
-                        <span>Section: {activeCitation.section || 'General Content'}</span>
-                        <span className="text-cyan-400">SHA-256 Verified at Ingestion &bull; Ephemeral Object URL</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Footer action bar */}
-            <div className="p-4 border-t border-slate-800 bg-slate-950/90 flex flex-wrap items-center justify-between gap-4">
-              <span className="text-xs text-slate-400">
-                Want to test this against your own company files (PDF, DOCX, TXT)?
-              </span>
-              <button
-                onClick={onLaunchApp}
-                className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-400 text-slate-950 font-bold text-xs shadow-md shadow-cyan-500/10 hover:opacity-95 transition-all"
-              >
-                Upload Your Own Documents &rarr;
-              </button>
-            </div>
-          </div>
-        </section>
-
-        {/* WHAT IS DOCMIND SECTION */}
-        <section id="what-is-docmind" className="py-20 px-6 max-w-7xl mx-auto border-t border-slate-800/60">
-          <div className="grid lg:grid-cols-2 gap-12 items-center">
-            <div>
-              <div className="inline-block px-3 py-1 rounded-full bg-teal-500/10 border border-teal-500/20 text-teal-400 text-xs font-semibold uppercase tracking-wider mb-3">
-                Architectural Advantage
-              </div>
-              <h2 className="text-3xl sm:text-4xl font-bold text-white tracking-tight leading-tight">
-                Why Enterprise Teams Replace Generic AI with DocMind
-              </h2>
-              <p className="mt-4 text-slate-300 text-base leading-relaxed">
-                Generic AI tools are trained to be creative, which makes them disastrous for compliance, law, and financial diligence. When an LLM doesn’t know an answer, it fabricates believable figures and ungrounded clauses.
+              <h3 className="text-base font-bold text-white">Row-Level Database Guard</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Every query to PostgreSQL and pgvector strictly checks <code className="text-teal-300 text-[11px]">WHERE workspace_id = :active_workspace_id</code> derived from cryptographic JWT claims. IDOR tampering is rejected with an immediate 403 Forbidden.
               </p>
-              <p className="mt-3 text-slate-400 text-sm leading-relaxed">
-                <strong>DocMind is built on an authoritative engineering principle: Grounded over Confident.</strong> Every single answer must originate from verified passages retrieved from your uploaded files. If evidence does not exist in the source, DocMind unequivocally informs you.
+            </div>
+
+            <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/40 transition-all space-y-4">
+              <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 flex items-center justify-center text-2xl">
+                🔐
+              </div>
+              <h3 className="text-base font-bold text-white">Zero Model Training</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Your company contracts, balance sheets, and intellectual property are never sent to train or fine-tune public foundation models. Your data remains strictly your own.
               </p>
-
-              <div className="mt-8 space-y-4">
-                <div className="flex items-start gap-3">
-                  <div className="w-6 h-6 rounded bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
-                    1
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-white">Hybrid Semantic & Lexical Retrieval</h4>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Combines 768-dimensional dense vector embeddings with PostgreSQL Full-Text Search (FTS) to ensure acronyms, clause numbers, and conceptual nuances are retrieved without fail.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <div className="w-6 h-6 rounded bg-teal-500/20 text-teal-400 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
-                    2
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-white">Multi-Tenant Cryptographic Boundaries</h4>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Row-Level Security guarantees no workspace can query, view, or infer data from another tenant. Company workspaces have dedicated user roles and audit tracking.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <div className="w-6 h-6 rounded bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
-                    3
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-white">Auditable Verbatim Citations</h4>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Clicking any citation instantly loads the exact excerpt, document name, and page number directly from immutable stored chunks.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Comparison Grid */}
-            <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 space-y-4">
-              <div className="text-xs font-bold uppercase tracking-wider text-slate-400 pb-2 border-b border-slate-800">
-                Direct Comparison: Standard Chatbot vs DocMind
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 text-xs">
-                <div className="p-4 rounded-2xl bg-rose-950/20 border border-rose-900/40 space-y-2">
-                  <div className="font-bold text-rose-300 flex items-center gap-1.5">
-                    <span>✕</span> Standard AI Chatbots
-                  </div>
-                  <ul className="space-y-1.5 text-slate-400">
-                    <li>&bull; Hallucinates when facts are missing</li>
-                    <li>&bull; No page numbers or verifiable citations</li>
-                    <li>&bull; Files may train public foundation models</li>
-                    <li>&bull; No cross-document comparison matrix</li>
-                    <li>&bull; Fragile prompt wrappers without quotas</li>
-                  </ul>
-                </div>
-
-                <div className="p-4 rounded-2xl bg-cyan-950/20 border border-cyan-500/30 space-y-2">
-                  <div className="font-bold text-cyan-300 flex items-center gap-1.5">
-                    <span>✓</span> DocMind Platform
-                  </div>
-                  <ul className="space-y-1.5 text-slate-300">
-                    <li>&bull; Strict evidence bounding (zero hallucination)</li>
-                    <li>&bull; Verifiable [S1], [S2] page-level citations</li>
-                    <li>&bull; Absolute zero training on customer data</li>
-                    <li>&bull; Automated multi-doc comparative matrix</li>
-                    <li>&bull; Enterprise quotas, metering & multi-tenancy</li>
-                  </ul>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
-                <span>Security Standard: Argon2id + SHA-256 + TLS 1.3</span>
-                <span className="text-cyan-400 font-mono">SOC2-Ready</span>
-              </div>
             </div>
           </div>
         </section>
 
-        {/* COMPLETE SERVICES SUITE SHOWCASE */}
-        <section id="services" className="py-20 px-6 max-w-7xl mx-auto border-t border-slate-800/60">
+        {/* SERVICES SUITE SECTION */}
+        <section id="services" className="py-20 px-6 max-w-7xl mx-auto border-t border-slate-800/80">
           <div className="text-center mb-16">
-            <div className="inline-block px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-semibold uppercase tracking-wider mb-3">
-              Full Services Suite
-            </div>
-            <h2 className="text-3xl sm:text-4xl font-bold text-white">
-              Engineered for End-to-End Document Workflows
+            <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20">
+              Enterprise Suite
+            </span>
+            <h2 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight mt-4">
+              Core Capabilities for Enterprise Document Teams
             </h2>
-            <p className="mt-3 text-slate-400 max-w-2xl mx-auto text-sm">
-              Six synchronized services providing ingestion, extraction, cross-document synthesis, and enterprise governance.
-            </p>
           </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {/* Service 1 */}
-            <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-cyan-500/40 transition-all hover:translate-y-[-2px] flex flex-col justify-between group">
-              <div>
-                <div className="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center text-xl mb-4 group-hover:bg-cyan-500/20 transition-colors">
-                  💬
-                </div>
-                <h3 className="text-lg font-bold text-white">Grounded Multi-Doc Chat</h3>
-                <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                  Ask deep questions across single files or hundreds of indexed documents. Every claim contains clickable, verifiable `[S1]` citations mapped to source page numbers.
-                </p>
-              </div>
-              <div className="mt-6 pt-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-cyan-400 font-medium">
-                <span>Hybrid pgvector + FTS</span>
-                <span>&rarr;</span>
-              </div>
-            </div>
-
-            {/* Service 2 */}
-            <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-cyan-500/40 transition-all hover:translate-y-[-2px] flex flex-col justify-between group">
-              <div>
-                <div className="w-12 h-12 rounded-xl bg-teal-500/10 border border-teal-500/20 text-teal-400 flex items-center justify-center text-xl mb-4 group-hover:bg-teal-500/20 transition-colors">
-                  ⚖️
-                </div>
-                <h3 className="text-lg font-bold text-white">Cross-Document Comparison Matrix</h3>
-                <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                  Select 2 to 5 ready documents—such as vendor contracts, insurance policies, or competitor RFPs—and generate an automated comparative attribute matrix.
-                </p>
-              </div>
-              <div className="mt-6 pt-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-teal-400 font-medium">
-                <span>Side-by-Side Analysis</span>
-                <span>&rarr;</span>
-              </div>
-            </div>
-
-            {/* Service 3 */}
-            <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-cyan-500/40 transition-all hover:translate-y-[-2px] flex flex-col justify-between group">
-              <div>
-                <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center text-xl mb-4 group-hover:bg-blue-500/20 transition-colors">
-                  📑
-                </div>
-                <h3 className="text-lg font-bold text-white">Executive Summaries & Insights</h3>
-                <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                  Instantly distill 100-page regulatory filings or whitepapers into high-level overviews, section breakdowns, critical takeaway bullets, and audit risk caveats.
-                </p>
-              </div>
-              <div className="mt-6 pt-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-blue-400 font-medium">
-                <span>Multi-Tier Summaries</span>
-                <span>&rarr;</span>
-              </div>
-            </div>
-
-            {/* Service 4 */}
-            <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-cyan-500/40 transition-all hover:translate-y-[-2px] flex flex-col justify-between group">
-              <div>
-                <div className="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center text-xl mb-4 group-hover:bg-purple-500/20 transition-colors">
-                  🔍
-                </div>
-                <h3 className="text-lg font-bold text-white">Layout-Aware Ingestion & OCR</h3>
-                <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                  Support for complex PDF multi-column tables, DOCX, TXT, and scanned image documents. Automated fallback OCR extracts text even from scanned paper copies.
-                </p>
-              </div>
-              <div className="mt-6 pt-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-purple-400 font-medium">
-                <span>PyMuPDF & Tesseract</span>
-                <span>&rarr;</span>
-              </div>
-            </div>
-
-            {/* Service 5 */}
-            <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-cyan-500/40 transition-all hover:translate-y-[-2px] flex flex-col justify-between group">
-              <div>
-                <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center text-xl mb-4 group-hover:bg-emerald-500/20 transition-colors">
-                  🏢
-                </div>
-                <h3 className="text-lg font-bold text-white">Company Multi-Tenancy & Roles</h3>
-                <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                  Create isolated organizational accounts with custom workspace slugs, invite team members, assign granular roles (Owner, Admin, Member, Viewer), and manage security.
-                </p>
-              </div>
-              <div className="mt-6 pt-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-emerald-400 font-medium">
-                <span>Role Governance</span>
-                <span>&rarr;</span>
-              </div>
-            </div>
-
-            {/* Service 6 */}
-            <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-cyan-500/40 transition-all hover:translate-y-[-2px] flex flex-col justify-between group">
-              <div>
-                <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center text-xl mb-4 group-hover:bg-amber-500/20 transition-colors">
-                  📊
-                </div>
-                <h3 className="text-lg font-bold text-white">Quota Metering & Storage Budgeting</h3>
-                <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                  Real-time tracking of monthly questions, document count, and storage bytes. Configurable limits and immutable audit logs prevent runaway cloud or AI API costs.
-                </p>
-              </div>
-              <div className="mt-6 pt-4 border-t border-slate-800/60 flex items-center justify-between text-xs text-amber-400 font-medium">
-                <span>Cost Predictability</span>
-                <span>&rarr;</span>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* PRICING & TIERS */}
-        <section id="pricing" className="py-20 px-6 max-w-7xl mx-auto border-t border-slate-800/60">
-          <div className="text-center mb-16">
-            <div className="inline-block px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-semibold uppercase tracking-wider mb-3">
-              Transparent SaaS Pricing
-            </div>
-            <h2 className="text-3xl sm:text-4xl font-bold text-white">
-              Predictable Plans for Solos and Organizations
-            </h2>
-            <p className="mt-3 text-slate-400 max-w-xl mx-auto text-sm">
-              Aligned with our strict cost-control and quota governance architecture.
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto items-stretch">
-            {/* Starter Tier */}
-            <div className="p-8 rounded-3xl bg-slate-900/60 border border-slate-800 flex flex-col justify-between">
-              <div>
-                <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Free Starter</div>
-                <div className="mt-4 flex items-baseline gap-1">
-                  <span className="text-4xl font-extrabold text-white">$0</span>
-                  <span className="text-xs text-slate-400">/ forever</span>
-                </div>
-                <p className="text-xs text-slate-400 mt-3">
-                  Ideal for solo researchers, students, and evaluation testing.
-                </p>
-
-                <div className="mt-6 space-y-3 text-xs text-slate-300">
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan-400">✓</span> 1 Private Workspace
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan-400">✓</span> 20 Active Documents (Max 20MB)
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan-400">✓</span> 200 MB Storage Allowance
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan-400">✓</span> 100 Grounded Questions / mo
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan-400">✓</span> Exact Verifiable Citations
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => onOpenAuth('signup', false)}
-                className="mt-8 w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition-colors"
-              >
-                Get Started Free &rarr;
-              </button>
-            </div>
-
-            {/* Company / Pro Tier (Featured) */}
-            <div className="p-8 rounded-3xl bg-gradient-to-b from-slate-900 to-slate-950 border-2 border-cyan-500/60 flex flex-col justify-between relative shadow-2xl shadow-cyan-500/10">
-              <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-gradient-to-r from-cyan-500 to-teal-400 text-slate-950 font-bold text-[10px] uppercase tracking-wider">
-                Most Popular for Organizations
-              </div>
-
-              <div>
-                <div className="text-xs font-bold text-cyan-400 uppercase tracking-wider">Company / Pro</div>
-                <div className="mt-4 flex items-baseline gap-1">
-                  <span className="text-4xl font-extrabold text-white">$49</span>
-                  <span className="text-xs text-slate-400">/ month</span>
-                </div>
-                <p className="text-xs text-slate-400 mt-3">
-                  For law firms, financial analysts, and corporate research teams.
-                </p>
-
-                <div className="mt-6 space-y-3 text-xs text-slate-300">
-                  <div className="flex items-center gap-2 font-semibold text-white">
-                    <span className="text-cyan-400">✓</span> Multi-User Company Workspaces
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan-400">✓</span> 500 Active Documents
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan-400">✓</span> 10 GB Encrypted Storage
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan-400">✓</span> 2,500 Grounded Questions / mo
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan-400">✓</span> Multi-Doc Comparative Matrix
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan-400">✓</span> Priority OCR Background Queue
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => onOpenAuth('signup', true)}
-                className="mt-8 w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-400 hover:from-cyan-400 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-500/20 transition-all"
-              >
-                Create Company Account &rarr;
-              </button>
-            </div>
-
-            {/* Enterprise Tier */}
-            <div className="p-8 rounded-3xl bg-slate-900/60 border border-slate-800 flex flex-col justify-between">
-              <div>
-                <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Enterprise Dedicated</div>
-                <div className="mt-4 flex items-baseline gap-1">
-                  <span className="text-4xl font-extrabold text-white">Custom</span>
-                </div>
-                <p className="text-xs text-slate-400 mt-3">
-                  Custom VPC, on-premise deployment, and strict regulatory compliance.
-                </p>
-
-                <div className="mt-6 space-y-3 text-xs text-slate-300">
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan-400">✓</span> Unlimited Documents & Storage
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan-400">✓</span> Dedicated Worker & OCR Fleet
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan-400">✓</span> Custom SAML / SSO Authentication
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan-400">✓</span> Self-Hosted / On-Premise VPC
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan-400">✓</span> 99.99% Uptime SLA & Audit Logs
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => alert('Contacting enterprise sales team: enterprise@docmind.ai')}
-                className="mt-8 w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition-colors"
-              >
-                Contact Enterprise &rarr;
-              </button>
-            </div>
-          </div>
-        </section>
-
-        {/* FAQ SECTION */}
-        <section id="faq" className="py-20 px-6 max-w-4xl mx-auto border-t border-slate-800/60">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold text-white">Frequently Asked Questions</h2>
-            <p className="mt-2 text-slate-400 text-sm">
-              Answers regarding security, data retention, and how DocMind functions.
-            </p>
-          </div>
-
-          <div className="space-y-4">
-            {faqs.map((faq, idx) => (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {[
+              {
+                icon: '🔍',
+                title: 'Hybrid Vector + Lexical Search',
+                desc: 'Reciprocal Rank Fusion (k=60) merges 768-dim dense semantic vector search with PostgreSQL tsvector full-text search.',
+              },
+              {
+                icon: '📑',
+                title: 'Cross-Document Comparative Matrix',
+                desc: 'Select 2 to 5 agreements or reports to automatically generate structured side-by-side attribute difference matrices with citation grounding.',
+              },
+              {
+                icon: '📷',
+                title: 'Automated OCR & Table Parsing',
+                desc: 'PyMuPDF and Tesseract OCR automatically extract scanned paper PDFs while restoring multi-column tables into Markdown relational pipes.',
+              },
+              {
+                icon: '👥',
+                title: 'Company Workspaces & RBAC',
+                desc: 'Manage organizations with Owner, Admin, Member, and Viewer roles. Send branded email invites via production Gmail SMTP.',
+              },
+              {
+                icon: '📊',
+                title: 'Dynamic Quota & Usage Metering',
+                desc: 'Enforce real-time limits on documents, storage MB, monthly questions, and concurrent uploads with automated billing cycle resets.',
+              },
+              {
+                icon: '⚡',
+                title: 'Global Platform Admin Console',
+                desc: 'Dedicated administration portal to monitor total workspaces, storage utilization, ingestion queues, and global security audit trails.',
+              },
+            ].map((svc, idx) => (
               <div
                 key={idx}
-                className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 transition-colors"
+                className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/40 hover:bg-slate-900/90 transition-all space-y-3"
               >
-                <button
-                  type="button"
-                  onClick={() => setOpenFaq(openFaq === idx ? null : idx)}
-                  className="w-full flex items-center justify-between text-left font-semibold text-sm text-white"
-                >
-                  <span>{faq.q}</span>
-                  <span className="text-cyan-400 ml-4">{openFaq === idx ? '−' : '+'}</span>
-                </button>
-                {openFaq === idx && (
-                  <p className="mt-3 text-xs leading-relaxed text-slate-300 pt-3 border-t border-slate-800/80">
-                    {faq.a}
-                  </p>
-                )}
+                <div className="text-3xl mb-2">{svc.icon}</div>
+                <h3 className="text-base font-bold text-white">{svc.title}</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">{svc.desc}</p>
               </div>
             ))}
           </div>
         </section>
 
-        {/* BOTTOM CTA BANNER */}
-        <section className="py-16 px-6 max-w-7xl mx-auto">
-          <div className="p-10 rounded-3xl bg-gradient-to-r from-cyan-950/40 via-slate-900 to-teal-950/40 border border-cyan-500/30 text-center relative overflow-hidden">
-            <div className="relative z-10 max-w-2xl mx-auto space-y-4">
-              <h2 className="text-3xl font-extrabold text-white">
-                Ready to Upgrade to Grounded Document Intelligence?
-              </h2>
-              <p className="text-sm text-slate-300">
-                Join engineering leads, legal analysts, and compliance directors who verify facts with mathematical precision.
-              </p>
-              <div className="pt-4 flex flex-wrap justify-center gap-4">
-                <button
-                  onClick={() => onOpenAuth('signup', true)}
-                  className="px-8 py-3.5 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-400 text-slate-950 font-bold text-sm shadow-xl shadow-cyan-500/20 hover:opacity-95 transition-all"
-                >
-                  Create Company Account Now &rarr;
-                </button>
-                <button
-                  onClick={onLaunchApp}
-                  className="px-6 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm transition-colors"
-                >
-                  Enter Workspace
-                </button>
+        {/* PRICING & TIERS SECTION */}
+        <section id="pricing" className="py-20 px-6 max-w-7xl mx-auto border-t border-slate-800/80">
+          <div className="text-center mb-12">
+            <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20">
+              Transparent Pricing
+            </span>
+            <h2 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight mt-4">
+              Predictable SaaS Tiers for Every Team
+            </h2>
+            <p className="text-sm text-slate-400 mt-2">Zero hidden charges. Scale seamlessly as your document volume grows.</p>
+
+            {/* Monthly / Annual Switcher */}
+            <div className="mt-8 inline-flex items-center gap-3 p-1.5 rounded-2xl bg-slate-900 border border-slate-800">
+              <button
+                onClick={() => setIsAnnual(false)}
+                className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  !isAnnual ? 'bg-cyan-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Monthly Billing
+              </button>
+              <button
+                onClick={() => setIsAnnual(true)}
+                className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                  isAnnual ? 'bg-cyan-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span>Annual Billing</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500 text-slate-950 font-bold">Save 20%</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {/* Tier 1: Starter */}
+            <div className="p-8 rounded-3xl bg-slate-900/60 border border-slate-800 flex flex-col justify-between">
+              <div className="space-y-4">
+                <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Solo Researcher</div>
+                <h3 className="text-2xl font-bold text-white">Starter Personal</h3>
+                <div className="text-3xl font-extrabold text-white mt-2">$0 <span className="text-xs text-slate-500 font-normal">/ forever free</span></div>
+                <p className="text-xs text-slate-400">Ideal for individual researchers, testing, and compliance pilots.</p>
+                <div className="border-t border-slate-800 pt-4 space-y-2.5 text-xs text-slate-300">
+                  <div className="flex items-center gap-2">✓ 20 Documents Max</div>
+                  <div className="flex items-center gap-2">✓ 200 MB Cloudflare R2 Storage</div>
+                  <div className="flex items-center gap-2">✓ 100 Questions / month</div>
+                  <div className="flex items-center gap-2">✓ Strict [S1] Citation Grounding</div>
+                  <div className="flex items-center gap-2">✓ 1 User Seat</div>
+                </div>
               </div>
+              <button
+                onClick={() => onOpenAuth('signup', false)}
+                className="w-full mt-8 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition-all"
+              >
+                Start Free Solo &rarr;
+              </button>
+            </div>
+
+            {/* Tier 2: Pro Company */}
+            <div className="p-8 rounded-3xl bg-slate-900 border-2 border-cyan-500 shadow-2xl shadow-cyan-500/10 flex flex-col justify-between relative">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-gradient-to-r from-cyan-500 to-teal-400 text-slate-950 font-bold text-[10px] uppercase tracking-wider shadow-md">
+                Most Popular for Teams
+              </div>
+              <div className="space-y-4">
+                <div className="text-xs font-bold text-cyan-400 uppercase tracking-wider">Multi-User Organization</div>
+                <h3 className="text-2xl font-bold text-white">Pro Company</h3>
+                <div className="text-3xl font-extrabold text-white mt-2">
+                  ${isAnnual ? '64' : '79'}{' '}
+                  <span className="text-xs text-slate-500 font-normal">/ month</span>
+                </div>
+                <p className="text-xs text-slate-400">Comprehensive legal and compliance document workspace.</p>
+                <div className="border-t border-slate-800 pt-4 space-y-2.5 text-xs text-slate-200">
+                  <div className="flex items-center gap-2 text-cyan-300">✓ 500 Documents Max</div>
+                  <div className="flex items-center gap-2 text-cyan-300">✓ 10 GB Cloudflare R2 Storage</div>
+                  <div className="flex items-center gap-2 text-cyan-300">✓ 2,500 Questions / month</div>
+                  <div className="flex items-center gap-2">✓ Cross-Doc Comparative Matrix (2-5 docs)</div>
+                  <div className="flex items-center gap-2">✓ Automated OCR Fallback for Scans</div>
+                  <div className="flex items-center gap-2">✓ 25 Team Member Seats (RBAC)</div>
+                </div>
+              </div>
+              <button
+                onClick={() => onOpenAuth('signup', true)}
+                className="w-full mt-8 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-400 hover:from-cyan-400 hover:to-teal-300 text-slate-950 font-bold text-xs transition-all shadow-md shadow-cyan-500/20 active:scale-95"
+              >
+                Create Pro Company &rarr;
+              </button>
+            </div>
+
+            {/* Tier 3: Enterprise */}
+            <div className="p-8 rounded-3xl bg-slate-900/60 border border-slate-800 flex flex-col justify-between">
+              <div className="space-y-4">
+                <div className="text-xs font-bold text-amber-400 uppercase tracking-wider">Mission-Critical Enterprise</div>
+                <h3 className="text-2xl font-bold text-white">Enterprise Fleet</h3>
+                <div className="text-3xl font-extrabold text-white mt-2">
+                  ${isAnnual ? '239' : '299'}{' '}
+                  <span className="text-xs text-slate-500 font-normal">/ month</span>
+                </div>
+                <p className="text-xs text-slate-400">Dedicated OCR fleet, audit logs, and custom compliance SLA.</p>
+                <div className="border-t border-slate-800 pt-4 space-y-2.5 text-xs text-slate-300">
+                  <div className="flex items-center gap-2 text-amber-300">✓ 5,000 Documents Max</div>
+                  <div className="flex items-center gap-2 text-amber-300">✓ 100 GB Cloudflare R2 Storage</div>
+                  <div className="flex items-center gap-2 text-amber-300">✓ 25,000 Questions / month</div>
+                  <div className="flex items-center gap-2">✓ 500 Team Member Seats</div>
+                  <div className="flex items-center gap-2">✓ Full Audit Event Log Stream</div>
+                  <div className="flex items-center gap-2">✓ Dedicated Priority Worker Fleets</div>
+                </div>
+              </div>
+              <button
+                onClick={() => onOpenAuth('signup', true)}
+                className="w-full mt-8 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition-all"
+              >
+                Contact Enterprise Sales &rarr;
+              </button>
             </div>
           </div>
         </section>
 
+        {/* FAQ ACCORDION */}
+        <section id="faq" className="py-20 px-6 max-w-4xl mx-auto border-t border-slate-800/80">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl font-extrabold text-white tracking-tight">Frequently Asked Questions</h2>
+            <p className="text-xs sm:text-sm text-slate-400 mt-2">Everything you need to know about DocMind security, citations, and storage.</p>
+          </div>
+
+          <div className="space-y-3">
+            {faqs.map((faq, idx) => {
+              const isOpen = openFaq === idx;
+              return (
+                <div
+                  key={idx}
+                  className="rounded-2xl bg-slate-900/60 border border-slate-800/80 overflow-hidden transition-all"
+                >
+                  <button
+                    onClick={() => setOpenFaq(isOpen ? null : idx)}
+                    className="w-full p-5 text-left text-sm font-semibold text-white flex items-center justify-between gap-4 cursor-pointer"
+                  >
+                    <span>{faq.q}</span>
+                    <span className="text-cyan-400 font-bold">{isOpen ? '−' : '+'}</span>
+                  </button>
+                  {isOpen && (
+                    <div className="px-5 pb-5 text-xs text-slate-300 leading-relaxed border-t border-slate-800/60 pt-4 animate-in fade-in">
+                      {faq.a}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
         {/* FOOTER */}
-        <footer className="py-12 border-t border-slate-800 text-slate-500 text-xs px-6 max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-3">
-            <div className="w-6 h-6 rounded bg-gradient-to-tr from-cyan-500 to-teal-400 text-slate-950 font-bold flex items-center justify-center text-xs">
-              D
-            </div>
-            <span className="font-bold text-slate-300 text-sm">DocMind Intelligence</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">v1.0 Production</span>
+        <footer className="border-t border-slate-800/80 py-12 px-6 max-w-7xl mx-auto text-xs text-slate-500 flex flex-col sm:flex-row items-center justify-between gap-6">
+          <Logo size="sm" showBadge={false} />
+          <div className="flex items-center gap-6 text-[11px] text-slate-400">
+            <span>Cloudflare R2 Encrypted</span>
+            <span>•</span>
+            <span>pgvector 768-Dim</span>
+            <span>•</span>
+            <span>Gmail SMTP Verified</span>
+            <span>•</span>
+            <span>Argon2id Hashed</span>
           </div>
-
-          <div className="flex flex-wrap items-center gap-6 text-slate-400">
-            <a href="#what-is-docmind" className="hover:text-cyan-400 transition-colors">Overview</a>
-            <a href="#services" className="hover:text-cyan-400 transition-colors">Services</a>
-            <a href="#demo" className="hover:text-cyan-400 transition-colors">Interactive Demo</a>
-            <a href="#pricing" className="hover:text-cyan-400 transition-colors">Pricing</a>
-            <a href="#faq" className="hover:text-cyan-400 transition-colors">Security & FAQ</a>
-          </div>
-
-          <div>
-            &copy; 2026 DocMind Systems. Built as per Technical Specification v1.0.
-          </div>
+          <p>© 2026 DocMind Enterprise SaaS. All rights reserved.</p>
         </footer>
       </div>
     </div>
   );
 };
-

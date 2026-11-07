@@ -1,3 +1,60 @@
+export interface AdminOverviewDTO {
+  total_workspaces: number;
+  total_users: number;
+  total_documents: number;
+  total_chunks: number;
+  total_storage_bytes: number;
+  total_questions: number;
+  active_tiers: Record<string, number>;
+  document_status_breakdown: Record<string, number>;
+  worker_health: string;
+  cloudflare_r2_status: string;
+  gemini_api_status: string;
+  smtp_status: string;
+}
+
+export interface AdminWorkspaceSummaryDTO {
+  id: string;
+  name: string;
+  slug: string;
+  tier: string;
+  created_at: string;
+  owner_email?: string;
+  member_count: number;
+  document_count: number;
+  storage_bytes: number;
+}
+
+export interface AdminDocumentSummaryDTO {
+  id: string;
+  workspace_id: string;
+  workspace_name: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  status: string;
+  page_count: number;
+  created_at: string;
+  error_code?: string;
+  error_message?: string;
+}
+
+export interface AdminSystemDiagnosticsDTO {
+  app_env: string;
+  storage_provider: string;
+  r2_bucket: string;
+  llm_provider: string;
+  llm_model: string;
+  embedding_model: string;
+  embedding_dimension: number;
+  email_enabled: boolean;
+  smtp_host: string;
+  smtp_from_email: string;
+  worker_concurrency: number;
+  public_app_url: string;
+  api_base_url: string;
+}
+
 export interface DocumentDTO {
   id: string;
   workspace_id: string;
@@ -461,5 +518,40 @@ export class ApiClient {
 
   static async getTiers(): Promise<TierSpecDTO[]> {
     return this.request<TierSpecDTO[]>('/tiers');
+  }
+
+  // Admin Platform Methods
+  static async getAdminOverview(): Promise<AdminOverviewDTO> {
+    return this.request<AdminOverviewDTO>('/admin/overview');
+  }
+
+  static async getAdminWorkspaces(): Promise<AdminWorkspaceSummaryDTO[]> {
+    return this.request<AdminWorkspaceSummaryDTO[]>('/admin/workspaces');
+  }
+
+  static async updateAdminWorkspaceTier(workspaceId: string, tier: string): Promise<AdminWorkspaceSummaryDTO> {
+    return this.request<AdminWorkspaceSummaryDTO>(`/admin/workspaces/${workspaceId}/tier`, {
+      method: 'PATCH',
+      body: JSON.stringify({ tier }),
+    });
+  }
+
+  static async getAdminDocuments(status?: string): Promise<AdminDocumentSummaryDTO[]> {
+    const query = status ? `?status=${encodeURIComponent(status)}` : '';
+    return this.request<AdminDocumentSummaryDTO[]>(`/admin/documents${query}`);
+  }
+
+  static async retryAdminDocument(documentId: string): Promise<{ message: string; job_id: string }> {
+    return this.request<{ message: string; job_id: string }>(`/admin/documents/${documentId}/retry`, {
+      method: 'POST',
+    });
+  }
+
+  static async getAdminAuditLogs(limit: number = 100): Promise<AuditEventDTO[]> {
+    return this.request<AuditEventDTO[]>(`/admin/audit-logs?limit=${limit}`);
+  }
+
+  static async getAdminSystemDiagnostics(): Promise<AdminSystemDiagnosticsDTO> {
+    return this.request<AdminSystemDiagnosticsDTO>('/admin/system');
   }
 }

@@ -36,11 +36,27 @@ class AuditRepository:
         limit: int = 50,
         offset: int = 0
     ) -> List[Tuple[AuditEvent, Optional[str]]]:
-        """Lists audit events joined with actor email."""
+        """Lists audit events joined with actor email for a specific workspace."""
         query = (
             select(AuditEvent, User.email)
             .outerjoin(User, AuditEvent.actor_user_id == User.id)
             .where(AuditEvent.workspace_id == workspace_id)
+            .order_by(AuditEvent.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self.db.execute(query)
+        return list(result.all())
+
+    async def list_all_platform_events(
+        self,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Tuple[AuditEvent, Optional[str]]]:
+        """Lists platform-wide audit events across all workspaces for administrative governance."""
+        query = (
+            select(AuditEvent, User.email)
+            .outerjoin(User, AuditEvent.actor_user_id == User.id)
             .order_by(AuditEvent.created_at.desc())
             .limit(limit)
             .offset(offset)

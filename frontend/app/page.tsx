@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { AdminConsole } from '../components/AdminConsole';
 import { AuthModal, UserSession } from '../components/AuthModal';
 import { CitationDrawer } from '../components/CitationDrawer';
 import { LandingPage } from '../components/LandingPage';
@@ -597,6 +598,10 @@ export default function DocMindApp() {
           setAuthModalOpen(true);
         }}
         onSwitchView={setViewMode}
+        onOpenAdmin={() => {
+          setViewMode('app');
+          setActiveTab('admin');
+        }}
         onSignOut={() => {
           if (typeof window !== 'undefined') {
             localStorage.removeItem('docmind_user_session');
@@ -1530,6 +1535,11 @@ export default function DocMindApp() {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* ==================== 6. ADMIN CONSOLE TAB ==================== */}
+          {activeTab === 'admin' && (
+            <AdminConsole onBackToApp={() => setActiveTab('dashboard')} />
           )}
         </main>
       </div>

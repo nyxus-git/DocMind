@@ -3,6 +3,7 @@
 import React, { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ApiClient } from '../../lib/api';
+import { Logo } from '../../components/Logo';
 
 function AuthActionContent() {
   const router = useRouter();
@@ -71,11 +72,8 @@ function AuthActionContent() {
 
       <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-8 relative z-10">
         {/* Brand Header */}
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-tr from-cyan-500 to-teal-400 font-bold text-slate-950 text-xl shadow-lg shadow-cyan-500/20 mb-3">
-            D
-          </div>
-          <h1 className="text-xl font-bold text-white tracking-tight">DocMind Enterprise</h1>
+        <div className="flex flex-col items-center justify-center text-center mb-6">
+          <Logo size="lg" showBadge={true} badgeText="Identity" className="justify-center mb-2" />
           <p className="text-xs text-slate-400 mt-1">Ground-truth citation intelligence</p>
         </div>
 
