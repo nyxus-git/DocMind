@@ -20,20 +20,23 @@ class GeminiLLM(LLMProvider):
         prompt: str,
         system_prompt: str = "",
         response_schema: Optional[Dict[str, Any]] = None,
-        max_tokens: int = 1500,
+        max_tokens: int = 4000,
         temperature: float = 0.2
     ) -> LLMResult:
         if not self.api_key:
             return self._mock_generate(prompt, response_schema)
 
-        url = f"{self.base_url}/models/{self.model}:generateContent?key={self.api_key}"
-        
+        candidate_models: List[str] = []
+        for m in [self.model, "gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.1-flash-lite"]:
+            if m and m not in candidate_models:
+                candidate_models.append(m)
+
         contents = [{"role": "user", "parts": [{"text": prompt}]}]
         generation_config: Dict[str, Any] = {
             "temperature": temperature,
             "maxOutputTokens": max_tokens,
         }
-        
+
         if response_schema:
             generation_config["responseMimeType"] = "application/json"
 
@@ -45,37 +48,60 @@ class GeminiLLM(LLMProvider):
             payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
 
         start_time = time.time()
+        import re
+
         async with httpx.AsyncClient(timeout=45.0) as client:
-            resp = await client.post(url, json=payload)
-            latency_ms = int((time.time() - start_time) * 1000)
-            
-            if resp.status_code != 200:
-                logger.error(f"Gemini API error {resp.status_code}: {resp.text}")
-                return self._mock_generate(prompt, response_schema)
-
-            data = resp.json()
-            candidate = data.get("candidates", [{}])[0]
-            part_text = candidate.get("content", {}).get("parts", [{}])[0].get("text", "")
-            
-            usage = data.get("usageMetadata", {})
-            input_tokens = usage.get("promptTokenCount", 0)
-            output_tokens = usage.get("candidatesTokenCount", 0)
-
-            parsed = None
-            if response_schema:
+            for model_name in candidate_models:
+                url = f"{self.base_url}/models/{model_name}:generateContent?key={self.api_key}"
                 try:
-                    parsed = json.loads(part_text)
-                except Exception:
-                    parsed = None
+                    resp = await client.post(url, json=payload)
+                    if resp.status_code == 200:
+                        latency_ms = int((time.time() - start_time) * 1000)
+                        data = resp.json()
+                        candidates = data.get("candidates", [])
+                        if not candidates:
+                            continue
 
-            return LLMResult(
-                text=part_text,
-                parsed_json=parsed,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                model=self.model,
-                latency_ms=latency_ms
-            )
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        part_texts = [p.get("text", "") for p in parts if isinstance(p, dict) and "text" in p]
+                        part_text = "".join(part_texts).strip()
+
+                        usage = data.get("usageMetadata", {})
+                        input_tokens = usage.get("promptTokenCount", 0)
+                        output_tokens = usage.get("candidatesTokenCount", 0)
+
+                        parsed = None
+                        if response_schema:
+                            cleaned_json_text = part_text
+                            if "```json" in cleaned_json_text:
+                                cleaned_json_text = cleaned_json_text.split("```json")[1].split("```")[0].strip()
+                            elif "```" in cleaned_json_text:
+                                cleaned_json_text = cleaned_json_text.split("```")[1].split("```")[0].strip()
+                            try:
+                                parsed = json.loads(cleaned_json_text)
+                            except Exception:
+                                m = re.search(r"(\{.*\})", cleaned_json_text, re.DOTALL)
+                                if m:
+                                    try:
+                                        parsed = json.loads(m.group(1))
+                                    except Exception:
+                                        parsed = None
+
+                        return LLMResult(
+                            text=part_text,
+                            parsed_json=parsed,
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens,
+                            model=model_name,
+                            latency_ms=latency_ms
+                        )
+                    else:
+                        logger.warning(f"Gemini API error {resp.status_code} on model {model_name}: {resp.text}")
+                except Exception as ex:
+                    logger.warning(f"Gemini call exception on model {model_name}: {ex}")
+
+        # Fallback if all live Gemini candidate calls fail
+        return self._mock_generate(prompt, response_schema)
 
     def _mock_generate(self, prompt: str, response_schema: Optional[Dict[str, Any]]) -> LLMResult:
         """Deterministic fallback when no API key is present or in offline test environments."""
@@ -329,25 +355,31 @@ class GeminiEmbedding(EmbeddingProvider):
         if not self.api_key or not texts:
             return [self._mock_vector(t) for t in texts]
 
-        # Google Gemini batchEmbedContents endpoint
-        url = f"{self.base_url}/models/{self.model}:batchEmbedContents?key={self.api_key}"
-        requests = [
-            {
-                "model": f"models/{self.model}",
-                "content": {"parts": [{"text": t[:2000]}]},
-                "outputDimensionality": settings.EMBEDDING_DIMENSION
-            }
-            for t in texts
-        ]
-        
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(url, json={"requests": requests})
-                if resp.status_code == 200:
-                    data = resp.json()
-                    return [e.get("values", self._mock_vector(texts[i])) for i, e in enumerate(data.get("embeddings", []))]
-        except Exception as e:
-            logger.warning(f"Embedding API error, falling back to deterministic vector: {e}")
+        candidate_models = []
+        for m in [self.model, "gemini-embedding-001"]:
+            if m and m not in candidate_models:
+                candidate_models.append(m)
+
+        for model_name in candidate_models:
+            url = f"{self.base_url}/models/{model_name}:batchEmbedContents?key={self.api_key}"
+            requests = [
+                {
+                    "model": f"models/{model_name}",
+                    "content": {"parts": [{"text": t[:2000]}]},
+                    "outputDimensionality": settings.EMBEDDING_DIMENSION
+                }
+                for t in texts
+            ]
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    resp = await client.post(url, json={"requests": requests})
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        embeddings = data.get("embeddings", [])
+                        if embeddings:
+                            return [e.get("values", self._mock_vector(texts[i])) for i, e in enumerate(embeddings)]
+            except Exception as e:
+                logger.warning(f"Embedding API error on {model_name}: {e}")
 
         return [self._mock_vector(t) for t in texts]
 

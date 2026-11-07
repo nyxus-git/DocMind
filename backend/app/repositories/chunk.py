@@ -176,3 +176,25 @@ class ChunkRepository:
         )
         res = await self.db.execute(stmt)
         return list(res.all())
+
+    async def get_all_chunks_for_documents(
+        self,
+        workspace_id: uuid.UUID,
+        document_ids: List[uuid.UUID],
+        limit: int = 25
+    ) -> List[Tuple[DocumentChunk, Document]]:
+        """Returns sequential chunks across the given documents up to limit for comprehensive synthesis and counting."""
+        if not document_ids:
+            return []
+        stmt = (
+            select(DocumentChunk, Document)
+            .join(Document, DocumentChunk.document_id == Document.id)
+            .where(
+                DocumentChunk.workspace_id == workspace_id,
+                DocumentChunk.document_id.in_(document_ids)
+            )
+            .order_by(DocumentChunk.document_id, DocumentChunk.chunk_index.asc())
+            .limit(limit)
+        )
+        res = await self.db.execute(stmt)
+        return list(res.all())
