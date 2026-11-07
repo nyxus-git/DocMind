@@ -82,6 +82,37 @@ class ChatService:
             content=content
         )
 
+        # Handle natural conversational greetings
+        clean_query = content.strip().lower().rstrip("!.,? ")
+        greetings = {"hi", "hii", "hiii", "hello", "hey", "heyy", "greetings", "good morning", "good afternoon", "good evening", "who are you", "what can you do"}
+        if clean_query in greetings:
+            doc_names = ", ".join([f"'{d.filename}'" for d in ready_docs[:3]])
+            greeting_text = (
+                f"Hello! I am DocMind, your enterprise document intelligence assistant. "
+                f"I have indexed your document(s) ({doc_names}) in this workspace. "
+                f"How can I help you analyze them today? You can ask me to summarize key sections, extract specific details, or answer questions about the content."
+            )
+            asst_msg = await self.conv_repo.create_message(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=greeting_text,
+                model=settings.LLM_MODEL
+            )
+            return SendMessageResponse(
+                message_id=asst_msg.id,
+                role="assistant",
+                content=greeting_text,
+                insufficient_evidence=False,
+                citations=[],
+                usage=UsageDTO(input_tokens=10, output_tokens=35),
+                suggested_followups=[
+                    "What are the main topics in this document?",
+                    "Can you summarize the key points?",
+                    "What are the primary questions and answers in this file?"
+                ],
+                created_at=asst_msg.created_at
+            )
+
         # 6. Hybrid retrieval (Vector + Lexical + RRF)
         query_vector = await self.embedding.embed_query(content)
         retrieved_items = await self.chunk_repo.hybrid_search(

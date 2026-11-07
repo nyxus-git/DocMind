@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState } from 'react';
-import { CitationDTO } from '../lib/api';
 import { Logo } from './Logo';
 
 interface LandingPageProps {
@@ -9,139 +8,7 @@ interface LandingPageProps {
   onLaunchApp: () => void;
 }
 
-interface DemoScenario {
-  id: string;
-  title: string;
-  documentScope: string[];
-  question: string;
-  answer: string;
-  citations: CitationDTO[];
-}
-
-const DEMO_SCENARIOS: DemoScenario[] = [
-  {
-    id: 'compliance',
-    title: 'Cloudflare R2 & Multi-Tenancy',
-    documentScope: ['DocMind_PRD_Technical_Specification_v1.0.pdf'],
-    question: 'How does DocMind ensure customer documents are never visible to another company?',
-    answer:
-      'DocMind enforces strict tenant boundaries at every layer of the infrastructure. Documents are stored in encrypted, isolated Cloudflare R2 object partitions under workspaces/[workspace_id]/ [S1]. Every database query enforces row-level workspace constraints derived exclusively from verified JWT server state [S2]. Passwords use memory-hard Argon2id hashing, and documents are never used for AI model training [S3].',
-    citations: [
-      {
-        citation_id: 'cit-demo-1',
-        document_id: 'doc-prd-01',
-        filename: 'DocMind_PRD_Technical_Specification_v1.0.pdf',
-        page_start: 10,
-        page_end: 10,
-        section: '09 / Identity and workspaces',
-        excerpt:
-          'FR-007: Every request resolves user and active workspace strictly from trusted server state. Cross-tenant access attempts immediately fail with HTTP 403 Forbidden.',
-        source_label: 'S1',
-      },
-      {
-        citation_id: 'cit-demo-2',
-        document_id: 'doc-prd-01',
-        filename: 'DocMind_PRD_Technical_Specification_v1.0.pdf',
-        page_start: 12,
-        page_end: 12,
-        section: '11 / Cloudflare R2 Object Storage',
-        excerpt:
-          'Direct browser-to-R2 upload with ephemeral presigned URLs; private workspace prefixing ensures cross-tenant data inference or discovery is impossible.',
-        source_label: 'S2',
-      },
-      {
-        citation_id: 'cit-demo-3',
-        document_id: 'doc-prd-01',
-        filename: 'DocMind_PRD_Technical_Specification_v1.0.pdf',
-        page_start: 10,
-        page_end: 10,
-        section: '09 / FR-002 Security Policy',
-        excerpt:
-          'Argon2id password hashing with time_cost=2 and 64MB memory. Zero model training policy on customer reference documents.',
-        source_label: 'S3',
-      },
-    ],
-  },
-  {
-    id: 'compare',
-    title: 'Contract Cross-Comparison',
-    documentScope: ['Vendor_A_MSA_2026.pdf', 'Vendor_B_MSA_2026.pdf'],
-    question: 'Compare the liability limitations and indemnification covenants between Vendor A and Vendor B.',
-    answer:
-      'Vendor A caps aggregate indemnification liability at 12 months of paid contract fees ($250,000 maximum) with a 30-day notice window [S1]. In contrast, Vendor B provides an uncapped indemnification for gross negligence and IP infringement, but imposes a $1,000,000 general liability threshold [S2]. Vendor B also requires binding arbitration in New York, whereas Vendor A elects Delaware jurisdiction [S3].',
-    citations: [
-      {
-        citation_id: 'cit-demo-4',
-        document_id: 'doc-vendor-a',
-        filename: 'Vendor_A_MSA_2026.pdf',
-        page_start: 8,
-        page_end: 8,
-        section: 'Section 12.1: Limitation of Liability',
-        excerpt:
-          'Except for breach of confidentiality, neither party liability shall exceed the total amount paid by Customer in the preceding twelve (12) months or $250,000.',
-        source_label: 'S1',
-      },
-      {
-        citation_id: 'cit-demo-5',
-        document_id: 'doc-vendor-b',
-        filename: 'Vendor_B_MSA_2026.pdf',
-        page_start: 14,
-        page_end: 15,
-        section: 'Section 16: Indemnification Obligations',
-        excerpt:
-          'Supplier indemnification for third-party intellectual property claims and willful misconduct shall remain uncapped up to statutory damages limits.',
-        source_label: 'S2',
-      },
-      {
-        citation_id: 'cit-demo-6',
-        document_id: 'doc-vendor-b',
-        filename: 'Vendor_B_MSA_2026.pdf',
-        page_start: 22,
-        page_end: 22,
-        section: 'Section 24: Dispute Resolution and Governing Law',
-        excerpt:
-          'Any dispute arising hereunder shall be finally settled under the Rules of Arbitration of the American Arbitration Association in New York County, New York.',
-        source_label: 'S3',
-      },
-    ],
-  },
-  {
-    id: 'financial',
-    title: 'Financial Audit & Balance Sheet Analysis',
-    documentScope: ['Meridian_Q3_Financials.pdf', 'Q3_Consolidated_Audit.pdf'],
-    question: 'Extract Q3 ARR growth, operating margins, and outstanding auditor caveats.',
-    answer:
-      'Q3 Enterprise ARR reached $48.6M, representing a 34.2% YoY acceleration with gross margins expanding to 81.4% [S1]. The independent auditor flagged $4.2M in aged cross-border receivables pending European regulatory clearance [S2].',
-    citations: [
-      {
-        citation_id: 'cit-demo-7',
-        document_id: 'doc-fin-01',
-        filename: 'Meridian_Q3_Financials.pdf',
-        page_start: 4,
-        page_end: 5,
-        section: 'Item 2: Management Discussion & Analysis',
-        excerpt:
-          'Enterprise ARR reached $48.6M representing 34.2% YoY acceleration. Cloud subscription gross margins expanded to 81.4% from 78.2% in Q3 prior year.',
-        source_label: 'S1',
-      },
-      {
-        citation_id: 'cit-demo-8',
-        document_id: 'doc-fin-02',
-        filename: 'Q3_Consolidated_Audit.pdf',
-        page_start: 28,
-        page_end: 29,
-        section: 'Note 14: Contingencies and Audit Caveats',
-        excerpt:
-          'Auditors identified $4.2M in aged cross-border receivables requiring specialized reserve allocation pending regulatory currency settlement.',
-        source_label: 'S2',
-      },
-    ],
-  },
-];
-
 export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchApp }) => {
-  const [activeScenario, setActiveScenario] = useState<DemoScenario>(DEMO_SCENARIOS[0]);
-  const [activeCitation, setActiveCitation] = useState<CitationDTO | null>(null);
   const [isAnnual, setIsAnnual] = useState(true);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
 
@@ -259,114 +126,170 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onLaunchAp
           </div>
         </section>
 
-        {/* INTERACTIVE QUERY & CITATION PLAYGROUND */}
+        {/* MODERN PRODUCT WORKSPACE PREVIEW */}
         <section id="demo" className="py-16 px-6 max-w-6xl mx-auto">
           <div className="text-center mb-10">
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              Interactive Ground-Truth Playground
+            <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider px-3.5 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 shadow-sm shadow-cyan-500/10">
+              Interactive Enterprise Experience
+            </span>
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight mt-3">
+              Audit-Grade Document Intelligence at Enterprise Scale
             </h2>
-            <p className="text-xs sm:text-sm text-slate-400 mt-2">
-              Experience verified citation grounding. Click any numbered badge <b className="text-cyan-400">[S1]</b> to inspect verbatim proof.
+            <p className="text-xs sm:text-sm text-slate-400 mt-2 max-w-2xl mx-auto">
+              Search, synthesize, and cross-compare complex corporate files with verifiable inline source citations that prove every claim.
             </p>
           </div>
 
-          {/* Playground Container */}
-          <div className="rounded-3xl bg-slate-900/70 border border-slate-800 shadow-2xl backdrop-blur-2xl overflow-hidden p-6 sm:p-8">
-            {/* Scenario Switcher Tabs */}
-            <div className="flex flex-wrap gap-2.5 pb-6 border-b border-slate-800">
-              {DEMO_SCENARIOS.map(sc => (
-                <button
-                  key={sc.id}
-                  onClick={() => {
-                    setActiveScenario(sc);
-                    setActiveCitation(null);
-                  }}
-                  className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
-                    activeScenario.id === sc.id
-                      ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
-                      : 'bg-slate-950/80 text-slate-400 hover:text-white border border-slate-800'
-                  }`}
-                >
-                  {sc.title}
-                </button>
-              ))}
-            </div>
-
-            {/* Scope Bar */}
-            <div className="py-4 flex items-center gap-2 text-xs text-slate-400 border-b border-slate-800/60">
-              <span className="text-slate-500">Document Scope:</span>
-              {activeScenario.documentScope.map((doc, idx) => (
-                <span
-                  key={idx}
-                  className="px-2.5 py-1 rounded-lg bg-slate-950 text-cyan-300 font-mono text-[11px] border border-slate-800 flex items-center gap-1.5"
-                >
-                  <span>📄</span> {doc}
+          {/* Product UI Window Mockup */}
+          <div className="rounded-3xl bg-slate-900/90 border border-slate-800 shadow-2xl backdrop-blur-2xl overflow-hidden">
+            {/* macOS Window Chrome Header */}
+            <div className="px-5 py-3.5 bg-slate-950/90 border-b border-slate-800 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-rose-500/80"></div>
+                <div className="w-3 h-3 rounded-full bg-amber-500/80"></div>
+                <div className="w-3 h-3 rounded-full bg-emerald-500/80"></div>
+                <span className="ml-3 font-mono text-[11px] text-slate-400">DocMind Workspace • Acme Global Systems</span>
+              </div>
+              <div className="hidden sm:flex items-center gap-2 text-[11px]">
+                <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-medium">
+                  Cloudflare R2 Encrypted
                 </span>
-              ))}
-            </div>
-
-            {/* User Question */}
-            <div className="py-6">
-              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">User Query</div>
-              <div className="text-base sm:text-lg font-semibold text-white bg-slate-950/80 p-4 rounded-2xl border border-slate-800/80">
-                &ldquo;{activeScenario.question}&rdquo;
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
+                  Tenant-Isolated
+                </span>
               </div>
             </div>
 
-            {/* Grounded AI Response */}
-            <div className="pb-6">
-              <div className="text-[11px] font-bold text-cyan-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-                <span>🤖</span> DocMind Grounded Synthesis (Gemini 2.5 Flash)
-              </div>
-              <div className="text-sm leading-relaxed text-slate-200 bg-slate-950/90 p-5 rounded-2xl border border-cyan-500/30">
-                {activeScenario.answer.split(/(\[S\d+\])/g).map((segment, idx) => {
-                  const match = segment.match(/\[S(\d+)\]/);
-                  if (match) {
-                    const citIndex = parseInt(match[1], 10) - 1;
-                    const cit = activeScenario.citations[citIndex];
-                    const isSelected = activeCitation?.citation_id === cit?.citation_id;
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => setActiveCitation(cit || null)}
-                        className={`inline-flex items-center px-1.5 py-0.5 mx-1 rounded font-mono font-bold text-xs transition-all ${
-                          isSelected
-                            ? 'bg-cyan-400 text-slate-950 ring-2 ring-cyan-400 shadow-md shadow-cyan-400/30 scale-105'
-                            : 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 cursor-pointer'
-                        }`}
-                        title="Click to view verbatim excerpt proof"
-                      >
-                        {segment}
-                      </button>
-                    );
-                  }
-                  return <span key={idx}>{segment}</span>;
-                })}
-              </div>
-            </div>
+            {/* Split Screen Workspace Preview */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 min-h-[460px]">
+              {/* Mock Sidebar */}
+              <div className="lg:col-span-4 p-4 border-b lg:border-b-0 lg:border-r border-slate-800 bg-slate-950/50 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 mb-4">
+                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-bold text-white truncate">Acme Systems Corp</div>
+                      <div className="text-[10px] text-slate-400">Enterprise Tenant #WS-042</div>
+                    </div>
+                  </div>
 
-            {/* Verbatim Excerpt Drawer Preview */}
-            {activeCitation && (
-              <div className="p-5 rounded-2xl bg-cyan-950/30 border border-cyan-500/40 text-xs animate-in fade-in slide-in-from-bottom-2 duration-150">
-                <div className="flex items-center justify-between text-cyan-400 font-bold mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded bg-cyan-400 text-slate-950 text-[10px]">
-                      {activeCitation.source_label}
+                  <div className="space-y-1 text-xs">
+                    <div className="px-3 py-2 rounded-lg text-slate-400 flex items-center gap-2.5 hover:bg-slate-900/60 transition-colors">
+                      <span>📊</span> Dashboard
+                    </div>
+                    <div className="px-3 py-2 rounded-lg text-slate-400 flex items-center justify-between hover:bg-slate-900/60 transition-colors">
+                      <span className="flex items-center gap-2.5"><span>📁</span> Document Library</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">14</span>
+                    </div>
+                    <div className="px-3 py-2 rounded-lg bg-cyan-500/15 text-cyan-300 font-semibold border border-cyan-500/30 flex items-center justify-between shadow-sm">
+                      <span className="flex items-center gap-2.5"><span>💬</span> Research Chat</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+                    </div>
+                    <div className="px-3 py-2 rounded-lg text-slate-400 flex items-center gap-2.5 hover:bg-slate-900/60 transition-colors">
+                      <span>⚖️</span> Compare Files
+                    </div>
+                    <div className="px-3 py-2 rounded-lg text-slate-400 flex items-center gap-2.5 hover:bg-slate-900/60 transition-colors">
+                      <span>🛡️</span> Admin Console
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 mt-4 text-[11px] text-slate-400">
+                  <div className="flex items-center justify-between font-semibold text-slate-300 mb-1">
+                    <span>Quota & Storage</span>
+                    <span className="text-cyan-400 font-mono">42 MB / 10 GB</span>
+                  </div>
+                  <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                    <div className="bg-cyan-400 h-full w-[4%]"></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Mock Chat & Grounded Citation Pane */}
+              <div className="lg:col-span-8 p-5 sm:p-6 flex flex-col justify-between bg-slate-950/30">
+                <div className="space-y-4">
+                  {/* Scope Badges */}
+                  <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-slate-800/60 text-xs">
+                    <span className="text-slate-500 shrink-0 font-medium">Selected Scope:</span>
+                    <span className="px-2.5 py-1 rounded-lg bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 font-mono text-[11px] flex items-center gap-1.5 whitespace-nowrap">
+                      <span>📕</span> Vendor_Master_Services_Agreement_2026.pdf
                     </span>
-                    <span>
-                      {activeCitation.filename} • Page {activeCitation.page_start}
+                    <span className="px-2.5 py-1 rounded-lg bg-slate-900 text-slate-300 border border-slate-800 font-mono text-[11px] flex items-center gap-1.5 whitespace-nowrap">
+                      <span>📘</span> Global_Enterprise_SLA.docx
                     </span>
                   </div>
-                  <button onClick={() => setActiveCitation(null)} className="text-slate-400 hover:text-white">✕</button>
+
+                  {/* Mock User Message */}
+                  <div className="flex justify-end">
+                    <div className="bg-cyan-500/15 text-cyan-100 border border-cyan-500/30 rounded-2xl rounded-tr-sm px-4 py-3 max-w-lg text-xs sm:text-sm leading-relaxed shadow-sm">
+                      Compare indemnification liabilities and termination notice covenants between these contracts.
+                    </div>
+                  </div>
+
+                  {/* Mock Assistant Response with Citations */}
+                  <div className="flex gap-3">
+                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center text-slate-950 font-bold text-xs shrink-0 shadow-md shadow-cyan-500/20">
+                      D
+                    </div>
+                    <div className="space-y-3 flex-1">
+                      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl rounded-tl-sm p-4 text-xs sm:text-sm text-slate-200 leading-relaxed space-y-2">
+                        <p>
+                          Under Section 16.2 of the Master Services Agreement, supplier indemnification for third-party intellectual property claims remains uncapped{' '}
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded font-mono font-bold text-xs bg-cyan-400 text-slate-950 shadow-sm cursor-default">
+                            [S1]
+                          </span>.
+                        </p>
+                        <p>
+                          In contrast, general commercial liability is bounded to the preceding 12 months of paid fees ($500,000 maximum){' '}
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded font-mono font-bold text-xs bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 cursor-default">
+                            [S2]
+                          </span>.
+                          Termination for convenience requires a 60-day written cure window across both documents{' '}
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded font-mono font-bold text-xs bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 cursor-default">
+                            [S3]
+                          </span>.
+                        </p>
+                      </div>
+
+                      {/* Verified Citation Drawer */}
+                      <div className="p-3.5 rounded-xl bg-cyan-950/30 border border-cyan-500/30 text-xs">
+                        <div className="flex items-center justify-between font-semibold text-cyan-300 mb-1.5">
+                          <span className="flex items-center gap-2">
+                            <span className="px-1.5 py-0.5 rounded bg-cyan-400 text-slate-950 text-[10px] font-bold">S1</span>
+                            <span>Vendor_Master_Services_Agreement_2026.pdf • Page 16</span>
+                          </span>
+                          <span className="text-[10px] text-cyan-400/80 font-mono">100% Match</span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 font-mono bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/80">
+                          &ldquo;Supplier shall defend, indemnify and hold harmless Customer against all third-party IP infringement damages without monetary limitation.&rdquo;
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div className="text-slate-400 text-[11px] mb-2 font-mono">
-                  Section: {activeCitation.section || 'General'}
+
+                {/* Card Bottom CTA */}
+                <div className="pt-5 mt-5 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="text-xs text-slate-400 text-center sm:text-left">
+                    <span className="text-white font-medium">Ready to explore with your documents?</span> Try our 1-click recruiter sandbox or create a company workspace.
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      onClick={() => onOpenAuth('signin')}
+                      className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-400 text-slate-950 font-bold text-xs hover:opacity-95 transition-all shadow-md shadow-cyan-500/20 cursor-pointer"
+                    >
+                      Fast-Pass Demo →
+                    </button>
+                    <button
+                      onClick={() => setSovereignModalOpen(true)}
+                      className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 font-medium text-xs border border-slate-800 transition-colors cursor-pointer"
+                    >
+                      BYOS Inquiry
+                    </button>
+                  </div>
                 </div>
-                <blockquote className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 font-mono text-[11px] leading-relaxed">
-                  &ldquo;{activeCitation.excerpt}&rdquo;
-                </blockquote>
               </div>
-            )}
+            </div>
           </div>
         </section>
 

@@ -439,36 +439,28 @@ export default function DocMindApp() {
         messages: [...(prev.messages || []), newAsstMsg],
       }));
       setUsage(prev => ({ ...prev, questions_used: prev.questions_used + 1 }));
-    } catch {
-      // Offline fallback simulation
-      setTimeout(() => {
-        const fallbackMsg: MessageDTO = {
-          id: `asst-${Date.now()}`,
-          conversation_id: activeConv.id,
-          role: 'assistant',
-          content: `Analysis of query: "${query}". Based on verified evidence in the indexed sources, the compliance specifications enforce strict workspace multi-tenancy, SHA-256 integrity verification, and zero model training on uploaded data [S1].`,
-          status: 'completed',
-          citations: [
-            {
-              citation_id: `cit-${Date.now()}`,
-              document_id: documents[0]?.id || 'doc-001',
-              filename: documents[0]?.filename || 'DocMind_PRD_Technical_Specification_v1.0.pdf',
-              page_start: 32,
-              page_end: 32,
-              section: 'Security & Threat Model',
-              excerpt:
-                'Every tenant-owned table must include workspace_id directly or be accessed through a parent join that proves workspace ownership.',
-              source_label: 'S1',
-            },
-          ],
-          created_at: new Date().toISOString(),
-        };
-        setActiveConv(prev => ({
-          ...prev,
-          messages: [...(prev.messages || []), fallbackMsg],
-        }));
-        setUsage(prev => ({ ...prev, questions_used: prev.questions_used + 1 }));
-      }, 700);
+    } catch (err: unknown) {
+      const isGreeting = /^(hi|hii|hiii|hello|hey|heyy|greetings|good morning|good afternoon|good evening|who are you|what can you do)[\s!?.]*$/i.test(query.trim());
+      const firstDoc = documents[0];
+      const docName = firstDoc?.filename ? `'${firstDoc.filename}'` : 'your workspace documents';
+      
+      const fallbackContent = isGreeting
+        ? `Hello! I am DocMind, your enterprise document intelligence assistant. I have indexed ${docName} in this workspace. How can I help you analyze them today? You can ask me to summarize key points, extract specific metrics, or answer questions about the content.`
+        : `DocMind could not reach the backend AI service (${err instanceof Error ? err.message : 'Network error'}). Please ensure the API backend is running and try again.`;
+
+      const fallbackMsg: MessageDTO = {
+        id: `asst-${Date.now()}`,
+        conversation_id: activeConv.id,
+        role: 'assistant',
+        content: fallbackContent,
+        status: 'completed',
+        citations: [],
+        created_at: new Date().toISOString(),
+      };
+      setActiveConv(prev => ({
+        ...prev,
+        messages: [...(prev.messages || []), fallbackMsg],
+      }));
     } finally {
       setIsSending(false);
     }

@@ -81,7 +81,7 @@ class GeminiLLM(LLMProvider):
         """Deterministic fallback when no API key is present or in offline test environments."""
         if response_schema:
             prompt_lower = prompt.lower()
-            if "compare" in prompt_lower or "matrix" in prompt_lower:
+            if '"matrix":' in prompt or ("compare" in prompt_lower and "matrix" in prompt_lower):
                 mock_json = {
                     "narrative_summary": "Comparative analysis across selected files demonstrates consistent baseline terms with distinct provisions regarding liability caps and operational SLAs.",
                     "matrix": [
@@ -100,7 +100,7 @@ class GeminiLLM(LLMProvider):
                     ],
                     "limitations": "Comparison is scoped to extracted contractual terms."
                 }
-            elif "extract" in prompt_lower or "preset" in prompt_lower:
+            elif '"extracted_data":' in prompt or "extracted_data" in prompt_lower:
                 mock_json = {
                     "extracted_data": {
                         "entities": ["Acme Corp", "DocMind Systems LLC"],
@@ -110,7 +110,7 @@ class GeminiLLM(LLMProvider):
                     "confidence_note": "Extracted with high confidence from primary document sections.",
                     "source_labels": ["S1"]
                 }
-            elif "summary" in prompt_lower or "key_points" in prompt_lower:
+            elif '"overview":' in prompt or '"key_points":' in prompt:
                 mock_json = {
                     "overview": "Comprehensive document outlining operational terms, technical standards, and governance policies.",
                     "key_points": [
@@ -120,13 +120,21 @@ class GeminiLLM(LLMProvider):
                     "caveats": "Subject to annual regulatory compliance review."
                 }
             else:
+                import re
+                evidence_match = re.search(r"\[S1\]\s*\([^)]+\):\s*([^\n]+(?:\n[^\n]+)?)", prompt)
+                first_fact = evidence_match.group(1).strip()[:180] if evidence_match else "the indexed sources detail verified operational and technical standards"
+                first_fact = re.sub(r"[@#*`]+", "", first_fact).strip()
+                
                 mock_json = {
-                    "answer": "Based on the selected documents, the information indicates verified compliance with the specified guidelines [S1].",
+                    "answer": f"Based on the indexed documents, {first_fact} [S1].",
                     "insufficient_evidence": False,
                     "citations": [
-                        {"source_id": "S1", "claim": "Verified compliance with specified guidelines."}
+                        {"source_id": "S1", "claim": first_fact[:120]}
                     ],
-                    "suggested_followups": ["What are the next compliance steps?"]
+                    "suggested_followups": [
+                        "Can you summarize the key points?",
+                        "What are the specific requirements or questions in this file?"
+                    ]
                 }
             return LLMResult(
                 text=json.dumps(mock_json),
