@@ -118,9 +118,10 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         onClose();
       }, 800);
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       setIsUploading(false);
-      setErrorMessage(err.message || 'Upload failed. Please check network connection and try again.');
+      const msg = err instanceof Error ? err.message : 'Upload failed. Please check network connection and try again.';
+      setErrorMessage(msg);
     }
   };
 

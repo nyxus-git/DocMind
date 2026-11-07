@@ -71,7 +71,7 @@ export const CitationDrawer: React.FC<CitationDrawerProps> = ({
             Verbatim Grounding Excerpt
           </label>
           <div className="p-4 rounded-xl bg-slate-950/90 border border-slate-800 text-sm leading-relaxed text-slate-300 font-serif italic selection:bg-cyan-500/30">
-            "{citation.excerpt}"
+            &ldquo;{citation.excerpt}&rdquo;
           </div>
         </div>
 

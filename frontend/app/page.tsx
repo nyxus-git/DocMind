@@ -227,7 +227,7 @@ export default function DocMindApp() {
         messages: [...(prev.messages || []), newAsstMsg],
       }));
       setUsage(prev => ({ ...prev, questions_used: prev.questions_used + 1 }));
-    } catch (err: any) {
+    } catch {
       // Offline fallback simulation
       setTimeout(() => {
         const fallbackMsg: MessageDTO = {
