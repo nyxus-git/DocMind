@@ -1,8 +1,7 @@
 import asyncio
 import uuid
 import httpx
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 from app.api.v1.dependencies import get_current_user
 from app.db.session import get_db
@@ -15,13 +14,9 @@ from app.repositories.workspace import WorkspaceRepository
 async def _run_test_create_workspace():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all, tables=[
-            User.__table__,
-            Workspace.__table__,
-            WorkspaceMember.__table__
-        ])
+        await conn.run_sync(Base.metadata.create_all)
 
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async_session = async_sessionmaker(bind=engine, expire_on_commit=False)
     async with async_session() as session:
         user_id = uuid.uuid4()
         user = User(id=user_id, email="owner@acme.com", password_hash="hash")
@@ -48,13 +43,9 @@ def test_create_workspace_sets_owner():
 async def _run_test_add_and_update_member():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all, tables=[
-            User.__table__,
-            Workspace.__table__,
-            WorkspaceMember.__table__
-        ])
+        await conn.run_sync(Base.metadata.create_all)
 
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async_session = async_sessionmaker(bind=engine, expire_on_commit=False)
     async with async_session() as session:
         owner_id = uuid.uuid4()
         member_id = uuid.uuid4()
@@ -100,12 +91,9 @@ async def _run_test_api_workspace_lifecycle():
         poolclass=StaticPool
     )
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all, tables=[
-            User.__table__,
-            Workspace.__table__,
-            WorkspaceMember.__table__
-        ])
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        await conn.run_sync(Base.metadata.create_all)
+
+    async_session = async_sessionmaker(bind=engine, expire_on_commit=False)
 
     test_user = User(id=uuid.uuid4(), email="director@acme.ai", password_hash="hash")
     async with async_session() as s:

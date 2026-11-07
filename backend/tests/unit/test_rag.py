@@ -2,8 +2,7 @@ import asyncio
 import uuid
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 from app.adapters.ai.base import EmbeddingProvider, LLMProvider, LLMResult
 from app.models.entities import (
@@ -67,19 +66,9 @@ async def _run_test_rag_pipeline():
         poolclass=StaticPool
     )
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all, tables=[
-            User.__table__,
-            Workspace.__table__,
-            WorkspaceMember.__table__,
-            Document.__table__,
-            DocumentChunk.__table__,
-            Conversation.__table__,
-            Message.__table__,
-            MessageCitation.__table__,
-            UsageEvent.__table__
-        ])
+        await conn.run_sync(Base.metadata.create_all)
 
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async_session = async_sessionmaker(bind=engine, expire_on_commit=False)
     async with async_session() as session:
         user_id = uuid.uuid4()
         ws_id = uuid.uuid4()

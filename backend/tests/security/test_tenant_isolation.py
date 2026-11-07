@@ -9,14 +9,7 @@ from app.models.enums import DocumentStatus, WorkspaceRole
 @pytest.fixture
 def sync_db():
     engine = create_engine("sqlite:///:memory:")
-    # Create tables without pgvector specific column in sqlite
-    # In sqlite, Vector/TSVECTOR can be treated as plain types or excluded for this unit test
-    Base.metadata.create_all(engine, tables=[
-        User.__table__,
-        Workspace.__table__,
-        WorkspaceMember.__table__,
-        Document.__table__
-    ])
+    Base.metadata.create_all(engine)
     with Session(engine) as session:
         yield session
 

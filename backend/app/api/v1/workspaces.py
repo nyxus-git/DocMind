@@ -230,6 +230,9 @@ async def update_member_role(
         raise DocMindException(status_code=400, code="INVALID_ROLE", title="Bad Request", detail="Invalid role specified.")
 
     updated = await ws_repo.update_member_role(workspace_id, target_user_id, new_role)
+    if not updated:
+        raise DocMindException(status_code=404, code="MEMBER_NOT_FOUND", title="Not Found", detail="Member not found in workspace.")
+
     user_repo = UserRepository(db)
     target_user = await user_repo.get_by_id(target_user_id)
 
