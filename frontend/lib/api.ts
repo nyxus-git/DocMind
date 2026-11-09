@@ -212,6 +212,29 @@ export interface InviteMemberResponse {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api/v1';
 
+/** Error thrown for non-2xx API responses. `status` lets the UI react to 401 (expired session), 402/429 (quota), etc. */
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+function describeApiError(body: unknown, status: number): string {
+  const b = (body ?? {}) as { detail?: unknown; title?: unknown };
+  if (typeof b.detail === 'string') return b.detail;
+  if (Array.isArray(b.detail)) {
+    const msgs = b.detail
+      .map(d => (d && typeof d === 'object' && 'msg' in d ? String((d as { msg: unknown }).msg) : ''))
+      .filter(Boolean);
+    if (msgs.length) return msgs.join('; ');
+  }
+  if (typeof b.title === 'string') return b.title;
+  return `API error ${status}`;
+}
+
 export class ApiClient {
   private static token: string | null = null;
   private static activeWorkspaceId: string | null = null;
@@ -290,27 +313,14 @@ export class ApiClient {
     }
 
     try {
-      let res = await fetch(`${API_BASE}${endpoint}`, {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
         ...options,
         headers,
       });
 
-      if (res.status === 401 && !endpoint.startsWith('/auth/')) {
-        // Expired or invalid token: clear local cache and re-authenticate demo session
-        this.setToken('');
-        const freshToken = await this.ensureSession();
-        if (freshToken) {
-          headers['Authorization'] = `Bearer ${freshToken}`;
-          res = await fetch(`${API_BASE}${endpoint}`, {
-            ...options,
-            headers,
-          });
-        }
-      }
-
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || errorData.title || `API error ${res.status}`);
+        throw new ApiError(describeApiError(errorData, res.status), res.status);
       }
 
       if (res.status === 204) {

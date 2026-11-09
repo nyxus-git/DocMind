@@ -17,7 +17,6 @@ interface AdminConsoleProps {
 export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp }) => {
   const [activeAdminTab, setActiveAdminTab] = useState<'overview' | 'workspaces' | 'documents' | 'audit' | 'system'>('overview');
 
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [overview, setOverview] = useState<AdminOverviewDTO>({
     total_workspaces: 8,
@@ -189,13 +188,13 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp }) => {
     } catch {
       // Retain pre-populated state
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
   };
 
   useEffect(() => {
-    loadData();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadData();
   }, []);
 
   const handleOverrideTier = async (workspaceId: string, currentTier: string) => {
@@ -311,16 +310,18 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp }) => {
       {/* Navigation Sub-Tabs */}
       <div className="px-6 border-b border-slate-800/80 bg-slate-900/30">
         <div className="flex gap-2 py-3 overflow-x-auto">
-          {[
-            { id: 'overview', label: 'Platform Telemetry', icon: '📊' },
-            { id: 'workspaces', label: 'Tenants & Workspaces', icon: '🏢' },
-            { id: 'documents', label: 'Document & OCR Fleet', icon: '📄' },
-            { id: 'audit', label: 'Global Audit Trail', icon: '🛡️' },
-            { id: 'system', label: 'System & Cloudflare Config', icon: '⚙️' },
-          ].map(tab => (
+          {(
+            [
+              { id: 'overview', label: 'Platform Telemetry', icon: '📊' },
+              { id: 'workspaces', label: 'Tenants & Workspaces', icon: '🏢' },
+              { id: 'documents', label: 'Document & OCR Fleet', icon: '📄' },
+              { id: 'audit', label: 'Global Audit Trail', icon: '🛡️' },
+              { id: 'system', label: 'System & Cloudflare Config', icon: '⚙️' },
+            ] as const
+          ).map(tab => (
             <button
               key={tab.id}
-              onClick={() => setActiveAdminTab(tab.id as any)}
+              onClick={() => setActiveAdminTab(tab.id)}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
                 activeAdminTab === tab.id
                   ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/40 shadow-sm'
