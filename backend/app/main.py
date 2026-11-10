@@ -1,6 +1,9 @@
+import logging
+import traceback
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from app.api.v1.admin import router as admin_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.chat import router as chat_router
@@ -14,11 +17,18 @@ from app.api.v1.workspaces import router as workspaces_router
 from app.core.config import settings
 from app.core.exceptions import DocMindException, docmind_exception_handler
 from app.core.logging import RequestLoggingMiddleware, setup_logging
+from app.db.migrate import run_migrations
+
+logger = logging.getLogger("docmind.app")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
+    try:
+        await run_migrations()
+    except Exception as e:
+        logger.warning(f"Startup schema migration check deferred: {e}")
     yield
 
 
@@ -31,6 +41,33 @@ app = FastAPI(
 
 # Exception handlers (RFC 7807 problem details)
 app.add_exception_handler(DocMindException, docmind_exception_handler)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error(
+        f"Unhandled 500 Exception on {request.method} {request.url.path}: {exc}\n{traceback.format_exc()}"
+    )
+    request_id = getattr(request.state, "request_id", None)
+    origin = request.headers.get("Origin") or "*"
+    headers = {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Allow-Methods": "*",
+        "Access-Control-Allow-Headers": "*",
+    }
+    return JSONResponse(
+        status_code=500,
+        content={
+            "type": "https://docmind.ai/errors/internal_server_error",
+            "title": "Internal Server Error",
+            "status": 500,
+            "code": "INTERNAL_SERVER_ERROR",
+            "detail": f"Server error: {str(exc)}" if settings.APP_ENV != "production" else "An internal server error occurred on the DocMind server.",
+            "request_id": request_id,
+        },
+        headers=headers,
+    )
 
 # Structured JSON request logging & duration tracking
 app.add_middleware(RequestLoggingMiddleware)
