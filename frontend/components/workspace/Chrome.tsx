@@ -267,17 +267,14 @@ export function TopBar({
                 <Icon name="sliders" className="size-4 text-muted" /> Settings
               </button>
               {Boolean(session.isSuperAdmin) && (
-                <button
+                <Link
                   role="menuitem"
-                  type="button"
-                  onClick={() => {
-                    setMenu(false);
-                    setTab('admin');
-                  }}
+                  href="/admin/"
+                  onClick={() => setMenu(false)}
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm hover:bg-surface-2 text-amber-500 hover:text-amber-400 font-medium"
                 >
                   <Icon name="shield" className="size-4 text-amber-500" /> Admin Console
-                </button>
+                </Link>
               )}
               <Link
                 role="menuitem"

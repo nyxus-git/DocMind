@@ -148,8 +148,15 @@ function Shell({ session: initialSession }: { session: UserSession }) {
   useEffect(() => {
     if (tab === 'admin' && !session.isSuperAdmin) {
       setTab('dashboard');
+      return;
     }
-  }, [tab, session.isSuperAdmin, setTab]);
+    if (session.isSuperAdmin) {
+      const explicitWs = typeof window !== 'undefined' && window.location.search.includes('view=workspace');
+      if (tab === 'admin' || (!explicitWs && tab === 'dashboard')) {
+        router.replace('/admin/');
+      }
+    }
+  }, [tab, session.isSuperAdmin, setTab, router]);
 
   useEffect(() => {
     // Fetch on mount and whenever the workspace changes.
@@ -242,7 +249,11 @@ function Shell({ session: initialSession }: { session: UserSession }) {
   if (tab === 'admin' && session.isSuperAdmin) {
     return (
       <WorkspaceProvider value={ctx}>
-        <AdminConsole onBackToApp={() => setTab('dashboard')} />
+        <AdminConsole
+          adminEmail={session.email}
+          onBackToApp={() => router.push('/app/?view=workspace#dashboard')}
+          onSignOut={signOut}
+        />
       </WorkspaceProvider>
     );
   }

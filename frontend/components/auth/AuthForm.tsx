@@ -95,10 +95,11 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
     }
   };
 
-  // Already signed in? Go straight to the workspace (unless a demo was requested).
+  // Already signed in? Go straight to the workspace or super-admin dashboard (unless a demo was requested).
   useEffect(() => {
-    if (!demoRequested && loadSession() && ApiClient.getToken()) {
-      router.replace('/app/');
+    const existing = loadSession();
+    if (!demoRequested && existing && ApiClient.getToken()) {
+      router.replace(existing.isSuperAdmin ? '/admin/' : '/app/');
     }
   }, [router, demoRequested]);
 
@@ -163,8 +164,8 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
         }
         try {
           await ApiClient.login(email, password);
-          await establishSession(email, fullName.trim());
-          router.push('/app/');
+          const session = await establishSession(email, fullName.trim());
+          router.push(session.isSuperAdmin ? '/admin/' : '/app/');
         } catch {
           // Sign-in is usually blocked until the email is verified.
           setLoading(false);
@@ -181,8 +182,8 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
     setLoading(true);
     try {
       await ApiClient.login(email, password);
-      await establishSession(email);
-      router.push('/app/');
+      const session = await establishSession(email);
+      router.push(session.isSuperAdmin ? '/admin/' : '/app/');
     } catch (err) {
       setLoading(false);
       setError(friendlyError(err, 'Could not sign in. Check your email and password.'));

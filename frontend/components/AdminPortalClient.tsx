@@ -135,7 +135,7 @@ export function AdminPortalClient() {
     return (
       <AdminConsole
         adminEmail={authorizedSession.email}
-        onBackToApp={() => router.push('/app/')}
+        onBackToApp={() => router.push('/app/?view=workspace#dashboard')}
         onSignOut={handleSignOut}
       />
     );

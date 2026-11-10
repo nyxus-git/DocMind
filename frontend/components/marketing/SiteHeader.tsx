@@ -23,7 +23,16 @@ const NAV = [
 
 export function SiteHeader() {
   const [open, setOpen] = useState(false);
-  const signedIn = useSyncExternalStore(subscribeStorage, () => !!readRawSession(), () => false);
+  const rawSession = useSyncExternalStore(subscribeStorage, readRawSession, () => '');
+  const signedIn = !!rawSession;
+  let isSuperAdmin = false;
+  if (rawSession) {
+    try {
+      isSuperAdmin = Boolean(JSON.parse(rawSession).isSuperAdmin);
+    } catch {
+      // ignore
+    }
+  }
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -58,8 +67,8 @@ export function SiteHeader() {
         <div className="hidden items-center gap-2 md:flex">
           <ThemeToggle />
           {signedIn ? (
-            <LinkButton href="/app" size="sm">
-              Open workspace
+            <LinkButton href={isSuperAdmin ? '/admin' : '/app'} size="sm">
+              {isSuperAdmin ? 'Admin Console' : 'Open workspace'}
             </LinkButton>
           ) : (
             <>
@@ -104,8 +113,8 @@ export function SiteHeader() {
           </nav>
           <div className="mt-3 flex gap-2">
             {signedIn ? (
-              <LinkButton href="/app" className="flex-1">
-                Open workspace
+              <LinkButton href={isSuperAdmin ? '/admin' : '/app'} className="flex-1">
+                {isSuperAdmin ? 'Admin Console' : 'Open workspace'}
               </LinkButton>
             ) : (
               <>

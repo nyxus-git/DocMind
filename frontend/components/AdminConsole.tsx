@@ -202,33 +202,24 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignO
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       {/* Top Header Bar */}
       <header className="h-16 border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-xl px-6 flex items-center justify-between sticky top-0 z-40">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={onBackToApp}
-            className="flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-white px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-800 transition-colors"
-          >
-            <span>&larr;</span> Back to Workspace
-          </button>
-          <div className="h-4 w-px bg-slate-800" />
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-amber-500 to-rose-500 flex items-center justify-center text-xs font-bold text-slate-950 shadow-md shadow-amber-500/20">
-              ⚡
-            </div>
-            <div>
-              <h1 className="text-sm font-bold text-white tracking-tight flex items-center gap-2">
-                DocMind Platform Control Center
-                <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30">
-                  Super Admin
-                </span>
-              </h1>
-              <p className="text-[11px] text-slate-400">
-                {adminEmail ? `Signed in as ${adminEmail} • ` : ''}Live Database Management & Multi-Tenant Governance
-              </p>
-            </div>
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-amber-500 to-rose-500 flex items-center justify-center text-sm font-bold text-slate-950 shadow-md shadow-amber-500/20">
+            ⚡
+          </div>
+          <div>
+            <h1 className="text-sm font-bold text-white tracking-tight flex items-center gap-2">
+              DocMind Super-Admin Control Center
+              <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                Global Platform Admin
+              </span>
+            </h1>
+            <p className="text-[11px] text-slate-400">
+              {adminEmail ? `Signed in as ${adminEmail} • ` : ''}Live Database Governance — All Companies, Users & Infrastructure
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <button
             onClick={loadData}
             disabled={refreshing}
@@ -236,6 +227,14 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignO
           >
             <span className={refreshing ? 'animate-spin inline-block' : ''}>↻</span>
             <span>{refreshing ? 'Syncing DB...' : 'Refresh Database'}</span>
+          </button>
+          <button
+            onClick={onBackToApp}
+            className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-colors"
+            title="Switch to DocMind HQ Document Workspace"
+          >
+            <span>HQ Workspace</span>
+            <span>&rarr;</span>
           </button>
           {onSignOut && (
             <button
@@ -298,6 +297,34 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignO
 
       {/* Main Content Area */}
       <main className="flex-1 p-6 max-w-7xl w-full mx-auto space-y-6">
+        {/* Global Platform KPI Strip */}
+        {overview && (activeAdminTab === 'workspaces' || activeAdminTab === 'users') && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Total Companies / Workspaces</div>
+              <div className="text-2xl font-extrabold text-white mt-1">{overview.total_workspaces}</div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                {overview.active_tiers.ENTERPRISE || 0} Ent • {overview.active_tiers.PRO || 0} Pro • {overview.active_tiers.STARTER || 0} Starter
+              </div>
+            </div>
+            <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Registered Accounts</div>
+              <div className="text-2xl font-extrabold text-cyan-400 mt-1">{overview.total_users}</div>
+              <div className="text-[11px] text-slate-400 mt-1">All Platform Users</div>
+            </div>
+            <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Total Documents</div>
+              <div className="text-2xl font-extrabold text-white mt-1">{overview.total_documents}</div>
+              <div className="text-[11px] text-slate-400 mt-1">{overview.total_chunks} vector chunks</div>
+            </div>
+            <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Total Storage & Q&amp;A</div>
+              <div className="text-2xl font-extrabold text-white mt-1">{formatBytes(overview.total_storage_bytes)}</div>
+              <div className="text-[11px] text-slate-400 mt-1">{overview.total_questions} AI questions answered</div>
+            </div>
+          </div>
+        )}
+
         {/* TAB 1: COMPANIES & WORKSPACES */}
         {activeAdminTab === 'workspaces' && (
           <div className="space-y-4">
