@@ -73,3 +73,4 @@ async def handle_delete_account_job(
     user.verified_at = None
     await db.flush()
     logger.info("User account %s anonymized and solo workspaces purged.", user_id)
+

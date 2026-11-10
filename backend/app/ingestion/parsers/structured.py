@@ -199,3 +199,4 @@ def parse_html(data: bytes) -> ParsedDocument:
         parser_name="html-semantic",
         detected_language="en",
     )
+

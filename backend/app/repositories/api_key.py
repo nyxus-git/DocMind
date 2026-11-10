@@ -63,3 +63,4 @@ class ApiKeyRepository:
         record.revoked_at = datetime.now(timezone.utc)
         await self.db.flush()
         return True
+
