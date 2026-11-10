@@ -1,5 +1,6 @@
-from typing import List
-from pydantic import Field
+import json
+from typing import Any, List, Optional
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +25,31 @@ class Settings(BaseSettings):
             "http://127.0.0.1:3001",
         ]
     )
+    CORS_ORIGIN_REGEX: Optional[str] = None
+
+    @field_validator("CORS_ALLOWED_ORIGINS", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, v: Any) -> List[str]:
+        if isinstance(v, str):
+            v_trimmed = v.strip()
+            if v_trimmed.startswith("[") and v_trimmed.endswith("]"):
+                try:
+                    parsed = json.loads(v_trimmed)
+                    if isinstance(parsed, list):
+                        return [str(o).strip() for o in parsed if str(o).strip()]
+                except Exception:
+                    pass
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        elif isinstance(v, (list, tuple, set)):
+            return [str(origin).strip() for origin in v if str(origin).strip()]
+        return v
+
+    @property
+    def effective_cors_origins(self) -> List[str]:
+        origins = list(self.CORS_ALLOWED_ORIGINS)
+        if self.PUBLIC_APP_URL and self.PUBLIC_APP_URL not in origins:
+            origins.append(self.PUBLIC_APP_URL)
+        return origins
 
     # Cloudflare R2 / S3 Object Storage
     R2_ACCOUNT_ID: str = ""

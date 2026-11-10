@@ -59,6 +59,39 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
   const [verifyEmailSentTo, setVerifyEmailSentTo] = useState<string | null>(null);
   const demoStarted = useRef(false);
 
+  // Server configuration state for production resiliency
+  const [showServerConfig, setShowServerConfig] = useState(false);
+  const [customApiUrl, setCustomApiUrl] = useState('');
+  const [currentApiUrl, setCurrentApiUrl] = useState('');
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [testFeedback, setTestFeedback] = useState<{ ok: boolean; message: string } | null>(null);
+
+  useEffect(() => {
+    const base = ApiClient.getBaseUrl();
+    setCurrentApiUrl(base);
+    setCustomApiUrl(base.replace(/\/api\/v1\/?$/, ''));
+  }, []);
+
+  const saveAndTestServerUrl = async () => {
+    if (!customApiUrl.trim()) return;
+    setTestingConnection(true);
+    setTestFeedback(null);
+    const testResult = await ApiClient.testConnection(customApiUrl);
+    setTestingConnection(false);
+    if (testResult.ok) {
+      ApiClient.setBaseUrl(customApiUrl);
+      const newUrl = ApiClient.getBaseUrl();
+      setCurrentApiUrl(newUrl);
+      setTestFeedback({ ok: true, message: `Connected to ${newUrl}!` });
+      setError(null);
+    } else {
+      setTestFeedback({
+        ok: false,
+        message: testResult.error ? `Could not reach ${customApiUrl}: ${testResult.error}` : `Could not reach ${customApiUrl}.`,
+      });
+    }
+  };
+
   // Already signed in? Go straight to the workspace (unless a demo was requested).
   useEffect(() => {
     if (!demoRequested && loadSession() && ApiClient.getToken()) {
@@ -197,9 +230,58 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
 
       <form onSubmit={onSubmit} className="mt-7 space-y-4" noValidate={false}>
         {error && (
-          <div role="alert" className="flex items-start gap-2.5 rounded-lg bg-danger-soft px-3.5 py-3 text-sm text-danger">
-            <Icon name="alert" className="mt-0.5 size-4" />
-            <span>{error}</span>
+          <div role="alert" className="rounded-lg bg-danger-soft px-3.5 py-3 text-sm text-danger space-y-2">
+            <div className="flex items-start gap-2.5">
+              <Icon name="alert" className="mt-0.5 size-4 shrink-0" />
+              <div className="flex-1">
+                <span>{error}</span>
+                {error.includes('Cannot reach the DocMind server') && (
+                  <div className="mt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowServerConfig(prev => !prev)}
+                      className="text-xs font-semibold underline hover:opacity-80"
+                    >
+                      {showServerConfig ? 'Hide server settings' : 'Configure API server URL →'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {error.includes('Cannot reach the DocMind server') && showServerConfig && (
+              <div className="rounded-md border border-danger/30 bg-bg p-3 text-fg space-y-2.5 mt-2">
+                <div className="text-xs text-muted">
+                  Current API Target: <code className="rounded bg-surface px-1.5 py-0.5 font-mono text-[11px] text-fg border border-line-strong">{currentApiUrl}</code>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={customApiUrl}
+                    onChange={e => setCustomApiUrl(e.target.value)}
+                    placeholder="https://api.yourdomain.com"
+                    className="h-8 flex-1 rounded border border-border bg-surface px-2.5 font-mono text-xs text-fg focus:outline-none focus:ring-1 focus:ring-brand"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={saveAndTestServerUrl}
+                    disabled={testingConnection}
+                  >
+                    {testingConnection ? 'Testing…' : 'Save & Connect'}
+                  </Button>
+                </div>
+                {testFeedback && (
+                  <p className={`text-xs ${testFeedback.ok ? 'text-ok font-medium' : 'text-danger'}`}>
+                    {testFeedback.message}
+                  </p>
+                )}
+                <p className="text-[11px] text-faint">
+                  Note: In production hosting (e.g. Vercel or Cloudflare), configure the <code>NEXT_PUBLIC_API_BASE_URL</code> environment variable in your dashboard to permanently configure this for all users.
+                </p>
+              </div>
+            )}
           </div>
         )}
         {notice && (

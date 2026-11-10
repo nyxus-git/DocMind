@@ -2,6 +2,7 @@ import logging
 import traceback
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.api.v1.admin import router as admin_router
@@ -43,6 +44,37 @@ app = FastAPI(
 app.add_exception_handler(DocMindException, docmind_exception_handler)
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    origin = request.headers.get("Origin") or "*"
+    headers = {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Allow-Methods": "*",
+        "Access-Control-Allow-Headers": "*",
+    }
+    field_errors = []
+    messages = []
+    for err in exc.errors():
+        loc = ".".join(str(item) for item in err.get("loc", []) if item != "body")
+        msg = err.get("msg", "Invalid value")
+        field_errors.append({"field": loc, "issue": msg})
+        messages.append(f"{loc}: {msg}" if loc else msg)
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "type": "https://docmind.ai/errors/validation_error",
+            "title": "Validation Error",
+            "status": 422,
+            "code": "VALIDATION_ERROR",
+            "detail": "; ".join(messages) if messages else "Invalid request data.",
+            "field_errors": field_errors,
+        },
+        headers=headers,
+    )
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     logger.error(
@@ -73,10 +105,14 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 app.add_middleware(RequestLoggingMiddleware)
 
 # CORS configuration
+default_cors_regex = (
+    r"https?://(localhost|127\.0\.0\.1|.*\.vercel\.app|.*\.pages\.dev|.*\.netlify\.app|.*\.railway\.app|.*\.rohanmane\.dev|.*\.docmind\.ai|.*\.docmind\.app|.*\.docmind\.dev)(:[0-9]+)?"
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ALLOWED_ORIGINS,
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|.*\.vercel\.app|.*\.rohanmane\.dev)(:[0-9]+)?",
+    allow_origins=settings.effective_cors_origins,
+    allow_origin_regex=settings.CORS_ORIGIN_REGEX or default_cors_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -210,7 +210,80 @@ export interface InviteMemberResponse {
   message: string;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api/v1';
+/**
+ * Normalizes an API base URL ensuring no trailing slashes and appending /api/v1 if omitted.
+ */
+export function normalizeApiBase(url: string): string {
+  let trimmed = (url || '').trim().replace(/\/+$/, '');
+  if (!trimmed) return '/api/v1';
+  if (!trimmed.endsWith('/api/v1')) {
+    trimmed = `${trimmed}/api/v1`;
+  }
+  return trimmed;
+}
+
+/**
+ * Dynamically resolves the API base URL in priority order:
+ * 1. Runtime URL search query parameter: ?api_base_url=... or ?api_url=...
+ * 2. Runtime localStorage override: 'docmind_api_base_url'
+ * 3. Build-time environment variable: NEXT_PUBLIC_API_BASE_URL
+ * 4. Production browser fallback: same-origin `${window.location.origin}/api/v1`
+ * 5. Local development fallback: 'http://localhost:8000/api/v1'
+ */
+export function getApiBase(): string {
+  if (typeof window !== 'undefined') {
+    // 1. Query parameter override (?api_base_url=... or ?api_url=...)
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const queryApi = params.get('api_base_url') || params.get('api_url');
+      if (queryApi && queryApi.trim()) {
+        const norm = normalizeApiBase(queryApi);
+        localStorage.setItem('docmind_api_base_url', norm);
+        return norm;
+      }
+    } catch {
+      // ignore
+    }
+
+    // 2. Stored user override
+    try {
+      const stored = localStorage.getItem('docmind_api_base_url');
+      if (stored && stored.trim()) {
+        return normalizeApiBase(stored);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 3. Build-time environment variable
+  const envUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+  if (envUrl && envUrl.trim()) {
+    // Detect HTTPS mixed content block if env was baked with http://localhost
+    if (
+      typeof window !== 'undefined' &&
+      window.location.protocol === 'https:' &&
+      (envUrl.includes('localhost') || envUrl.includes('127.0.0.1'))
+    ) {
+      console.warn(
+        `[DocMind API] Build-time NEXT_PUBLIC_API_BASE_URL ("${envUrl}") cannot be fetched over HTTPS from ${window.location.origin}. Falling back to same-origin /api/v1.`
+      );
+      return `${window.location.origin}/api/v1`;
+    }
+    return normalizeApiBase(envUrl);
+  }
+
+  // 4. Production browser fallback
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    const isLocal = host === 'localhost' || host === '127.0.0.1';
+    if (!isLocal) {
+      return `${window.location.origin}/api/v1`;
+    }
+  }
+
+  return 'http://localhost:8000/api/v1';
+}
 
 /** Error thrown for non-2xx API responses. `status` lets the UI react to 401 (expired session), 402/429 (quota), etc. */
 export class ApiError extends Error {
@@ -273,11 +346,61 @@ export class ApiClient {
     return null;
   }
 
+  static getBaseUrl(): string {
+    return getApiBase();
+  }
+
+  static setBaseUrl(url: string): void {
+    if (typeof window !== 'undefined') {
+      if (url && url.trim()) {
+        localStorage.setItem('docmind_api_base_url', normalizeApiBase(url));
+      } else {
+        localStorage.removeItem('docmind_api_base_url');
+      }
+    }
+  }
+
+  static resetBaseUrl(): void {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('docmind_api_base_url');
+    }
+  }
+
+  static async testConnection(targetUrl?: string): Promise<{ ok: boolean; status?: number; error?: string }> {
+    const base = targetUrl ? normalizeApiBase(targetUrl) : getApiBase();
+    try {
+      const rootUrl = base.replace(/\/api\/v1\/?$/, '');
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6000);
+      try {
+        const res = await fetch(`${rootUrl}/health/ready`, { method: 'GET', signal: controller.signal });
+        clearTimeout(timer);
+        if (res && (res.ok || res.status < 500)) {
+          return { ok: true, status: res.status };
+        }
+      } catch {
+        // try root
+      }
+      const controller2 = new AbortController();
+      const timer2 = setTimeout(() => controller2.abort(), 6000);
+      const rootRes = await fetch(`${rootUrl}/`, { method: 'GET', signal: controller2.signal });
+      clearTimeout(timer2);
+      if (rootRes && (rootRes.ok || rootRes.status < 500)) {
+        return { ok: true, status: rootRes.status };
+      }
+      return { ok: false, error: 'Server did not respond with a healthy status.' };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: msg };
+    }
+  }
+
   static async ensureSession(): Promise<string> {
     const existing = this.getToken();
     if (existing) return existing;
+    const base = getApiBase();
     try {
-      const res = await fetch(`${API_BASE}/auth/demo-login`, { method: 'POST' });
+      const res = await fetch(`${base}/auth/demo-login`, { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
         if (data.access_token) {
@@ -287,7 +410,7 @@ export class ApiClient {
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      console.warn('[DocMind API] Auto-session initialization failed:', msg);
+      console.warn(`[DocMind API] Auto-session initialization failed (${base}):`, msg);
     }
     return '';
   }
@@ -312,8 +435,11 @@ export class ApiClient {
       headers['X-Workspace-ID'] = wsId;
     }
 
+    const apiBase = getApiBase();
+    const url = `${apiBase}${endpoint}`;
+
     try {
-      const res = await fetch(`${API_BASE}${endpoint}`, {
+      const res = await fetch(url, {
         ...options,
         headers,
       });
@@ -330,7 +456,7 @@ export class ApiClient {
       return await res.json();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[DocMind API] Request to ${endpoint} failed:`, msg);
+      console.warn(`[DocMind API] Request to ${url} failed:`, msg);
       throw err;
     }
   }

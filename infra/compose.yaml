@@ -47,6 +47,7 @@ services:
       - SMTP_USE_SSL=${SMTP_USE_SSL:-false}
       - PUBLIC_APP_URL=${PUBLIC_APP_URL:-http://localhost:3000}
       - API_BASE_URL=${API_BASE_URL:-http://localhost:8000}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-["http://localhost:3000","http://127.0.0.1:3000","http://localhost:3001","http://127.0.0.1:3001"]}
     networks:
       - docmind-net
     depends_on:

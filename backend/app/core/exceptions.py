@@ -82,4 +82,11 @@ async def docmind_exception_handler(request: Request, exc: Any) -> JSONResponse:
         request_id=request_id,
         field_errors=exc.field_errors,
     )
-    return JSONResponse(status_code=exc.status_code, content=problem.model_dump())
+    origin = request.headers.get("Origin") or "*"
+    headers = {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Allow-Methods": "*",
+        "Access-Control-Allow-Headers": "*",
+    }
+    return JSONResponse(status_code=exc.status_code, content=problem.model_dump(), headers=headers)
