@@ -266,7 +266,7 @@ export function TopBar({
               >
                 <Icon name="sliders" className="size-4 text-muted" /> Settings
               </button>
-              {(session.role === 'OWNER' || session.role === 'ADMIN') && (
+              {Boolean(session.isSuperAdmin) && (
                 <button
                   role="menuitem"
                   type="button"
@@ -274,9 +274,9 @@ export function TopBar({
                     setMenu(false);
                     setTab('admin');
                   }}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm hover:bg-surface-2"
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm hover:bg-surface-2 text-amber-500 hover:text-amber-400 font-medium"
                 >
-                  <Icon name="shield" className="size-4 text-muted" /> Admin Console
+                  <Icon name="shield" className="size-4 text-amber-500" /> Admin Console
                 </button>
               )}
               <Link

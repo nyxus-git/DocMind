@@ -200,6 +200,7 @@ class AuthService:
             email=user.email,
             status=user.status,
             verified=(user.verified_at is not None),
+            is_superadmin=user.is_superadmin,
             active_workspace=ws_dto
         )
 

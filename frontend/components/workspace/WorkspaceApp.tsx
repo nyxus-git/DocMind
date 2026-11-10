@@ -11,7 +11,7 @@ import {
   UsageSummaryDTO,
   WorkspaceDetailDTO,
 } from '../../lib/api';
-import { clearSession, readRawSession, saveSession, UserSession } from '../../lib/session';
+import { clearSession, loadSession, readRawSession, saveSession, UserSession } from '../../lib/session';
 import { Spinner } from '../ui/Button';
 import { ToastProvider, useToast } from '../ui/Toast';
 import { MobileNav, Sidebar, TopBar } from './Chrome';
@@ -125,6 +125,33 @@ function Shell({ session: initialSession }: { session: UserSession }) {
   }, [refreshDocuments, refreshUsage, refreshConversations]);
 
   useEffect(() => {
+    // Sync super-admin status from live backend on mount
+    let cancelled = false;
+    ApiClient.getMyProfile()
+      .then(profile => {
+        if (cancelled) return;
+        const flag = Boolean(profile.is_superadmin);
+        setSession(prev => (Boolean(prev.isSuperAdmin) === flag ? prev : { ...prev, isSuperAdmin: flag }));
+        const stored = loadSession();
+        if (stored && Boolean(stored.isSuperAdmin) !== flag) {
+          saveSession({ ...stored, isSuperAdmin: flag });
+        }
+      })
+      .catch(() => {
+        // ignore background sync failures
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session.email]);
+
+  useEffect(() => {
+    if (tab === 'admin' && !session.isSuperAdmin) {
+      setTab('dashboard');
+    }
+  }, [tab, session.isSuperAdmin, setTab]);
+
+  useEffect(() => {
     // Fetch on mount and whenever the workspace changes.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void reloadAll();
@@ -212,7 +239,7 @@ function Shell({ session: initialSession }: { session: UserSession }) {
     ],
   );
 
-  if (tab === 'admin') {
+  if (tab === 'admin' && session.isSuperAdmin) {
     return (
       <WorkspaceProvider value={ctx}>
         <AdminConsole onBackToApp={() => setTab('dashboard')} />

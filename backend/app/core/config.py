@@ -76,11 +76,13 @@ class Settings(BaseSettings):
     MONTHLY_QUESTION_LIMIT: int = 100
     WORKER_CONCURRENCY: int = 1
 
-    # Security
+    # Security & Platform Administration
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     VERIFICATION_TOKEN_EXPIRE_HOURS: int = 24
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 60
+    PLATFORM_ADMIN_EMAIL: str = "admin@docmind.com"
+    PLATFORM_ADMIN_PASSWORD: str = "Admin@123"
 
     # Transactional Email & SMTP
     EMAIL_ENABLED: bool = True

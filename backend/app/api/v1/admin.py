@@ -1,32 +1,39 @@
 import uuid
 from typing import Dict, List, Optional
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.api.v1.dependencies import get_current_user
+from app.api.v1.dependencies import require_platform_admin
 from app.core.config import settings
 from app.core.exceptions import DocMindException
 from app.db.session import get_db
 from app.models.entities import AuditEvent, Document, DocumentChunk, Message, User, Workspace, WorkspaceMember
-from app.models.enums import DocumentStatus, JobType, WorkspaceRole, WorkspaceTier
+from app.models.enums import DocumentStatus, JobType, UserStatus, WorkspaceRole, WorkspaceTier
 from app.repositories.audit import AuditRepository
 from app.repositories.document import DocumentRepository
 from app.repositories.job import JobRepository
+from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.admin import (
     AdminDocumentSummaryDTO,
     AdminOverviewDTO,
     AdminSystemDiagnosticsDTO,
+    AdminUpdateUserStatusRequest,
+    AdminUserSummaryDTO,
     AdminWorkspaceSummaryDTO,
 )
 from app.schemas.workspace import AuditEventDTO, UpdateWorkspaceTierRequest
 
-router = APIRouter(prefix="/admin", tags=["Platform Administration"])
+router = APIRouter(
+    prefix="/admin",
+    tags=["Platform Administration"],
+    dependencies=[Depends(require_platform_admin)],
+)
 
 
 @router.get("/overview", response_model=AdminOverviewDTO)
 async def get_admin_overview(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_platform_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """Retrieves platform-wide metrics, tenant counts, and service statuses."""
@@ -91,7 +98,7 @@ async def get_admin_overview(
 
 @router.get("/workspaces", response_model=List[AdminWorkspaceSummaryDTO])
 async def list_admin_workspaces(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_platform_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """Lists all customer workspaces with member counts, document totals, and storage used."""
@@ -142,11 +149,52 @@ async def list_admin_workspaces(
     return results
 
 
+@router.delete("/workspaces/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def admin_delete_workspace(
+    workspace_id: uuid.UUID,
+    current_user: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Administrative deletion of a customer workspace and its associated records."""
+    ws_repo = WorkspaceRepository(db)
+    audit_repo = AuditRepository(db)
+
+    ws = await ws_repo.get_by_id(workspace_id)
+    if not ws:
+        raise DocMindException(status_code=404, code="WORKSPACE_NOT_FOUND", title="Not Found", detail="Workspace does not exist.")
+
+    # Prevent deleting platform admin's active workspace
+    if ws.name == "DocMind Platform HQ" or ws.slug.startswith("docmind-hq"):
+        raise DocMindException(
+            status_code=400,
+            code="CANNOT_DELETE_PLATFORM_HQ",
+            title="Action Not Allowed",
+            detail="The platform HQ workspace cannot be deleted."
+        )
+
+    # Persist audit record in platform HQ if available
+    caller_ws = await ws_repo.get_user_workspaces(current_user.id)
+    audit_ws_id = caller_ws[0][0].id if caller_ws and caller_ws[0][0].id != workspace_id else None
+    if audit_ws_id:
+        await audit_repo.record_event(
+            workspace_id=audit_ws_id,
+            actor_user_id=current_user.id,
+            action="ADMIN_WORKSPACE_DELETED",
+            target_type="workspace",
+            target_id=workspace_id,
+            metadata={"workspace_name": ws.name, "slug": ws.slug}
+        )
+
+    await db.delete(ws)
+    await db.flush()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.patch("/workspaces/{workspace_id}/tier", response_model=AdminWorkspaceSummaryDTO)
 async def admin_override_workspace_tier(
     workspace_id: uuid.UUID,
     req: UpdateWorkspaceTierRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_platform_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """Administrative override of workspace subscription tier."""
@@ -207,10 +255,82 @@ async def admin_override_workspace_tier(
     )
 
 
+@router.get("/users", response_model=List[AdminUserSummaryDTO])
+async def list_admin_users(
+    current_user: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Lists all registered users across all customer companies."""
+    users_query = select(User).where(User.status != UserStatus.DELETED.value).order_by(User.created_at.desc())
+    users = (await db.execute(users_query)).scalars().all()
+
+    results: List[AdminUserSummaryDTO] = []
+    for u in users:
+        ws_count = await db.scalar(
+            select(func.count(WorkspaceMember.workspace_id)).where(WorkspaceMember.user_id == u.id)
+        ) or 0
+        results.append(
+            AdminUserSummaryDTO(
+                id=u.id,
+                email=u.email,
+                status=u.status,
+                verified=bool(u.verified_at),
+                is_superadmin=bool(u.is_superadmin),
+                workspace_count=ws_count,
+                created_at=u.created_at
+            )
+        )
+    return results
+
+
+@router.patch("/users/{user_id}/status", response_model=AdminUserSummaryDTO)
+async def admin_update_user_status(
+    user_id: uuid.UUID,
+    req: AdminUpdateUserStatusRequest,
+    current_user: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Administrative activation or suspension of a user account."""
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_id(user_id)
+    if not user:
+        raise DocMindException(status_code=404, code="USER_NOT_FOUND", title="Not Found", detail="User account not found.")
+
+    new_status = req.status.upper().strip()
+    if new_status not in [UserStatus.ACTIVE.value, UserStatus.SUSPENDED.value, UserStatus.UNVERIFIED.value]:
+        raise DocMindException(status_code=400, code="INVALID_STATUS", title="Bad Request", detail=f"Invalid user status: {new_status}")
+
+    # Cannot suspend self or platform admin
+    if user.id == current_user.id or user.email.lower() == settings.PLATFORM_ADMIN_EMAIL.lower():
+        raise DocMindException(status_code=400, code="CANNOT_SUSPEND_ADMIN", title="Bad Request", detail="Platform Super-Administrator account status cannot be altered.")
+
+    from app.models.entities import utc_now
+    user.status = new_status
+    if new_status == UserStatus.ACTIVE.value and not user.verified_at:
+        user.verified_at = utc_now()
+    if new_status == UserStatus.SUSPENDED.value:
+        await user_repo.revoke_all_user_sessions(user.id)
+    await db.flush()
+
+    ws_count = await db.scalar(
+        select(func.count(WorkspaceMember.workspace_id)).where(WorkspaceMember.user_id == user.id)
+    ) or 0
+
+    return AdminUserSummaryDTO(
+        id=user.id,
+        email=user.email,
+        status=user.status,
+        verified=bool(user.verified_at),
+        is_superadmin=bool(user.is_superadmin),
+        workspace_count=ws_count,
+        created_at=user.created_at
+    )
+
+
 @router.get("/documents", response_model=List[AdminDocumentSummaryDTO])
 async def list_admin_documents(
     status_filter: Optional[str] = Query(None, alias="status"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_platform_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """Lists documents across all customer workspaces with error inspection."""
@@ -247,7 +367,7 @@ async def list_admin_documents(
 @router.post("/documents/{document_id}/retry", status_code=status.HTTP_200_OK)
 async def admin_retry_document(
     document_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_platform_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """Requeues a failed document for worker OCR & vector ingestion."""
@@ -281,7 +401,7 @@ async def admin_retry_document(
 @router.get("/audit-logs", response_model=List[AuditEventDTO])
 async def list_admin_audit_logs(
     limit: int = Query(100, ge=1, le=500),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_platform_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """Returns platform-wide audit logs across all customer organizations."""
@@ -305,7 +425,7 @@ async def list_admin_audit_logs(
 
 @router.get("/system", response_model=AdminSystemDiagnosticsDTO)
 async def get_admin_system_diagnostics(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_platform_admin)
 ):
     """Returns runtime infrastructure diagnostics."""
     storage_provider = "Cloudflare R2" if settings.R2_ACCOUNT_ID and settings.R2_ACCESS_KEY_ID else "Local Filesystem Fallback"

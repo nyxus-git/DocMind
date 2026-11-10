@@ -6,6 +6,7 @@ export interface UserSession {
   workspaceId?: string;
   isCompany: boolean;
   role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
+  isSuperAdmin?: boolean;
 }
 
 const SESSION_KEY = 'docmind_user_session';

@@ -3,6 +3,7 @@ from typing import Optional
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.config import settings
 from app.core.exceptions import CrossTenantAccessException, DocMindException
 from app.core.security import decode_access_token
 from app.db.session import get_db
@@ -109,3 +110,23 @@ async def get_current_workspace(
     # Default to first personal/accessible workspace
     default_ws, default_role = workspaces[0]
     return WorkspaceContext(workspace=default_ws, user=current_user, role=default_role)
+
+
+async def require_platform_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """
+    Enforces platform super-admin privileges.
+    Strictly denies regular tenant owners or members.
+    """
+    is_super = current_user.is_superadmin or (
+        bool(settings.PLATFORM_ADMIN_EMAIL) and current_user.email.lower() == settings.PLATFORM_ADMIN_EMAIL.lower()
+    )
+    if not is_super:
+        raise DocMindException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="PLATFORM_ADMIN_REQUIRED",
+            title="Access Denied",
+            detail="Platform Administrator privileges are required to access this resource."
+        )
+    return current_user

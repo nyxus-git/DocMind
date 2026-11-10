@@ -26,8 +26,14 @@ export async function establishSession(email: string, fullName?: string): Promis
   }
 
   let workspaces: WorkspaceDetailDTO[] = [];
+  let isSuperAdmin = false;
   try {
-    workspaces = await ApiClient.listWorkspaces();
+    const [wsList, profile] = await Promise.all([
+      ApiClient.listWorkspaces(),
+      ApiClient.getMyProfile().catch(() => null),
+    ]);
+    workspaces = wsList;
+    isSuperAdmin = Boolean(profile?.is_superadmin);
   } catch {
     // fall through with a minimal session
   }
@@ -47,6 +53,7 @@ export async function establishSession(email: string, fullName?: string): Promis
     workspaceId: ws?.id,
     isCompany: ws ? !/personal/i.test(ws.name) : false,
     role: (ws?.role as UserSession['role']) ?? 'OWNER',
+    isSuperAdmin,
   };
   saveSession(session);
   return session;

@@ -1,7 +1,13 @@
 import asyncio
 import logging
-from sqlalchemy import text
-from app.db.session import async_engine, Base
+from datetime import datetime, timezone
+from sqlalchemy import select, text
+from app.core.config import settings
+from app.core.security import hash_password
+from app.db.session import AsyncSessionLocal, async_engine, Base
+from app.models.entities import User
+from app.models.enums import UserStatus, WorkspaceTier
+from app.repositories.workspace import WorkspaceRepository
 import app.models.entities  # noqa: F401
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -14,8 +20,69 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS tier VARCHAR(32) NOT NULL DEFAULT 'STARTER';",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP WITH TIME ZONE NULL;",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(32) NOT NULL DEFAULT 'UNVERIFIED';",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN NOT NULL DEFAULT FALSE;",
     "CREATE INDEX IF NOT EXISTS ix_workspaces_tier ON workspaces (tier);",
 ]
+
+
+async def seed_platform_admin() -> None:
+    admin_email = settings.PLATFORM_ADMIN_EMAIL.strip().lower()
+    admin_password = settings.PLATFORM_ADMIN_PASSWORD
+    if not admin_email or not admin_password:
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(User).where(User.email == admin_email))
+            user = result.scalar_one_or_none()
+            pw_hash = hash_password(admin_password)
+            now = datetime.now(timezone.utc)
+
+            if not user:
+                user = User(
+                    email=admin_email,
+                    password_hash=pw_hash,
+                    status=UserStatus.ACTIVE.value,
+                    is_superadmin=True,
+                    verified_at=now,
+                )
+                db.add(user)
+                await db.flush()
+                logger.info("Created platform super-admin account: %s", admin_email)
+            else:
+                changed = False
+                if not user.is_superadmin:
+                    user.is_superadmin = True
+                    changed = True
+                if user.status != UserStatus.ACTIVE.value:
+                    user.status = UserStatus.ACTIVE.value
+                    changed = True
+                if not user.verified_at:
+                    user.verified_at = now
+                    changed = True
+                # Ensure configured platform admin password stays synced
+                from app.core.security import verify_password
+                if not verify_password(admin_password, user.password_hash):
+                    user.password_hash = pw_hash
+                    changed = True
+                if changed:
+                    await db.flush()
+                    logger.info("Updated platform super-admin account: %s", admin_email)
+
+            ws_repo = WorkspaceRepository(db)
+            workspaces = await ws_repo.get_user_workspaces(user.id)
+            if not workspaces:
+                await ws_repo.create_workspace(
+                    name="DocMind Platform HQ",
+                    slug=f"docmind-hq-{user.id.hex[:6]}",
+                    created_by=user.id,
+                    tier=WorkspaceTier.ENTERPRISE.value,
+                )
+                logger.info("Created default platform HQ workspace for %s", admin_email)
+
+            await db.commit()
+    except Exception as e:
+        logger.warning("Platform super-admin seed check note: %s", e)
 
 
 async def run_migrations():
@@ -32,6 +99,9 @@ async def run_migrations():
                 await conn.execute(text(stmt))
             except Exception as e:
                 logger.warning("Migration statement note: %s -> %s", stmt, e)
+
+    # 3. Seed platform super-admin
+    await seed_platform_admin()
 
     logger.info("All DocMind schema migrations applied successfully.")
 

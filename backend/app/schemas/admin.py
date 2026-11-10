@@ -60,3 +60,17 @@ class AdminSystemDiagnosticsDTO(BaseModel):
     public_app_url: str
     api_base_url: str
 
+
+class AdminUserSummaryDTO(BaseModel):
+    id: uuid.UUID
+    email: str
+    status: str
+    verified: bool
+    is_superadmin: bool
+    workspace_count: int
+    created_at: datetime
+
+
+class AdminUpdateUserStatusRequest(BaseModel):
+    status: str
+

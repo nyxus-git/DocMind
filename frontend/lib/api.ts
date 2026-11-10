@@ -55,6 +55,31 @@ export interface AdminSystemDiagnosticsDTO {
   api_base_url: string;
 }
 
+export interface AdminUserSummaryDTO {
+  id: string;
+  email: string;
+  status: string;
+  verified: boolean;
+  is_superadmin: boolean;
+  workspace_count: number;
+  created_at: string;
+}
+
+export interface UserProfileDTO {
+  id: string;
+  email: string;
+  status: string;
+  verified: boolean;
+  is_superadmin: boolean;
+  created_at: string;
+  active_workspace?: {
+    id: string;
+    name: string;
+    slug: string;
+    role: string;
+  };
+}
+
 export interface DocumentDTO {
   id: string;
   workspace_id: string;
@@ -670,6 +695,10 @@ export class ApiClient {
     return this.request<TierSpecDTO[]>('/tiers');
   }
 
+  static async getMyProfile(): Promise<UserProfileDTO> {
+    return this.request<UserProfileDTO>('/me');
+  }
+
   // Admin Platform Methods
   static async getAdminOverview(): Promise<AdminOverviewDTO> {
     return this.request<AdminOverviewDTO>('/admin/overview');
@@ -679,10 +708,27 @@ export class ApiClient {
     return this.request<AdminWorkspaceSummaryDTO[]>('/admin/workspaces');
   }
 
+  static async deleteAdminWorkspace(workspaceId: string): Promise<void> {
+    return this.request<void>(`/admin/workspaces/${workspaceId}`, {
+      method: 'DELETE',
+    });
+  }
+
   static async updateAdminWorkspaceTier(workspaceId: string, tier: string): Promise<AdminWorkspaceSummaryDTO> {
     return this.request<AdminWorkspaceSummaryDTO>(`/admin/workspaces/${workspaceId}/tier`, {
       method: 'PATCH',
       body: JSON.stringify({ tier }),
+    });
+  }
+
+  static async getAdminUsers(): Promise<AdminUserSummaryDTO[]> {
+    return this.request<AdminUserSummaryDTO[]>('/admin/users');
+  }
+
+  static async updateAdminUserStatus(userId: string, status: string): Promise<AdminUserSummaryDTO> {
+    return this.request<AdminUserSummaryDTO>(`/admin/users/${userId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
     });
   }
 

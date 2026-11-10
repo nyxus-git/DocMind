@@ -45,6 +45,7 @@ class UserSummaryDTO(BaseModel):
     email: str
     status: str
     verified: bool
+    is_superadmin: bool = False
     active_workspace: Optional[WorkspaceSummaryDTO] = None
 
 
@@ -53,6 +54,7 @@ class UserProfileDTO(BaseModel):
     email: str
     status: str
     verified: bool
+    is_superadmin: bool = False
     created_at: datetime
     active_workspace: Optional[WorkspaceSummaryDTO] = None
 

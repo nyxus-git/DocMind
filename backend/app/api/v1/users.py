@@ -28,6 +28,7 @@ async def get_my_profile(
         email=ctx.user.email,
         status=ctx.user.status,
         verified=(ctx.user.verified_at is not None),
+        is_superadmin=ctx.user.is_superadmin,
         created_at=ctx.user.created_at,
         active_workspace=WorkspaceSummaryDTO(
             id=ctx.workspace.id,
@@ -54,6 +55,7 @@ async def update_my_profile(
         email=ctx.user.email,
         status=ctx.user.status,
         verified=(ctx.user.verified_at is not None),
+        is_superadmin=ctx.user.is_superadmin,
         created_at=ctx.user.created_at,
         active_workspace=WorkspaceSummaryDTO(
             id=ctx.workspace.id,

@@ -67,9 +67,12 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
   const [testFeedback, setTestFeedback] = useState<{ ok: boolean; message: string } | null>(null);
 
   useEffect(() => {
-    const base = ApiClient.getBaseUrl();
-    setCurrentApiUrl(base);
-    setCustomApiUrl(base.replace(/\/api\/v1\/?$/, ''));
+    const id = setTimeout(() => {
+      const base = ApiClient.getBaseUrl();
+      setCurrentApiUrl(base);
+      setCustomApiUrl(base.replace(/\/api\/v1\/?$/, ''));
+    }, 0);
+    return () => clearTimeout(id);
   }, []);
 
   const saveAndTestServerUrl = async () => {
