@@ -1,26 +1,37 @@
+import csv
+import io
+import json
 import re
 import uuid
 from typing import List
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.email.smtp import get_email_provider
 from app.api.v1.dependencies import get_current_user
 from app.core.config import settings
 from app.core.exceptions import CrossTenantAccessException, DocMindException
+from app.core.security import generate_secure_token, hash_token
 from app.db.session import get_db
 from app.models.entities import User
 from app.models.enums import WorkspaceRole, WorkspaceTier
+from app.repositories.api_key import ApiKeyRepository
 from app.repositories.audit import AuditRepository
 from app.repositories.document import DocumentRepository
 from app.repositories.usage import UsageRepository
 from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.workspace import (
+    ApiKeyDTO,
     AuditEventDTO,
+    CreateApiKeyRequest,
+    CreateApiKeyResponse,
     CreateCompanyWorkspaceRequest,
     InviteMemberRequest,
     InviteMemberResponse,
+    PendingInviteDTO,
+    TransferOwnershipRequest,
     UpdateMemberRoleRequest,
+    UpdateWorkspaceRequest,
     UpdateWorkspaceTierRequest,
     WorkspaceDetailDTO,
     WorkspaceMemberDTO,
@@ -297,7 +308,18 @@ async def invite_workspace_member(
             message=f"Added {req.email} directly to workspace as {target_role}."
         )
 
-    # User does not exist yet; register invite and audit
+    # User does not exist yet; persist pending invitation + audit
+    raw_invite_token = generate_secure_token(24)
+    await ws_repo.create_invitation(
+        workspace_id=workspace_id,
+        email=req.email,
+        role=target_role,
+        invited_by=current_user.id,
+        token_hash=hash_token(raw_invite_token),
+        expires_days=7,
+    )
+    invite_link_with_tok = f"{invite_link}&invite_token={raw_invite_token}"
+
     await audit_repo.record_event(
         workspace_id=workspace_id,
         actor_user_id=current_user.id,
@@ -310,7 +332,7 @@ async def invite_workspace_member(
             to_email=req.email,
             inviter_email=current_user.email,
             workspace_name=ws_name,
-            invite_link=invite_link
+            invite_link=invite_link_with_tok
         )
     except Exception:
         pass
@@ -322,6 +344,52 @@ async def invite_workspace_member(
         status="INVITED",
         message=f"Invitation sent to {req.email}. Member will be automatically linked upon account creation."
     )
+
+
+@router.get("/{workspace_id}/invites", response_model=List[PendingInviteDTO])
+async def list_pending_invites(
+    workspace_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Lists active pending workspace invitations (OWNER / ADMIN)."""
+    ws_repo = WorkspaceRepository(db)
+    membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
+    if not membership or membership.role not in [WorkspaceRole.OWNER.value, WorkspaceRole.ADMIN.value]:
+        raise DocMindException(status_code=403, code="INSUFFICIENT_PERMISSIONS", title="Forbidden", detail="Only workspace Owners and Admins can view invitations.")
+
+    invites = await ws_repo.list_pending_invitations(workspace_id)
+    return [
+        PendingInviteDTO(
+            id=inv.id,
+            workspace_id=inv.workspace_id,
+            email=inv.email,
+            role=inv.role,
+            status=inv.status,
+            expires_at=inv.expires_at,
+            created_at=inv.created_at,
+        )
+        for inv in invites
+    ]
+
+
+@router.delete("/{workspace_id}/invites/{invite_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_pending_invite(
+    workspace_id: uuid.UUID,
+    invite_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Revokes a pending workspace invitation."""
+    ws_repo = WorkspaceRepository(db)
+    membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
+    if not membership or membership.role not in [WorkspaceRole.OWNER.value, WorkspaceRole.ADMIN.value]:
+        raise DocMindException(status_code=403, code="INSUFFICIENT_PERMISSIONS", title="Forbidden", detail="Only workspace Owners and Admins can revoke invitations.")
+
+    revoked = await ws_repo.revoke_invitation(workspace_id, invite_id)
+    if not revoked:
+        raise DocMindException(status_code=404, code="INVITE_NOT_FOUND", title="Not Found", detail="Pending invitation not found.")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.patch("/{workspace_id}/members/{target_user_id}", response_model=WorkspaceMemberDTO)
@@ -457,3 +525,222 @@ async def list_workspace_audit_logs(
         )
         for event, actor_email in events
     ]
+
+
+@router.get("/{workspace_id}/audit-logs/export")
+async def export_workspace_audit_logs(
+    workspace_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Exports workspace audit trail as CSV for compliance & SOC 2 reporting."""
+    ws_repo = WorkspaceRepository(db)
+    audit_repo = AuditRepository(db)
+
+    membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
+    if not membership or membership.role not in [WorkspaceRole.OWNER.value, WorkspaceRole.ADMIN.value]:
+        raise DocMindException(status_code=403, code="INSUFFICIENT_PERMISSIONS", title="Forbidden", detail="Only workspace Owners and Admins can export audit logs.")
+
+    events = await audit_repo.list_events(workspace_id, limit=1000, offset=0)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Timestamp (UTC)", "Actor Email", "Action", "Target Type", "Target ID", "Metadata JSON"])
+    for event, actor_email in events:
+        writer.writerow([
+            event.created_at.isoformat(),
+            actor_email or "system",
+            event.action,
+            event.target_type,
+            str(event.target_id) if event.target_id else "",
+            json.dumps(event.audit_metadata or {}),
+        ])
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="docmind_audit_{workspace_id}.csv"'},
+    )
+
+
+@router.patch("/{workspace_id}", response_model=WorkspaceDetailDTO)
+async def update_workspace_name(
+    workspace_id: uuid.UUID,
+    req: UpdateWorkspaceRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Renames a workspace (restricted to OWNER / ADMIN)."""
+    ws_repo = WorkspaceRepository(db)
+    audit_repo = AuditRepository(db)
+
+    membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
+    if not membership or membership.role not in [WorkspaceRole.OWNER.value, WorkspaceRole.ADMIN.value]:
+        raise DocMindException(status_code=403, code="INSUFFICIENT_PERMISSIONS", title="Forbidden", detail="Only workspace Owners and Admins can rename this workspace.")
+
+    updated = await ws_repo.rename_workspace(workspace_id, req.name)
+    if not updated:
+        raise DocMindException(status_code=404, code="WORKSPACE_NOT_FOUND", title="Not Found", detail="Workspace does not exist.")
+
+    await audit_repo.record_event(
+        workspace_id=workspace_id,
+        actor_user_id=current_user.id,
+        action="WORKSPACE_RENAMED",
+        target_type="workspace",
+        target_id=workspace_id,
+        metadata={"name": updated.name}
+    )
+
+    count = await ws_repo.count_workspace_members(workspace_id)
+    return WorkspaceDetailDTO(
+        id=updated.id,
+        name=updated.name,
+        slug=updated.slug,
+        tier=updated.tier,
+        role=membership.role,
+        created_at=updated.created_at,
+        member_count=count
+    )
+
+
+@router.post("/{workspace_id}/transfer-ownership", response_model=WorkspaceMemberDTO)
+async def transfer_workspace_ownership(
+    workspace_id: uuid.UUID,
+    req: TransferOwnershipRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Transfers workspace OWNER role to another existing member."""
+    ws_repo = WorkspaceRepository(db)
+    user_repo = UserRepository(db)
+    audit_repo = AuditRepository(db)
+
+    if req.new_owner_user_id == current_user.id:
+        raise DocMindException(status_code=400, code="SAME_OWNER", title="Bad Request", detail="You are already the workspace owner.")
+
+    updated_member = await ws_repo.transfer_ownership(workspace_id, current_user.id, req.new_owner_user_id)
+    if not updated_member:
+        raise DocMindException(status_code=403, code="TRANSFER_FAILED", title="Forbidden", detail="Only current workspace Owner can transfer ownership to an existing member.")
+
+    await audit_repo.record_event(
+        workspace_id=workspace_id,
+        actor_user_id=current_user.id,
+        action="WORKSPACE_OWNERSHIP_TRANSFERRED",
+        target_type="user",
+        target_id=req.new_owner_user_id,
+        metadata={"previous_owner": str(current_user.id)}
+    )
+
+    target_user = await user_repo.get_by_id(req.new_owner_user_id)
+    return WorkspaceMemberDTO(
+        user_id=req.new_owner_user_id,
+        email=target_user.email if target_user else "unknown",
+        role=updated_member.role,
+        joined_at=updated_member.joined_at
+    )
+
+
+@router.get("/{workspace_id}/api-keys", response_model=List[ApiKeyDTO])
+async def list_workspace_api_keys(
+    workspace_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Lists active API keys for programmatic access to this workspace."""
+    ws_repo = WorkspaceRepository(db)
+    membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
+    if not membership or membership.role not in [WorkspaceRole.OWNER.value, WorkspaceRole.ADMIN.value]:
+        raise DocMindException(status_code=403, code="INSUFFICIENT_PERMISSIONS", title="Forbidden", detail="Only workspace Owners and Admins can manage API keys.")
+
+    api_repo = ApiKeyRepository(db)
+    keys = await api_repo.list_keys(workspace_id)
+    return [
+        ApiKeyDTO(
+            id=k.id,
+            name=k.name,
+            key_prefix=k.key_prefix,
+            scopes=list(k.scopes or ["read", "write"]),
+            last_used_at=k.last_used_at,
+            created_at=k.created_at,
+        )
+        for k in keys
+    ]
+
+
+@router.post("/{workspace_id}/api-keys", response_model=CreateApiKeyResponse, status_code=status.HTTP_201_CREATED)
+async def create_workspace_api_key(
+    workspace_id: uuid.UUID,
+    req: CreateApiKeyRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Creates a new scoped workspace API key; full secret is returned only once."""
+    ws_repo = WorkspaceRepository(db)
+    audit_repo = AuditRepository(db)
+
+    membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
+    if not membership or membership.role not in [WorkspaceRole.OWNER.value, WorkspaceRole.ADMIN.value]:
+        raise DocMindException(status_code=403, code="INSUFFICIENT_PERMISSIONS", title="Forbidden", detail="Only workspace Owners and Admins can create API keys.")
+
+    valid_scopes = [s for s in req.scopes if s in ("read", "write")] or ["read", "write"]
+    raw_secret = f"dm_live_{generate_secure_token(24)}"
+    key_prefix = f"{raw_secret[:14]}..."
+    key_hash = hash_token(raw_secret)
+
+    api_repo = ApiKeyRepository(db)
+    rec = await api_repo.create_key(
+        workspace_id=workspace_id,
+        created_by=current_user.id,
+        name=req.name,
+        key_prefix=key_prefix,
+        key_hash=key_hash,
+        scopes=valid_scopes,
+    )
+
+    await audit_repo.record_event(
+        workspace_id=workspace_id,
+        actor_user_id=current_user.id,
+        action="API_KEY_CREATED",
+        target_type="api_key",
+        target_id=rec.id,
+        metadata={"name": rec.name, "scopes": valid_scopes}
+    )
+
+    return CreateApiKeyResponse(
+        id=rec.id,
+        name=rec.name,
+        key_prefix=rec.key_prefix,
+        scopes=valid_scopes,
+        last_used_at=rec.last_used_at,
+        created_at=rec.created_at,
+        secret_key=raw_secret,
+    )
+
+
+@router.delete("/{workspace_id}/api-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_workspace_api_key(
+    workspace_id: uuid.UUID,
+    key_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Revokes a workspace API key immediately."""
+    ws_repo = WorkspaceRepository(db)
+    audit_repo = AuditRepository(db)
+
+    membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
+    if not membership or membership.role not in [WorkspaceRole.OWNER.value, WorkspaceRole.ADMIN.value]:
+        raise DocMindException(status_code=403, code="INSUFFICIENT_PERMISSIONS", title="Forbidden", detail="Only workspace Owners and Admins can revoke API keys.")
+
+    api_repo = ApiKeyRepository(db)
+    revoked = await api_repo.revoke_key(workspace_id, key_id)
+    if not revoked:
+        raise DocMindException(status_code=404, code="API_KEY_NOT_FOUND", title="Not Found", detail="Active API key not found.")
+
+    await audit_repo.record_event(
+        workspace_id=workspace_id,
+        actor_user_id=current_user.id,
+        action="API_KEY_REVOKED",
+        target_type="api_key",
+        target_id=key_id,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

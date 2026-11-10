@@ -1,8 +1,9 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.entities import User, Workspace, WorkspaceMember
+from app.models.entities import User, Workspace, WorkspaceInvitation, WorkspaceMember
 from app.models.enums import WorkspaceRole, WorkspaceTier
 
 
@@ -104,3 +105,119 @@ class WorkspaceRepository:
         ws.tier = tier
         await self.db.flush()
         return ws
+
+    async def rename_workspace(self, workspace_id: uuid.UUID, name: str) -> Optional[Workspace]:
+        ws = await self.get_by_id(workspace_id)
+        if not ws:
+            return None
+        ws.name = name.strip()
+        await self.db.flush()
+        return ws
+
+    async def transfer_ownership(
+        self,
+        workspace_id: uuid.UUID,
+        current_owner_id: uuid.UUID,
+        new_owner_id: uuid.UUID,
+    ) -> Optional[WorkspaceMember]:
+        cur = await self.get_user_membership(workspace_id, current_owner_id)
+        target = await self.get_user_membership(workspace_id, new_owner_id)
+        if not cur or not target or cur.role != WorkspaceRole.OWNER.value:
+            return None
+        cur.role = WorkspaceRole.ADMIN.value
+        target.role = WorkspaceRole.OWNER.value
+        await self.db.flush()
+        return target
+
+    async def create_invitation(
+        self,
+        workspace_id: uuid.UUID,
+        email: str,
+        role: str,
+        invited_by: uuid.UUID,
+        token_hash: str,
+        expires_days: int = 7,
+    ) -> WorkspaceInvitation:
+        norm_email = email.strip().lower()
+        # Revoke any older pending invites to the same email in this workspace
+        existing_res = await self.db.execute(
+            select(WorkspaceInvitation).where(
+                WorkspaceInvitation.workspace_id == workspace_id,
+                WorkspaceInvitation.email == norm_email,
+                WorkspaceInvitation.status == "PENDING",
+            )
+        )
+        for old_inv in existing_res.scalars().all():
+            old_inv.status = "REVOKED"
+
+        inv = WorkspaceInvitation(
+            workspace_id=workspace_id,
+            email=norm_email,
+            role=role,
+            invited_by=invited_by,
+            token_hash=token_hash,
+            status="PENDING",
+            expires_at=datetime.now(timezone.utc) + timedelta(days=expires_days),
+        )
+        self.db.add(inv)
+        await self.db.flush()
+        return inv
+
+    async def list_pending_invitations(self, workspace_id: uuid.UUID) -> List[WorkspaceInvitation]:
+        result = await self.db.execute(
+            select(WorkspaceInvitation)
+            .where(
+                WorkspaceInvitation.workspace_id == workspace_id,
+                WorkspaceInvitation.status == "PENDING",
+            )
+            .order_by(WorkspaceInvitation.created_at.desc())
+        )
+        now = datetime.now(timezone.utc)
+        valid: List[WorkspaceInvitation] = []
+        for inv in result.scalars().all():
+            exp = inv.expires_at if inv.expires_at.tzinfo else inv.expires_at.replace(tzinfo=timezone.utc)
+            if exp > now:
+                valid.append(inv)
+        return valid
+
+    async def revoke_invitation(self, workspace_id: uuid.UUID, invite_id: uuid.UUID) -> bool:
+        result = await self.db.execute(
+            select(WorkspaceInvitation).where(
+                WorkspaceInvitation.id == invite_id,
+                WorkspaceInvitation.workspace_id == workspace_id,
+                WorkspaceInvitation.status == "PENDING",
+            )
+        )
+        inv = result.scalar_one_or_none()
+        if not inv:
+            return False
+        inv.status = "REVOKED"
+        await self.db.flush()
+        return True
+
+    async def accept_pending_invitations_for_user(self, user_id: uuid.UUID, email: str) -> List[uuid.UUID]:
+        """Auto-links a user to any workspaces with active PENDING invitations matching their email."""
+        norm_email = email.strip().lower()
+        now = datetime.now(timezone.utc)
+        result = await self.db.execute(
+            select(WorkspaceInvitation).where(
+                WorkspaceInvitation.email == norm_email,
+                WorkspaceInvitation.status == "PENDING",
+            )
+        )
+        joined_ws_ids: List[uuid.UUID] = []
+        for inv in result.scalars().all():
+            exp = inv.expires_at if inv.expires_at.tzinfo else inv.expires_at.replace(tzinfo=timezone.utc)
+            if exp < now:
+                inv.status = "EXPIRED"
+                continue
+
+            existing_mem = await self.get_user_membership(inv.workspace_id, user_id)
+            if not existing_mem:
+                await self.add_member(inv.workspace_id, user_id, inv.role)
+            inv.status = "ACCEPTED"
+            inv.accepted_at = now
+            joined_ws_ids.append(inv.workspace_id)
+
+        await self.db.flush()
+        return joined_ws_ids

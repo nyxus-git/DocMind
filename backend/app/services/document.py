@@ -36,8 +36,9 @@ class DocumentService:
         size_bytes: int,
         checksum_sha256: str
     ) -> UploadIntentResponse:
-        # 1. Validate file metadata (whitelist, max 20 MB base)
-        validate_file_metadata(filename, declared_mime, size_bytes)
+        # 1. Resolve workspace tier limits & validate file metadata
+        limits = await self.quota_service.get_tier_limits(workspace_id)
+        validate_file_metadata(filename, declared_mime, size_bytes, max_file_mb=limits.max_file_mb)
 
         # 2. Check dynamic workspace tier quotas & user concurrent uploads
         await self.quota_service.check_upload_quota(workspace_id, size_bytes, user_id=user_id)

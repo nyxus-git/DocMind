@@ -54,6 +54,12 @@ class AuthService:
             created_by=user.id
         )
 
+        # Auto-accept any pending workspace invitations for this email
+        try:
+            await self.workspace_repo.accept_pending_invitations_for_user(user.id, user.email)
+        except Exception:
+            pass
+
         verification_token = create_email_verification_token(str(user.id))
         verification_link = f"{settings.PUBLIC_APP_URL}/auth?token={verification_token}&action=verify"
         try:
@@ -151,9 +157,28 @@ class AuthService:
         await self.user_repo.update_password(user.id, new_password_hash)
         await self.user_repo.revoke_all_user_sessions(user.id)
 
+    async def resend_verification(self, email: str) -> None:
+        user = await self.user_repo.get_by_email(email)
+        if not user or user.verified_at or user.status in (UserStatus.SUSPENDED.value, UserStatus.DELETED.value):
+            return
+        token = create_email_verification_token(str(user.id))
+        link = f"{settings.PUBLIC_APP_URL}/auth?token={token}&action=verify"
+        try:
+            await self.email_provider.send_verification_email(user.email, link)
+        except Exception:
+            pass
+
     async def login(self, email: str, password: str) -> Tuple[TokenResponse, str, UserSummaryDTO]:
         user = await self.user_repo.get_by_email(email)
         if not user or not verify_password(password, user.password_hash):
+            raise DocMindException(
+                status_code=401,
+                code="INVALID_CREDENTIALS",
+                title="Authentication Failed",
+                detail="Incorrect email or password."
+            )
+
+        if user.status == UserStatus.DELETED.value:
             raise DocMindException(
                 status_code=401,
                 code="INVALID_CREDENTIALS",
@@ -168,6 +193,19 @@ class AuthService:
                 title="Account Suspended",
                 detail="This account has been suspended."
             )
+
+        if settings.REQUIRE_EMAIL_VERIFICATION and not user.verified_at and not user.is_superadmin:
+            raise DocMindException(
+                status_code=403,
+                code="EMAIL_VERIFICATION_REQUIRED",
+                title="Verification Required",
+                detail="Please verify your email address before signing in. Check your inbox or request a new link."
+            )
+
+        try:
+            await self.workspace_repo.accept_pending_invitations_for_user(user.id, user.email)
+        except Exception:
+            pass
 
         workspaces = await self.workspace_repo.get_user_workspaces(user.id)
         active_ws, active_role = workspaces[0] if workspaces else (None, None)

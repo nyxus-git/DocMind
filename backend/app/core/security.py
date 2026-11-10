@@ -1,7 +1,8 @@
 import hashlib
+import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
@@ -129,3 +130,21 @@ def verify_password_reset_token(token: str, current_password_hash: str) -> Optio
     if payload.get("pwhash") != pwhash_fingerprint:
         return None
     return str(payload.get("sub"))
+
+
+def sign_storage_key(object_key: str, action: str, expires_in: int = 300) -> Tuple[int, str]:
+    """Generates HMAC-SHA256 signature and expiration epoch for local object storage URLs."""
+    exp = int(datetime.now(timezone.utc).timestamp()) + expires_in
+    msg = f"{action}:{object_key}:{exp}".encode("utf-8")
+    sig = hmac.new(settings.APP_SECRET_KEY.encode("utf-8"), msg, hashlib.sha256).hexdigest()
+    return exp, sig
+
+
+def verify_storage_signature(object_key: str, action: str, exp: int, sig: str) -> bool:
+    """Validates HMAC signature and expiration timestamp for signed local storage URLs."""
+    now = int(datetime.now(timezone.utc).timestamp())
+    if exp < now:
+        return False
+    msg = f"{action}:{object_key}:{exp}".encode("utf-8")
+    expected = hmac.new(settings.APP_SECRET_KEY.encode("utf-8"), msg, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, sig or "")

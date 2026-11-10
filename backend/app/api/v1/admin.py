@@ -1,3 +1,7 @@
+import csv
+import io
+import json
+import re
 import uuid
 from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, Query, Response, status
@@ -6,16 +10,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.dependencies import require_platform_admin
 from app.core.config import settings
 from app.core.exceptions import DocMindException
+from app.core.security import hash_password
 from app.db.session import get_db
-from app.models.entities import AuditEvent, Document, DocumentChunk, Message, User, Workspace, WorkspaceMember
-from app.models.enums import DocumentStatus, JobType, UserStatus, WorkspaceRole, WorkspaceTier
+from app.models.entities import AuditEvent, Document, DocumentChunk, Job, Message, User, Workspace, WorkspaceMember, utc_now
+from app.models.enums import DocumentStatus, JobStatus, JobType, UserStatus, WorkspaceRole, WorkspaceTier
 from app.repositories.audit import AuditRepository
 from app.repositories.document import DocumentRepository
 from app.repositories.job import JobRepository
+from app.repositories.usage import UsageRepository
 from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.admin import (
+    AdminCreateWorkspaceRequest,
     AdminDocumentSummaryDTO,
+    AdminJobSummaryDTO,
     AdminOverviewDTO,
     AdminSystemDiagnosticsDTO,
     AdminUpdateUserStatusRequest,
@@ -47,6 +55,14 @@ async def get_admin_overview(
         select(func.coalesce(func.sum(Document.size_bytes), 0)).where(Document.status != DocumentStatus.DELETED.value)
     ) or 0
     total_questions = await db.scalar(select(func.count(Message.id)).where(Message.role == "user")) or 0
+    pending_jobs = await db.scalar(
+        select(func.count(Job.id)).where(Job.status.in_([JobStatus.QUEUED.value, JobStatus.RUNNING.value, JobStatus.RETRY_WAIT.value]))
+    ) or 0
+    failed_jobs = await db.scalar(
+        select(func.count(Job.id)).where(Job.status == JobStatus.FAILED.value)
+    ) or 0
+    usage_repo = UsageRepository(db)
+    monthly_ai_cost = float(await usage_repo.get_monthly_cost_usd())
 
     tier_rows = (await db.execute(select(Workspace.tier, func.count(Workspace.id)).group_by(Workspace.tier))).all()
     active_tiers: Dict[str, int] = {str(tier): int(count) for tier, count in tier_rows}
@@ -78,7 +94,11 @@ async def get_admin_overview(
         else "DISABLED"
     )
 
-    worker_status = f"HEALTHY ({settings.WORKER_CONCURRENCY} worker concurrency)"
+    worker_status = (
+        f"HEALTHY ({settings.WORKER_CONCURRENCY} concurrency, {pending_jobs} queued)"
+        if failed_jobs == 0
+        else f"ATTENTION ({failed_jobs} failed jobs, {pending_jobs} queued)"
+    )
 
     return AdminOverviewDTO(
         total_workspaces=total_workspaces,
@@ -87,6 +107,9 @@ async def get_admin_overview(
         total_chunks=total_chunks,
         total_storage_bytes=total_storage,
         total_questions=total_questions,
+        monthly_ai_cost_usd=monthly_ai_cost,
+        pending_jobs=pending_jobs,
+        failed_jobs=failed_jobs,
         active_tiers=active_tiers,
         document_status_breakdown=doc_status,
         worker_health=worker_status,
@@ -101,9 +124,10 @@ async def list_admin_workspaces(
     current_user: User = Depends(require_platform_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    """Lists all customer workspaces with member counts, document totals, and storage used."""
+    """Lists all customer workspaces with member counts, document totals, storage used, and AI spend."""
     ws_query = select(Workspace).order_by(Workspace.created_at.desc())
     workspaces = (await db.execute(ws_query)).scalars().all()
+    usage_repo = UsageRepository(db)
 
     results: List[AdminWorkspaceSummaryDTO] = []
     for ws in workspaces:
@@ -132,6 +156,8 @@ async def list_admin_workspaces(
             )
         ) or 0
 
+        ws_cost = float(await usage_repo.get_monthly_cost_usd(ws.id))
+
         results.append(
             AdminWorkspaceSummaryDTO(
                 id=ws.id,
@@ -142,11 +168,81 @@ async def list_admin_workspaces(
                 owner_email=owner_email,
                 member_count=member_count,
                 document_count=doc_count,
-                storage_bytes=storage_bytes
+                storage_bytes=storage_bytes,
+                monthly_ai_cost_usd=ws_cost,
             )
         )
 
     return results
+
+
+@router.post("/workspaces", response_model=AdminWorkspaceSummaryDTO, status_code=status.HTTP_201_CREATED)
+async def admin_provision_workspace(
+    req: AdminCreateWorkspaceRequest,
+    current_user: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Provisions a customer company workspace (and owner account if new) directly from Admin Console."""
+    user_repo = UserRepository(db)
+    ws_repo = WorkspaceRepository(db)
+    audit_repo = AuditRepository(db)
+
+    owner_email = req.owner_email.strip().lower()
+    owner = await user_repo.get_by_email(owner_email)
+    if not owner:
+        if not req.owner_password:
+            raise DocMindException(
+                status_code=400,
+                code="OWNER_PASSWORD_REQUIRED",
+                title="Password Required",
+                detail=f"User '{owner_email}' does not exist yet. Provide an initial owner password to create the account.",
+            )
+        owner = User(
+            email=owner_email,
+            password_hash=hash_password(req.owner_password),
+            status=UserStatus.ACTIVE.value,
+            verified_at=utc_now(),
+        )
+        db.add(owner)
+        await db.flush()
+
+    base_slug = re.sub(r"[^a-z0-9]+", "-", req.name.lower().strip()).strip("-") or f"ws-{uuid.uuid4().hex[:6]}"
+    slug = base_slug
+    if await ws_repo.get_by_slug(slug):
+        slug = f"{base_slug}-{uuid.uuid4().hex[:4]}"
+
+    target_tier = req.tier.upper().strip()
+    if target_tier not in (WorkspaceTier.STARTER.value, WorkspaceTier.PRO.value, WorkspaceTier.ENTERPRISE.value):
+        target_tier = WorkspaceTier.PRO.value
+
+    ws = await ws_repo.create_workspace(
+        name=req.name.strip(),
+        slug=slug,
+        created_by=owner.id,
+        tier=target_tier,
+    )
+
+    await audit_repo.record_event(
+        workspace_id=ws.id,
+        actor_user_id=current_user.id,
+        action="ADMIN_WORKSPACE_PROVISIONED",
+        target_type="workspace",
+        target_id=ws.id,
+        metadata={"name": ws.name, "owner_email": owner_email, "tier": ws.tier},
+    )
+
+    return AdminWorkspaceSummaryDTO(
+        id=ws.id,
+        name=ws.name,
+        slug=ws.slug,
+        tier=ws.tier,
+        created_at=ws.created_at,
+        owner_email=owner_email,
+        member_count=1,
+        document_count=0,
+        storage_bytes=0,
+        monthly_ai_cost_usd=0.0,
+    )
 
 
 @router.delete("/workspaces/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -421,6 +517,103 @@ async def list_admin_audit_logs(
         )
         for event, actor_email in events
     ]
+
+
+@router.get("/audit-logs/export")
+async def export_admin_audit_logs(
+    current_user: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Exports platform-wide audit trail as CSV."""
+    audit_repo = AuditRepository(db)
+    events = await audit_repo.list_all_platform_events(limit=1000)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Timestamp (UTC)", "Workspace ID", "Actor Email", "Action", "Target Type", "Target ID", "Metadata JSON"])
+    for event, actor_email in events:
+        writer.writerow([
+            event.created_at.isoformat(),
+            str(event.workspace_id),
+            actor_email or "system",
+            event.action,
+            event.target_type,
+            str(event.target_id) if event.target_id else "",
+            json.dumps(event.audit_metadata or {}),
+        ])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="docmind_platform_audit.csv"'},
+    )
+
+
+@router.get("/jobs", response_model=List[AdminJobSummaryDTO])
+async def list_admin_jobs(
+    status_filter: Optional[str] = Query(None, alias="status"),
+    limit: int = Query(100, ge=1, le=500),
+    current_user: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Lists recent background worker jobs across all workspaces."""
+    query = (
+        select(Job, Workspace.name)
+        .join(Workspace, Job.workspace_id == Workspace.id)
+        .order_by(Job.created_at.desc())
+        .limit(limit)
+    )
+    if status_filter:
+        query = query.where(Job.status == status_filter.upper())
+
+    rows = (await db.execute(query)).all()
+    return [
+        AdminJobSummaryDTO(
+            id=job.id,
+            workspace_id=job.workspace_id,
+            workspace_name=ws_name,
+            job_type=job.job_type,
+            status=job.status,
+            attempts=job.attempts,
+            max_attempts=job.max_attempts,
+            last_error=job.last_error,
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+        )
+        for job, ws_name in rows
+    ]
+
+
+@router.post("/jobs/{job_id}/retry", response_model=AdminJobSummaryDTO)
+async def admin_retry_job(
+    job_id: uuid.UUID,
+    current_user: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Requeues a failed or stalled background worker job."""
+    job_repo = JobRepository(db)
+    job = await job_repo.get_by_id(job_id)
+    if not job:
+        raise DocMindException(status_code=404, code="JOB_NOT_FOUND", title="Not Found", detail="Background job not found.")
+
+    job.status = JobStatus.QUEUED.value
+    job.available_at = utc_now()
+    job.locked_by = None
+    job.locked_at = None
+    job.last_error = None
+    await db.flush()
+
+    ws = (await db.execute(select(Workspace.name).where(Workspace.id == job.workspace_id))).scalar_one_or_none() or "Unknown"
+    return AdminJobSummaryDTO(
+        id=job.id,
+        workspace_id=job.workspace_id,
+        workspace_name=ws,
+        job_type=job.job_type,
+        status=job.status,
+        attempts=job.attempts,
+        max_attempts=job.max_attempts,
+        last_error=job.last_error,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
 
 
 @router.get("/system", response_model=AdminSystemDiagnosticsDTO)

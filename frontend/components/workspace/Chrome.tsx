@@ -210,9 +210,11 @@ function WorkspaceSwitcher({
 export function TopBar({
   onSwitchWorkspace,
   onSignOut,
+  onOpenSearch,
 }: {
   onSwitchWorkspace: (ws: WorkspaceDetailDTO) => void;
   onSignOut: () => void;
+  onOpenSearch?: () => void;
 }) {
   const { session, canUpload, openUpload, setTab } = useWorkspace();
   const [menu, setMenu] = useState(false);
@@ -229,6 +231,28 @@ export function TopBar({
       </div>
 
       <div className="flex items-center gap-1.5">
+        {onOpenSearch && (
+          <button
+            type="button"
+            onClick={onOpenSearch}
+            className="hidden sm:inline-flex h-8 items-center gap-2 rounded-lg border border-line bg-surface px-2.5 text-xs text-muted hover:bg-surface-2 hover:text-fg transition-colors"
+            title="Search passages (Ctrl+K / Cmd+K)"
+          >
+            <Icon name="search" className="size-3.5" />
+            <span>Search</span>
+            <kbd className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-mono text-faint">⌘K</kbd>
+          </button>
+        )}
+        {onOpenSearch && (
+          <button
+            type="button"
+            onClick={onOpenSearch}
+            aria-label="Search documents"
+            className="inline-flex size-8 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg sm:hidden"
+          >
+            <Icon name="search" className="size-4" />
+          </button>
+        )}
         {canUpload && (
           <Button size="sm" onClick={openUpload}>
             <Icon name="plus" />

@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   AdminDocumentSummaryDTO,
+  AdminJobSummaryDTO,
   AdminOverviewDTO,
   AdminSystemDiagnosticsDTO,
   AdminUserSummaryDTO,
@@ -18,19 +19,20 @@ interface AdminConsoleProps {
 }
 
 async function fetchAllAdminData() {
-  const [ov, ws, usr, docs, logs, diag] = await Promise.allSettled([
+  const [ov, ws, usr, docs, jobs, logs, diag] = await Promise.allSettled([
     ApiClient.getAdminOverview(),
     ApiClient.getAdminWorkspaces(),
     ApiClient.getAdminUsers(),
     ApiClient.getAdminDocuments(),
+    ApiClient.getAdminJobs(),
     ApiClient.getAdminAuditLogs(100),
     ApiClient.getAdminSystemDiagnostics(),
   ]);
-  return { ov, ws, usr, docs, logs, diag };
+  return { ov, ws, usr, docs, jobs, logs, diag };
 }
 
 export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignOut, adminEmail }) => {
-  const [activeAdminTab, setActiveAdminTab] = useState<'overview' | 'workspaces' | 'users' | 'documents' | 'audit' | 'system'>('workspaces');
+  const [activeAdminTab, setActiveAdminTab] = useState<'workspaces' | 'users' | 'jobs' | 'overview' | 'documents' | 'audit' | 'system'>('workspaces');
 
   const [refreshing, setRefreshing] = useState(true);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
@@ -38,20 +40,29 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignO
   const [workspaces, setWorkspaces] = useState<AdminWorkspaceSummaryDTO[]>([]);
   const [users, setUsers] = useState<AdminUserSummaryDTO[]>([]);
   const [documents, setDocuments] = useState<AdminDocumentSummaryDTO[]>([]);
+  const [jobs, setJobs] = useState<AdminJobSummaryDTO[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditEventDTO[]>([]);
   const [diagnostics, setDiagnostics] = useState<AdminSystemDiagnosticsDTO | null>(null);
 
-  // Filter & confirmation states
+  // Filter, provision & confirmation states
   const [workspaceSearch, setWorkspaceSearch] = useState('');
   const [workspaceTierFilter, setWorkspaceTierFilter] = useState('ALL');
   const [userSearch, setUserSearch] = useState('');
   const [userStatusFilter, setUserStatusFilter] = useState('ALL');
+  const [jobStatusFilter, setJobStatusFilter] = useState('ALL');
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [confirmDeleteWsId, setConfirmDeleteWsId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  const [showProvisionModal, setShowProvisionModal] = useState(false);
+  const [provName, setProvName] = useState('');
+  const [provEmail, setProvEmail] = useState('');
+  const [provPassword, setProvPassword] = useState('');
+  const [provTier, setProvTier] = useState('PRO');
+  const [provisioning, setProvisioning] = useState(false);
+
   const applyResults = (res: Awaited<ReturnType<typeof fetchAllAdminData>>) => {
-    const { ov, ws, usr, docs, logs, diag } = res;
+    const { ov, ws, usr, docs, jobs: jobsRes, logs, diag } = res;
     const failures: string[] = [];
     if (ov.status === 'fulfilled') setOverview(ov.value);
     else failures.push(ov.reason?.message || 'Failed to load platform overview');
@@ -63,6 +74,7 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignO
     else failures.push(usr.reason?.message || 'Failed to load users');
 
     if (docs.status === 'fulfilled') setDocuments(docs.value);
+    if (jobsRes.status === 'fulfilled') setJobs(jobsRes.value);
     if (logs.status === 'fulfilled') setAuditLogs(logs.value);
     if (diag.status === 'fulfilled') setDiagnostics(diag.value);
 
@@ -154,6 +166,59 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignO
       setErrorBanner(err instanceof Error ? err.message : 'Failed to update user status.');
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const handleProvisionWorkspace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProvisioning(true);
+    setErrorBanner(null);
+    try {
+      const created = await ApiClient.createAdminWorkspace({
+        name: provName.trim(),
+        owner_email: provEmail.trim(),
+        owner_password: provPassword || undefined,
+        tier: provTier,
+      });
+      setWorkspaces(prev => [created, ...prev]);
+      setShowProvisionModal(false);
+      setProvName('');
+      setProvEmail('');
+      setProvPassword('');
+      showNotice(`Provisioned "${created.name}" (${created.tier}) for ${created.owner_email}.`);
+      void loadData();
+    } catch (err: unknown) {
+      setErrorBanner(err instanceof Error ? err.message : 'Failed to provision workspace.');
+    } finally {
+      setProvisioning(false);
+    }
+  };
+
+  const handleRetryJob = async (jobId: string) => {
+    setBusyId(jobId);
+    setErrorBanner(null);
+    try {
+      const updated = await ApiClient.retryAdminJob(jobId);
+      setJobs(prev => prev.map(j => (j.id === jobId ? updated : j)));
+      showNotice(`Requeued background job ${jobId.slice(0, 8)}...`);
+    } catch (err: unknown) {
+      setErrorBanner(err instanceof Error ? err.message : 'Failed to retry job.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleExportPlatformCsv = async () => {
+    try {
+      const blob = await ApiClient.exportAdminAuditLogsCsv();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'docmind_platform_audit.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: unknown) {
+      setErrorBanner(err instanceof Error ? err.message : 'Failed to export audit CSV.');
     }
   };
 
@@ -273,10 +338,11 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignO
             [
               { id: 'workspaces', label: `Companies & Workspaces (${workspaces.length})`, icon: '🏢' },
               { id: 'users', label: `Registered Users (${users.length})`, icon: '👥' },
+              { id: 'jobs', label: `Worker Queue (${jobs.length})`, icon: '⚙️' },
               { id: 'overview', label: 'Platform Telemetry', icon: '📊' },
               { id: 'documents', label: `Document Fleet (${documents.length})`, icon: '📄' },
               { id: 'audit', label: 'Global Audit Trail', icon: '🛡️' },
-              { id: 'system', label: 'System Config', icon: '⚙️' },
+              { id: 'system', label: 'System Config', icon: '🔧' },
             ] as const
           ).map(tab => (
             <button
@@ -318,9 +384,16 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignO
               <div className="text-[11px] text-slate-400 mt-1">{overview.total_chunks} vector chunks</div>
             </div>
             <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Total Storage & Q&amp;A</div>
-              <div className="text-2xl font-extrabold text-white mt-1">{formatBytes(overview.total_storage_bytes)}</div>
-              <div className="text-[11px] text-slate-400 mt-1">{overview.total_questions} AI questions answered</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Storage &amp; Monthly AI Cost</div>
+              <div className="text-2xl font-extrabold text-white mt-1">
+                {formatBytes(overview.total_storage_bytes)}
+                <span className="text-sm font-semibold text-emerald-400 ml-2">
+                  (${(overview.monthly_ai_cost_usd ?? 0).toFixed(3)} mo)
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                {overview.total_questions} Q&amp;A • {overview.pending_jobs ?? 0} queued • {overview.failed_jobs ?? 0} failed jobs
+              </div>
             </div>
           </div>
         )}
@@ -341,7 +414,7 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignO
                 <span className="absolute left-3 top-2.5 text-xs text-slate-500">🔍</span>
               </div>
 
-              <div className="flex items-center gap-2 self-end sm:self-auto">
+              <div className="flex flex-wrap items-center gap-2 self-end sm:self-auto">
                 <span className="text-xs text-slate-400">Tier:</span>
                 {['ALL', 'STARTER', 'PRO', 'ENTERPRISE'].map(tier => (
                   <button
@@ -356,8 +429,65 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignO
                     {tier}
                   </button>
                 ))}
+                <button
+                  onClick={() => setShowProvisionModal(true)}
+                  className="ml-2 px-3.5 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-amber-500 to-rose-500 text-slate-950 hover:from-amber-400 hover:to-rose-400 transition-all"
+                >
+                  + Provision Company
+                </button>
               </div>
             </div>
+
+            {showProvisionModal && (
+              <form onSubmit={handleProvisionWorkspace} className="p-5 rounded-2xl bg-slate-900 border border-amber-500/40 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-white">Provision New Customer Company</h3>
+                  <button type="button" onClick={() => setShowProvisionModal(false)} className="text-slate-400 hover:text-white text-xs">✕</button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <input
+                    type="text"
+                    required
+                    minLength={2}
+                    placeholder="Company name (e.g. Wipro)"
+                    value={provName}
+                    onChange={e => setProvName(e.target.value)}
+                    className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white"
+                  />
+                  <input
+                    type="email"
+                    required
+                    placeholder="Owner email"
+                    value={provEmail}
+                    onChange={e => setProvEmail(e.target.value)}
+                    className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white"
+                  />
+                  <input
+                    type="password"
+                    minLength={8}
+                    placeholder="Initial password (if new user)"
+                    value={provPassword}
+                    onChange={e => setProvPassword(e.target.value)}
+                    className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white"
+                  />
+                  <select
+                    value={provTier}
+                    onChange={e => setProvTier(e.target.value)}
+                    className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white"
+                  >
+                    <option value="STARTER">STARTER</option>
+                    <option value="PRO">PRO</option>
+                    <option value="ENTERPRISE">ENTERPRISE</option>
+                  </select>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={() => setShowProvisionModal(false)} className="px-3 py-1.5 rounded-lg bg-slate-800 text-xs text-slate-300">Cancel</button>
+                  <button type="submit" disabled={provisioning} className="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs">
+                    {provisioning ? 'Provisioning...' : 'Create Company Workspace'}
+                  </button>
+                </div>
+              </form>
+            )}
 
             {/* Workspaces Table */}
             <div className="rounded-2xl bg-slate-900/60 border border-slate-800 overflow-hidden">
@@ -371,6 +501,7 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignO
                       <th className="py-3 px-4">Members</th>
                       <th className="py-3 px-4">Documents</th>
                       <th className="py-3 px-4">Storage Used</th>
+                      <th className="py-3 px-4">Monthly AI Cost</th>
                       <th className="py-3 px-4">Created</th>
                       <th className="py-3 px-4 text-right">Manage Workspace</th>
                     </tr>
@@ -378,7 +509,7 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignO
                   <tbody className="divide-y divide-slate-800/60">
                     {filteredWorkspaces.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="py-10 text-center text-slate-400">
+                        <td colSpan={9} className="py-10 text-center text-slate-400">
                           {refreshing ? 'Loading registered companies from PostgreSQL...' : 'No workspaces match your search.'}
                         </td>
                       </tr>
@@ -420,6 +551,9 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignO
                             <td className="py-3.5 px-4 font-semibold text-white">{ws.member_count}</td>
                             <td className="py-3.5 px-4 font-semibold text-white">{ws.document_count}</td>
                             <td className="py-3.5 px-4 text-cyan-300 font-mono">{formatBytes(ws.storage_bytes)}</td>
+                            <td className="py-3.5 px-4 text-emerald-400 font-mono text-[11px]">
+                              ${(ws.monthly_ai_cost_usd ?? 0).toFixed(4)}
+                            </td>
                             <td className="py-3.5 px-4 text-slate-400 whitespace-nowrap">
                               {new Date(ws.created_at).toLocaleDateString()}
                             </td>
@@ -752,9 +886,108 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignO
           </div>
         )}
 
-        {/* TAB 5: GLOBAL AUDIT TRAIL */}
+        {/* TAB 5: WORKER JOB QUEUE */}
+        {activeAdminTab === 'jobs' && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
+              <div>
+                <h3 className="text-sm font-bold text-white">Background Worker Queue</h3>
+                <p className="text-xs text-slate-400">Live ingestion, deletion &amp; account cleanup jobs processed by docmind-worker.</p>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {['ALL', 'QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED'].map(st => (
+                  <button
+                    key={st}
+                    onClick={() => setJobStatusFilter(st)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      jobStatusFilter === st ? 'bg-cyan-500 text-slate-950' : 'bg-slate-800 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {st}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-slate-900/60 border border-slate-800 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-950/80 text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                    <tr>
+                      <th className="py-3 px-4">Job Type</th>
+                      <th className="py-3 px-4">Workspace</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4">Attempts</th>
+                      <th className="py-3 px-4">Last Error</th>
+                      <th className="py-3 px-4">Updated</th>
+                      <th className="py-3 px-4 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {jobs.filter(j => jobStatusFilter === 'ALL' || j.status === jobStatusFilter).length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-10 text-center text-slate-400">No background jobs matching filter.</td>
+                      </tr>
+                    ) : (
+                      jobs
+                        .filter(j => jobStatusFilter === 'ALL' || j.status === jobStatusFilter)
+                        .map(job => (
+                          <tr key={job.id} className="hover:bg-slate-800/30 transition-colors">
+                            <td className="py-3.5 px-4 font-mono text-[11px] font-semibold text-white">{job.job_type}</td>
+                            <td className="py-3.5 px-4 text-slate-300">{job.workspace_name}</td>
+                            <td className="py-3.5 px-4">
+                              <span
+                                className={`px-2 py-0.5 rounded-full font-semibold text-[10px] uppercase border ${
+                                  job.status === 'SUCCEEDED'
+                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                    : job.status === 'FAILED'
+                                    ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                                    : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30'
+                                }`}
+                              >
+                                {job.status}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-4 font-mono text-[11px]">{job.attempts} / {job.max_attempts}</td>
+                            <td className="py-3.5 px-4 text-rose-300 max-w-xs truncate">{job.last_error || '—'}</td>
+                            <td className="py-3.5 px-4 text-slate-400 whitespace-nowrap">{new Date(job.updated_at).toLocaleString()}</td>
+                            <td className="py-3.5 px-4 text-right">
+                              {(job.status === 'FAILED' || job.status === 'RETRY_WAIT') && (
+                                <button
+                                  disabled={busyId === job.id}
+                                  onClick={() => handleRetryJob(job.id)}
+                                  className="px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500 hover:text-slate-950 text-cyan-300 text-[11px] font-semibold border border-cyan-500/40"
+                                >
+                                  Retry Job ↻
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 6: GLOBAL AUDIT TRAIL */}
         {activeAdminTab === 'audit' && (
-          <div className="rounded-2xl bg-slate-900/60 border border-slate-800 overflow-hidden">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
+              <div>
+                <h3 className="text-sm font-bold text-white">Platform Audit Log</h3>
+                <p className="text-xs text-slate-400">Immutable security &amp; administrative actions across all customer companies.</p>
+              </div>
+              <button
+                onClick={handleExportPlatformCsv}
+                className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white border border-slate-700"
+              >
+                Export CSV ↓
+              </button>
+            </div>
+            <div className="rounded-2xl bg-slate-900/60 border border-slate-800 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-300">
                 <thead className="bg-slate-950/80 text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-800">
@@ -793,6 +1026,7 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignO
                 </tbody>
               </table>
             </div>
+          </div>
           </div>
         )}
 

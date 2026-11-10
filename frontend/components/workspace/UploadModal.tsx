@@ -15,7 +15,7 @@ interface Item {
   error?: string;
 }
 
-const EXTS = ['.pdf', '.docx', '.txt', '.md'];
+const EXTS = ['.pdf', '.docx', '.txt', '.md', '.csv', '.json', '.html', '.htm'];
 
 const STATUS_TEXT: Record<ItemStatus, string> = {
   queued: 'Waiting',
@@ -59,7 +59,7 @@ function UploadModalBody({ open, onClose, onUploaded, maxFileMb }: UploadModalPr
     Array.from(list).forEach(file => {
       const lower = file.name.toLowerCase();
       if (!EXTS.some(e => lower.endsWith(e))) {
-        problems.push(`${file.name}: use PDF, DOCX, TXT or MD.`);
+        problems.push(`${file.name}: use PDF, DOCX, TXT, MD, CSV, JSON or HTML.`);
       } else if (file.size > maxFileMb * 1024 * 1024) {
         problems.push(`${file.name}: larger than your plan’s ${maxFileMb} MB limit.`);
       } else {
@@ -109,7 +109,7 @@ function UploadModalBody({ open, onClose, onUploaded, maxFileMb }: UploadModalPr
       open={open}
       onClose={onClose}
       title="Upload documents"
-      description={`PDF, Word, text or Markdown. Up to ${maxFileMb} MB each.`}
+      description={`PDF, Word, CSV, JSON, HTML, text or Markdown. Up to ${maxFileMb} MB each.`}
       lockClose={running}
       footer={
         <>
@@ -161,7 +161,7 @@ function UploadModalBody({ open, onClose, onUploaded, maxFileMb }: UploadModalPr
           ref={inputRef}
           type="file"
           multiple
-          accept=".pdf,.docx,.txt,.md"
+          accept=".pdf,.docx,.txt,.md,.csv,.json,.html,.htm"
           className="sr-only"
           tabIndex={-1}
           onChange={e => {

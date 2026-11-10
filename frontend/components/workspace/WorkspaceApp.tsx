@@ -16,6 +16,7 @@ import { Spinner } from '../ui/Button';
 import { ToastProvider, useToast } from '../ui/Toast';
 import { MobileNav, Sidebar, TopBar } from './Chrome';
 import { CitationDrawer } from './CitationDrawer';
+import { GlobalSearchModal } from './GlobalSearchModal';
 import { UploadModal } from './UploadModal';
 import { TabId, WorkspaceProvider } from './WorkspaceContext';
 import { ErrorBanner } from './parts';
@@ -56,7 +57,19 @@ function Shell({ session: initialSession }: { session: UserSession }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [chatScope, setChatScope] = useState<string[]>([]);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [citation, setCitation] = useState<CitationDTO | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const expiredHandled = useRef(false);
   const mainRef = useRef<HTMLElement>(null);
 
@@ -233,6 +246,14 @@ function Shell({ session: initialSession }: { session: UserSession }) {
       openUpload: () => setUploadOpen(true),
       openCitation: (c: CitationDTO) => setCitation(c),
       handleApiError,
+      updateWorkspaceTitle: (name: string) => {
+        setSession(prev => {
+          const next = { ...prev, workspaceName: name };
+          saveSession(next);
+          return next;
+        });
+      },
+      signOut,
       role,
       canUpload,
       canAsk,
@@ -241,7 +262,7 @@ function Shell({ session: initialSession }: { session: UserSession }) {
     }),
     [
       session, usage, documents, documentsLoaded, conversations, loadError, refreshDocuments, refreshUsage,
-      refreshConversations, reloadAll, tab, setTab, chatScope, handleApiError, role, canUpload, canAsk,
+      refreshConversations, reloadAll, tab, setTab, chatScope, handleApiError, signOut, role, canUpload, canAsk,
       canManageMembers, isOwner,
     ],
   );
@@ -263,7 +284,7 @@ function Shell({ session: initialSession }: { session: UserSession }) {
       <div className="flex h-screen overflow-hidden">
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
-          <TopBar onSwitchWorkspace={switchWorkspace} onSignOut={signOut} />
+          <TopBar onSwitchWorkspace={switchWorkspace} onSignOut={signOut} onOpenSearch={() => setSearchOpen(true)} />
           <main ref={mainRef} className="scroll-thin flex-1 overflow-y-auto px-4 pb-28 pt-6 sm:px-6 lg:px-8 lg:pb-10" key={workspaceKey}>
             <div className={`mx-auto min-w-0 ${tab === 'chat' ? 'h-full max-w-6xl' : 'max-w-5xl'}`}>
               {loadError && tab !== 'chat' && <ErrorBanner message={loadError} onRetry={() => void reloadAll()} />}
@@ -287,6 +308,7 @@ function Shell({ session: initialSession }: { session: UserSession }) {
         }}
         maxFileMb={usage?.max_file_mb ?? 20}
       />
+      <GlobalSearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
       <CitationDrawer
         citation={citation}
         onClose={() => setCitation(null)}

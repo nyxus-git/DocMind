@@ -1,19 +1,24 @@
 import hashlib
 import os
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 from app.adapters.storage.base import ObjectStorage
 from app.adapters.storage.r2 import R2Storage
 from app.core.config import settings
+from app.core.security import sign_storage_key
 
 
 class LocalStorage(ObjectStorage):
     def __init__(self, base_dir: str = "/tmp/docmind_local_storage"):
-        self.base_dir = base_dir
+        self.base_dir = os.path.abspath(base_dir)
         os.makedirs(self.base_dir, exist_ok=True)
 
     def _resolve_path(self, object_key: str) -> str:
-        safe_key = object_key.replace("/", "_")
-        return os.path.join(self.base_dir, safe_key)
+        safe_key = object_key.replace("/", "_").replace("..", "_")
+        resolved = os.path.abspath(os.path.join(self.base_dir, safe_key))
+        if not resolved.startswith(self.base_dir + os.sep):
+            raise ValueError("Invalid object key path.")
+        return resolved
 
     async def create_upload_url(
         self,
@@ -22,8 +27,10 @@ class LocalStorage(ObjectStorage):
         size_bytes: int,
         expires_in: int = 300
     ) -> Dict[str, Any]:
+        exp, sig = sign_storage_key(object_key, "upload", expires_in=expires_in)
+        encoded_key = quote(object_key, safe="")
         return {
-            "upload_url": f"{settings.API_BASE_URL}/api/v1/mock-storage/upload?key={object_key}",
+            "upload_url": f"{settings.API_BASE_URL}/api/v1/mock-storage/upload?key={encoded_key}&exp={exp}&sig={sig}",
             "headers": {"Content-Type": content_type}
         }
 
@@ -32,7 +39,9 @@ class LocalStorage(ObjectStorage):
         object_key: str,
         expires_in: int = 120
     ) -> str:
-        return f"{settings.API_BASE_URL}/api/v1/mock-storage/download?key={object_key}"
+        exp, sig = sign_storage_key(object_key, "download", expires_in=expires_in)
+        encoded_key = quote(object_key, safe="")
+        return f"{settings.API_BASE_URL}/api/v1/mock-storage/download?key={encoded_key}&exp={exp}&sig={sig}"
 
     async def head_object(self, object_key: str) -> Optional[Dict[str, Any]]:
         path = self._resolve_path(object_key)

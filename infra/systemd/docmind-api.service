@@ -1,0 +1,16 @@
+[Unit]
+Description=DocMind FastAPI Backend
+After=network.target
+
+[Service]
+User=rohan
+WorkingDirectory=/home/rohan/DocMind/backend
+Environment="PATH=/home/rohan/DocMind/backend/venv/bin"
+Environment="PYTHONPATH=/home/rohan/DocMind/backend"
+EnvironmentFile=/home/rohan/DocMind/.env
+ExecStart=/home/rohan/DocMind/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 2
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

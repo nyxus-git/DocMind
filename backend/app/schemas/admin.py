@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 import uuid
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 
 
 class AdminOverviewDTO(BaseModel):
@@ -11,6 +11,9 @@ class AdminOverviewDTO(BaseModel):
     total_chunks: int
     total_storage_bytes: int
     total_questions: int
+    monthly_ai_cost_usd: float = 0.0
+    pending_jobs: int = 0
+    failed_jobs: int = 0
     active_tiers: Dict[str, int]
     document_status_breakdown: Dict[str, int]
     worker_health: str
@@ -29,6 +32,7 @@ class AdminWorkspaceSummaryDTO(BaseModel):
     member_count: int
     document_count: int
     storage_bytes: int
+    monthly_ai_cost_usd: float = 0.0
 
 
 class AdminDocumentSummaryDTO(BaseModel):
@@ -73,4 +77,24 @@ class AdminUserSummaryDTO(BaseModel):
 
 class AdminUpdateUserStatusRequest(BaseModel):
     status: str
+
+
+class AdminCreateWorkspaceRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=128)
+    owner_email: EmailStr
+    owner_password: Optional[str] = Field(None, min_length=8, max_length=128)
+    tier: str = Field(default="PRO")
+
+
+class AdminJobSummaryDTO(BaseModel):
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    workspace_name: str
+    job_type: str
+    status: str
+    attempts: int
+    max_attempts: int
+    last_error: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
 

@@ -29,6 +29,8 @@ export interface WorkspaceContextValue {
   openUpload: () => void;
   openCitation: (c: CitationDTO) => void;
   handleApiError: (err: unknown) => boolean;
+  updateWorkspaceTitle: (name: string) => void;
+  signOut: () => Promise<void>;
 
   role: UserSession['role'];
   canUpload: boolean;

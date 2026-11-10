@@ -5,6 +5,9 @@ export interface AdminOverviewDTO {
   total_chunks: number;
   total_storage_bytes: number;
   total_questions: number;
+  monthly_ai_cost_usd?: number;
+  pending_jobs?: number;
+  failed_jobs?: number;
   active_tiers: Record<string, number>;
   document_status_breakdown: Record<string, number>;
   worker_health: string;
@@ -23,6 +26,20 @@ export interface AdminWorkspaceSummaryDTO {
   member_count: number;
   document_count: number;
   storage_bytes: number;
+  monthly_ai_cost_usd?: number;
+}
+
+export interface AdminJobSummaryDTO {
+  id: string;
+  workspace_id: string;
+  workspace_name: string;
+  job_type: string;
+  status: string;
+  attempts: number;
+  max_attempts: number;
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AdminDocumentSummaryDTO {
@@ -225,6 +242,39 @@ export interface WorkspaceMemberDTO {
   email: string;
   role: string;
   joined_at: string;
+}
+
+export interface PendingInviteDTO {
+  id: string;
+  workspace_id: string;
+  email: string;
+  role: string;
+  status: string;
+  expires_at: string;
+  created_at: string;
+}
+
+export interface ApiKeyDTO {
+  id: string;
+  name: string;
+  key_prefix: string;
+  scopes: string[];
+  last_used_at?: string;
+  created_at: string;
+}
+
+export interface CreateApiKeyResponse extends ApiKeyDTO {
+  secret_key: string;
+}
+
+export interface SearchResultItemDTO {
+  document_id: string;
+  filename: string;
+  page_start?: number;
+  page_end?: number;
+  section?: string;
+  snippet: string;
+  score: number;
 }
 
 export interface InviteMemberResponse {
@@ -440,11 +490,34 @@ export class ApiClient {
     return '';
   }
 
-  private static async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    let token = this.getToken();
-    if (!token && !endpoint.startsWith('/auth/')) {
-      token = await this.ensureSession();
-    }
+  private static refreshPromise: Promise<string | null> | null = null;
+
+  private static async tryRefreshToken(): Promise<string | null> {
+    if (this.refreshPromise) return this.refreshPromise;
+    this.refreshPromise = (async () => {
+      try {
+        const res = await fetch(`${getApiBase()}/auth/refresh`, {
+          method: 'POST',
+          credentials: 'include',
+        });
+        if (!res.ok) return null;
+        const data = (await res.json()) as { access_token?: string };
+        if (data.access_token) {
+          this.setToken(data.access_token);
+          return data.access_token;
+        }
+        return null;
+      } catch {
+        return null;
+      } finally {
+        this.refreshPromise = null;
+      }
+    })();
+    return this.refreshPromise;
+  }
+
+  private static async request<T>(endpoint: string, options: RequestInit = {}, isRetry = false): Promise<T> {
+    const token = this.getToken();
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -462,12 +535,26 @@ export class ApiClient {
 
     const apiBase = getApiBase();
     const url = `${apiBase}${endpoint}`;
+    const isAuthMutation =
+      endpoint.startsWith('/auth/login') ||
+      endpoint.startsWith('/auth/register') ||
+      endpoint.startsWith('/auth/refresh') ||
+      endpoint.startsWith('/auth/demo-login') ||
+      endpoint.startsWith('/auth/logout');
 
     try {
       const res = await fetch(url, {
         ...options,
         headers,
+        credentials: 'include',
       });
+
+      if (res.status === 401 && !isRetry && !isAuthMutation) {
+        const refreshed = await this.tryRefreshToken();
+        if (refreshed) {
+          return this.request<T>(endpoint, options, true);
+        }
+      }
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
@@ -747,7 +834,116 @@ export class ApiClient {
     return this.request<AuditEventDTO[]>(`/admin/audit-logs?limit=${limit}`);
   }
 
+  static async exportAdminAuditLogsCsv(): Promise<Blob> {
+    const res = await fetch(`${getApiBase()}/admin/audit-logs/export`, {
+      headers: this.getToken() ? { Authorization: `Bearer ${this.getToken()}` } : {},
+      credentials: 'include',
+    });
+    if (!res.ok) throw new ApiError('Failed to export platform audit logs.', res.status);
+    return res.blob();
+  }
+
+  static async createAdminWorkspace(payload: { name: string; owner_email: string; owner_password?: string; tier: string }): Promise<AdminWorkspaceSummaryDTO> {
+    return this.request<AdminWorkspaceSummaryDTO>('/admin/workspaces', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  static async getAdminJobs(status?: string): Promise<AdminJobSummaryDTO[]> {
+    const query = status ? `?status=${encodeURIComponent(status)}` : '';
+    return this.request<AdminJobSummaryDTO[]>(`/admin/jobs${query}`);
+  }
+
+  static async retryAdminJob(jobId: string): Promise<AdminJobSummaryDTO> {
+    return this.request<AdminJobSummaryDTO>(`/admin/jobs/${jobId}/retry`, {
+      method: 'POST',
+    });
+  }
+
   static async getAdminSystemDiagnostics(): Promise<AdminSystemDiagnosticsDTO> {
     return this.request<AdminSystemDiagnosticsDTO>('/admin/system');
+  }
+
+  // Self-Service SaaS Endpoints
+  static async resendVerification(email: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>('/auth/resend-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  static async changePassword(currentPassword: string, newPassword: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>('/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    });
+  }
+
+  static async deleteAccount(): Promise<void> {
+    return this.request<void>('/delete-account', { method: 'POST' });
+  }
+
+  static async updateDocument(documentId: string, data: { filename?: string; tags?: string[] }): Promise<DocumentDTO> {
+    return this.request<DocumentDTO>(`/documents/${documentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  static async searchWorkspace(query: string, document_ids?: string[], limit: number = 10): Promise<{ query: string; results: SearchResultItemDTO[]; total_found: number }> {
+    return this.request<{ query: string; results: SearchResultItemDTO[]; total_found: number }>('/search', {
+      method: 'POST',
+      body: JSON.stringify({ query, document_ids, limit }),
+    });
+  }
+
+  static async updateWorkspaceName(workspaceId: string, name: string): Promise<WorkspaceDetailDTO> {
+    return this.request<WorkspaceDetailDTO>(`/workspaces/${workspaceId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  static async listPendingInvites(workspaceId: string): Promise<PendingInviteDTO[]> {
+    return this.request<PendingInviteDTO[]>(`/workspaces/${workspaceId}/invites`);
+  }
+
+  static async revokePendingInvite(workspaceId: string, inviteId: string): Promise<void> {
+    return this.request<void>(`/workspaces/${workspaceId}/invites/${inviteId}`, { method: 'DELETE' });
+  }
+
+  static async transferWorkspaceOwnership(workspaceId: string, newOwnerUserId: string): Promise<WorkspaceMemberDTO> {
+    return this.request<WorkspaceMemberDTO>(`/workspaces/${workspaceId}/transfer-ownership`, {
+      method: 'POST',
+      body: JSON.stringify({ new_owner_user_id: newOwnerUserId }),
+    });
+  }
+
+  static async exportWorkspaceAuditLogsCsv(workspaceId: string): Promise<Blob> {
+    const headers: Record<string, string> = {};
+    if (this.getToken()) headers['Authorization'] = `Bearer ${this.getToken()}`;
+    headers['X-Workspace-ID'] = workspaceId;
+    const res = await fetch(`${getApiBase()}/workspaces/${workspaceId}/audit-logs/export`, {
+      headers,
+      credentials: 'include',
+    });
+    if (!res.ok) throw new ApiError('Failed to export audit logs.', res.status);
+    return res.blob();
+  }
+
+  static async listApiKeys(workspaceId: string): Promise<ApiKeyDTO[]> {
+    return this.request<ApiKeyDTO[]>(`/workspaces/${workspaceId}/api-keys`);
+  }
+
+  static async createApiKey(workspaceId: string, name: string, scopes: string[] = ['read', 'write']): Promise<CreateApiKeyResponse> {
+    return this.request<CreateApiKeyResponse>(`/workspaces/${workspaceId}/api-keys`, {
+      method: 'POST',
+      body: JSON.stringify({ name, scopes }),
+    });
+  }
+
+  static async revokeApiKey(workspaceId: string, keyId: string): Promise<void> {
+    return this.request<void>(`/workspaces/${workspaceId}/api-keys/${keyId}`, { method: 'DELETE' });
   }
 }

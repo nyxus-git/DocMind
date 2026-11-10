@@ -1,12 +1,12 @@
 import io
 import zipfile
-from typing import Tuple
+from typing import Optional, Tuple
 from app.core.config import settings
 from app.core.exceptions import DocMindException
 from app.models.enums import DocumentErrorCode
 
 
-ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md", ".csv", ".json", ".html", ".htm"}
 
 # Known file signatures (magic bytes)
 SIGNATURES = {
@@ -15,8 +15,13 @@ SIGNATURES = {
 }
 
 
-def validate_file_metadata(filename: str, declared_mime: str, size_bytes: int) -> None:
-    """Enforces PRD extension, MIME, and size limits before upload."""
+def validate_file_metadata(
+    filename: str,
+    declared_mime: str,
+    size_bytes: int,
+    max_file_mb: Optional[int] = None,
+) -> None:
+    """Enforces PRD extension, MIME, and tier-aware size limits before upload."""
     import os
     ext = os.path.splitext(filename.lower())[1]
     if ext not in ALLOWED_EXTENSIONS:
@@ -24,16 +29,17 @@ def validate_file_metadata(filename: str, declared_mime: str, size_bytes: int) -
             status_code=400,
             code=DocumentErrorCode.UNSUPPORTED_FORMAT.value,
             title="Unsupported Format",
-            detail=f"File extension '{ext}' is not supported. Allowed formats: PDF, DOCX, TXT, MD."
+            detail=f"File extension '{ext}' is not supported. Allowed formats: PDF, DOCX, TXT, MD, CSV, JSON, HTML."
         )
 
-    max_bytes = settings.MAX_FILE_MB * 1024 * 1024
+    effective_max_mb = max_file_mb if max_file_mb is not None else settings.MAX_FILE_MB
+    max_bytes = effective_max_mb * 1024 * 1024
     if size_bytes > max_bytes:
         raise DocMindException(
             status_code=400,
             code=DocumentErrorCode.FILE_TOO_LARGE.value,
             title="File Too Large",
-            detail=f"File size {round(size_bytes / (1024 * 1024), 2)} MB exceeds maximum allowed limit of {settings.MAX_FILE_MB} MB."
+            detail=f"File size {round(size_bytes / (1024 * 1024), 2)} MB exceeds maximum allowed limit of {effective_max_mb} MB."
         )
 
 

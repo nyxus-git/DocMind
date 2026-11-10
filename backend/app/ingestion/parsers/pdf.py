@@ -1,5 +1,5 @@
 import logging
-from typing import List
+from typing import List, Optional
 import fitz  # PyMuPDF
 from app.core.config import settings
 from app.core.exceptions import DocMindException
@@ -14,7 +14,7 @@ logger = logging.getLogger("docmind.ingestion.pdf")
 DIGITAL_TEXT_THRESHOLD = 30
 
 
-def parse_pdf(data: bytes) -> ParsedDocument:
+def parse_pdf(data: bytes, max_pages: Optional[int] = None) -> ParsedDocument:
     try:
         doc = fitz.open(stream=data, filetype="pdf")
     except Exception as e:
@@ -34,14 +34,15 @@ def parse_pdf(data: bytes) -> ParsedDocument:
             detail="Password-protected PDFs cannot be processed in P0."
         )
 
+    effective_max_pages = max_pages if max_pages is not None else settings.MAX_PAGES
     page_count = len(doc)
-    if page_count > settings.MAX_PAGES:
+    if page_count > effective_max_pages:
         doc.close()
         raise DocMindException(
             status_code=400,
             code=DocumentErrorCode.PAGE_LIMIT_EXCEEDED.value,
             title="Page Limit Exceeded",
-            detail=f"PDF has {page_count} pages, which exceeds the maximum limit of {settings.MAX_PAGES} pages."
+            detail=f"PDF has {page_count} pages, which exceeds your plan limit of {effective_max_pages} pages."
         )
 
     blocks: List[ExtractedBlock] = []

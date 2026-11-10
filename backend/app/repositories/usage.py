@@ -36,15 +36,38 @@ class UsageRepository:
         await self.db.flush()
         return event
 
-    async def count_monthly_questions(self, user_id: uuid.UUID) -> int:
+    async def count_monthly_questions(self, workspace_id: uuid.UUID) -> int:
         now = datetime.now(timezone.utc)
         first_of_month = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
 
         result = await self.db.execute(
             select(func.count(UsageEvent.id)).where(
-                UsageEvent.user_id == user_id,
-                UsageEvent.event_type == "question",
+                UsageEvent.workspace_id == workspace_id,
+                UsageEvent.event_type.in_(["question", "comparison", "extraction"]),
                 UsageEvent.created_at >= first_of_month
             )
         )
         return int(result.scalar_one() or 0)
+
+    async def get_monthly_cost_usd(self, workspace_id: Optional[uuid.UUID] = None) -> Decimal:
+        now = datetime.now(timezone.utc)
+        first_of_month = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+        query = select(func.coalesce(func.sum(UsageEvent.cost_usd), 0)).where(UsageEvent.created_at >= first_of_month)
+        if workspace_id:
+            query = query.where(UsageEvent.workspace_id == workspace_id)
+        result = await self.db.execute(query)
+        val = result.scalar_one_or_none()
+        return Decimal(str(val or "0.0"))
+
+
+def calculate_llm_cost_usd(model: str, input_tokens: int, output_tokens: int) -> Decimal:
+    """Computes approximate USD cost per request based on Gemini token pricing."""
+    m = (model or "").lower()
+    if "pro" in m:
+        in_rate = Decimal("0.00000125")   # $1.25 / 1M input
+        out_rate = Decimal("0.00000500")  # $5.00 / 1M output
+    else:
+        in_rate = Decimal("0.000000075")  # $0.075 / 1M input
+        out_rate = Decimal("0.00000030")  # $0.30 / 1M output
+    cost = (Decimal(max(0, input_tokens)) * in_rate) + (Decimal(max(0, output_tokens)) * out_rate)
+    return cost.quantize(Decimal("0.000001"))

@@ -12,11 +12,15 @@ from app.core.exceptions import DocMindException
 from app.ingestion.chunker import StructureAwareChunker
 from app.ingestion.parsers.docx import parse_docx
 from app.ingestion.parsers.pdf import parse_pdf
+from app.ingestion.parsers.structured import parse_csv, parse_html, parse_json_doc
 from app.ingestion.parsers.txt import parse_markdown, parse_text
 from app.ingestion.validator import verify_file_content
 from app.models.enums import DocumentErrorCode, DocumentStatus
 from app.repositories.chunk import ChunkRepository
 from app.repositories.document import DocumentRepository
+from app.repositories.usage import UsageRepository
+from app.repositories.workspace import WorkspaceRepository
+from app.services.quota import QuotaService
 
 logger = logging.getLogger("docmind.worker.ingest")
 
@@ -57,16 +61,24 @@ async def handle_ingest_job(
         # 3. Verify magic bytes and safety
         verify_file_content(data, doc.filename)
 
-        # 4. Parse according to extension
+        # 4. Parse according to extension using workspace tier page limits
+        quota_svc = QuotaService(doc_repo, UsageRepository(db), WorkspaceRepository(db))
+        limits = await quota_svc.get_tier_limits(doc.workspace_id)
         ext = os.path.splitext(doc.filename.lower())[1]
         if ext == ".pdf":
-            parsed = parse_pdf(data)
+            parsed = parse_pdf(data, max_pages=limits.max_pages)
         elif ext == ".docx":
             parsed = parse_docx(data)
         elif ext == ".md":
             parsed = parse_markdown(data)
         elif ext == ".txt":
             parsed = parse_text(data)
+        elif ext == ".csv":
+            parsed = parse_csv(data)
+        elif ext == ".json":
+            parsed = parse_json_doc(data)
+        elif ext in (".html", ".htm"):
+            parsed = parse_html(data)
         else:
             raise DocMindException(
                 status_code=400,

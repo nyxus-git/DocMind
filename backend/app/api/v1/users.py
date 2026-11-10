@@ -87,6 +87,8 @@ async def delete_account(
     ctx: WorkspaceContext = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db)
 ):
+    if ctx.user.is_superadmin:
+        raise DocMindException(status_code=400, code="CANNOT_DELETE_ADMIN", title="Action Not Allowed", detail="Platform Super-Administrator account cannot be deleted.")
     ctx.user.status = UserStatus.DELETED.value
     user_repo = UserRepository(db)
     job_repo = JobRepository(db)

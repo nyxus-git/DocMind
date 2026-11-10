@@ -1,10 +1,12 @@
 import json
 import logging
+import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
 import httpx
 from app.adapters.ai.base import EmbeddingProvider, LLMProvider, LLMResult
 from app.core.config import settings
+from app.core.exceptions import ServiceDegradedException
 
 logger = logging.getLogger("docmind.ai.gemini")
 
@@ -100,7 +102,11 @@ class GeminiLLM(LLMProvider):
                 except Exception as ex:
                     logger.warning(f"Gemini call exception on model {model_name}: {ex}")
 
-        # Fallback if all live Gemini candidate calls fail
+        # Fail loudly in production when live API key fails; keep deterministic fallback in dev/tests
+        if settings.APP_ENV == "production" and not os.environ.get("PYTEST_CURRENT_TEST"):
+            raise ServiceDegradedException(
+                "The AI language model service is temporarily unavailable. Please try again in a moment."
+            )
         return self._mock_generate(prompt, response_schema)
 
     def _mock_generate(self, prompt: str, response_schema: Optional[Dict[str, Any]]) -> LLMResult:
@@ -352,7 +358,9 @@ class GeminiEmbedding(EmbeddingProvider):
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
 
     async def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        if not self.api_key or not texts:
+        if not texts:
+            return []
+        if not self.api_key:
             return [self._mock_vector(t) for t in texts]
 
         candidate_models = []
@@ -381,6 +389,10 @@ class GeminiEmbedding(EmbeddingProvider):
             except Exception as e:
                 logger.warning(f"Embedding API error on {model_name}: {e}")
 
+        if settings.APP_ENV == "production" and not os.environ.get("PYTEST_CURRENT_TEST"):
+            raise ServiceDegradedException(
+                "The AI embedding service is temporarily unavailable. Please try again in a moment."
+            )
         return [self._mock_vector(t) for t in texts]
 
     async def embed_query(self, text: str) -> List[float]:

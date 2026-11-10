@@ -18,6 +18,7 @@ from app.api.v1.workspaces import router as workspaces_router
 from app.core.config import settings
 from app.core.exceptions import DocMindException, docmind_exception_handler
 from app.core.logging import RequestLoggingMiddleware, setup_logging
+from app.core.rate_limit import RateLimitMiddleware
 from app.db.migrate import run_migrations
 
 logger = logging.getLogger("docmind.app")
@@ -101,7 +102,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         headers=headers,
     )
 
-# Structured JSON request logging & duration tracking
+# Structured JSON request logging & rate limiting
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 
 # CORS configuration

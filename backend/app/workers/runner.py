@@ -11,6 +11,7 @@ from app.db.session import AsyncSessionLocal
 from app.models.enums import JobType
 from app.repositories.job import JobRepository
 from app.workers.handlers.delete import handle_delete_job
+from app.workers.handlers.delete_account import handle_delete_account_job
 from app.workers.handlers.ingest import handle_ingest_job
 
 logger = logging.getLogger("docmind.worker")
@@ -71,6 +72,8 @@ async def run_worker():
                             await handle_ingest_job(exec_session, job.payload, storage, embedding_provider)
                         elif job.job_type == JobType.DELETE_DOCUMENT.value:
                             await handle_delete_job(exec_session, job.payload, storage)
+                        elif job.job_type == JobType.DELETE_ACCOUNT.value:
+                            await handle_delete_account_job(exec_session, job.payload, storage)
                         
                         # Mark succeeded
                         job_repo_exec = JobRepository(exec_session)

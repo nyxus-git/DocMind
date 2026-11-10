@@ -3,7 +3,9 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.storage.local import LocalStorage, get_storage
-from app.api.v1.dependencies import WorkspaceContext, get_current_workspace, require_verified_user
+from app.api.v1.dependencies import WorkspaceContext, get_current_workspace, require_write_access
+from app.core.exceptions import DocMindException
+from app.core.security import verify_storage_signature
 from app.db.session import get_db
 from app.schemas.common import MessageResponse
 from app.schemas.document import (
@@ -24,7 +26,7 @@ router = APIRouter(prefix="/documents", tags=["Documents"])
 @router.post("/upload-intents", response_model=UploadIntentResponse, status_code=status.HTTP_201_CREATED)
 async def create_upload_intent(
     req: UploadIntentRequest,
-    ctx: WorkspaceContext = Depends(get_current_workspace),
+    ctx: WorkspaceContext = Depends(require_write_access),
     db: AsyncSession = Depends(get_db)
 ):
     doc_service = DocumentService(db)
@@ -41,7 +43,7 @@ async def create_upload_intent(
 @router.post("/{document_id}/complete", response_model=UploadCompleteResponse, status_code=status.HTTP_202_ACCEPTED)
 async def complete_upload(
     document_id: uuid.UUID,
-    ctx: WorkspaceContext = Depends(get_current_workspace),
+    ctx: WorkspaceContext = Depends(require_write_access),
     db: AsyncSession = Depends(get_db)
 ):
     doc_service = DocumentService(db)
@@ -84,7 +86,7 @@ async def get_document(
 async def update_document(
     document_id: uuid.UUID,
     req: DocumentUpdateDTO,
-    ctx: WorkspaceContext = Depends(get_current_workspace),
+    ctx: WorkspaceContext = Depends(require_write_access),
     db: AsyncSession = Depends(get_db)
 ):
     doc_service = DocumentService(db)
@@ -99,7 +101,7 @@ async def update_document(
 @router.post("/{document_id}/retry", response_model=UploadCompleteResponse)
 async def retry_document_processing(
     document_id: uuid.UUID,
-    ctx: WorkspaceContext = Depends(get_current_workspace),
+    ctx: WorkspaceContext = Depends(require_write_access),
     db: AsyncSession = Depends(get_db)
 ):
     doc_service = DocumentService(db)
@@ -127,7 +129,7 @@ async def get_document_download_url(
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
     document_id: uuid.UUID,
-    ctx: WorkspaceContext = Depends(get_current_workspace),
+    ctx: WorkspaceContext = Depends(require_write_access),
     db: AsyncSession = Depends(get_db)
 ):
     doc_service = DocumentService(db)
@@ -149,7 +151,7 @@ async def get_document_summary(
 async def extract_document_preset(
     document_id: uuid.UUID,
     req: ExtractionPresetRequest,
-    ctx: WorkspaceContext = Depends(get_current_workspace),
+    ctx: WorkspaceContext = Depends(require_write_access),
     db: AsyncSession = Depends(get_db)
 ):
     intel_service = IntelligenceService(db)
@@ -161,24 +163,37 @@ async def extract_document_preset(
     )
 
 
-# Local mock storage upload/download handler for development & integration tests
+# Signed local storage upload/download handler when R2 is not configured
 mock_storage_router = APIRouter(prefix="/mock-storage", tags=["Mock Storage"])
 
 
 @mock_storage_router.put("/upload")
-async def mock_upload(request: Request, key: str = Query(...)):
+async def mock_upload(
+    request: Request,
+    key: str = Query(...),
+    exp: int = Query(...),
+    sig: str = Query(...),
+):
     storage = get_storage()
-    if isinstance(storage, LocalStorage):
-        body = await request.body()
-        await storage.save_bytes(key, body)
-        return {"status": "uploaded", "size": len(body)}
-    return {"status": "ok"}
+    if not isinstance(storage, LocalStorage):
+        raise DocMindException(status_code=404, code="STORAGE_MODE_R2", title="Not Found", detail="Local storage endpoint is disabled when R2 is configured.")
+    if not verify_storage_signature(key, "upload", exp, sig):
+        raise DocMindException(status_code=403, code="INVALID_UPLOAD_SIGNATURE", title="Forbidden", detail="Signed upload URL is invalid or expired.")
+    body = await request.body()
+    await storage.save_bytes(key, body)
+    return {"status": "uploaded", "size": len(body)}
 
 
 @mock_storage_router.get("/download")
-async def mock_download(key: str = Query(...)):
+async def mock_download(
+    key: str = Query(...),
+    exp: int = Query(...),
+    sig: str = Query(...),
+):
     storage = get_storage()
-    if isinstance(storage, LocalStorage):
-        data = await storage.download_bytes(key)
-        return Response(content=data, media_type="application/octet-stream")
-    return Response(content=b"", media_type="application/octet-stream")
+    if not isinstance(storage, LocalStorage):
+        raise DocMindException(status_code=404, code="STORAGE_MODE_R2", title="Not Found", detail="Local storage endpoint is disabled when R2 is configured.")
+    if not verify_storage_signature(key, "download", exp, sig):
+        raise DocMindException(status_code=403, code="INVALID_DOWNLOAD_SIGNATURE", title="Forbidden", detail="Signed download URL is invalid or expired.")
+    data = await storage.download_bytes(key)
+    return Response(content=data, media_type="application/octet-stream")

@@ -16,7 +16,7 @@ from app.models.enums import DocumentStatus
 from app.repositories.chunk import ChunkRepository
 from app.repositories.conversation import ConversationRepository
 from app.repositories.document import DocumentRepository
-from app.repositories.usage import UsageRepository
+from app.repositories.usage import UsageRepository, calculate_llm_cost_usd
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.chat import (
     CitationDTO,
@@ -307,14 +307,15 @@ class ChatService:
             await self.conv_repo.add_citations(asst_msg.id, citations_to_persist)
 
         # 13. Record usage event for cost tracking (FR-043)
+        cost = calculate_llm_cost_usd(llm_result.model, llm_result.input_tokens, llm_result.output_tokens)
         await self.usage_repo.record_event(
             workspace_id=workspace_id,
             user_id=user_id,
             event_type="question",
             provider=settings.LLM_PROVIDER,
             model=llm_result.model,
-            units=1,
-            cost_usd=Decimal("0.001")
+            units=llm_result.input_tokens + llm_result.output_tokens or 1,
+            cost_usd=cost
         )
 
         return SendMessageResponse(

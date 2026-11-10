@@ -81,6 +81,8 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     VERIFICATION_TOKEN_EXPIRE_HOURS: int = 24
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 60
+    REQUIRE_EMAIL_VERIFICATION: bool = False
+    RATE_LIMIT_ENABLED: bool = True
     PLATFORM_ADMIN_EMAIL: str = "admin@docmind.com"
     PLATFORM_ADMIN_PASSWORD: str = "Admin@123"
 

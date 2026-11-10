@@ -91,13 +91,16 @@ class QuotaService:
         self.usage_repo = usage_repo
         self.workspace_repo = workspace_repo
 
-    async def _get_tier_limits(self, workspace_id: uuid.UUID) -> TierLimitConfig:
+    async def get_tier_limits(self, workspace_id: uuid.UUID) -> TierLimitConfig:
         tier = "STARTER"
         if self.workspace_repo:
             ws = await self.workspace_repo.get_by_id(workspace_id)
             if ws and ws.tier:
                 tier = ws.tier
         return TIER_LIMITS.get(tier.upper(), TIER_LIMITS["STARTER"])
+
+    async def _get_tier_limits(self, workspace_id: uuid.UUID) -> TierLimitConfig:
+        return await self.get_tier_limits(workspace_id)
 
     async def check_upload_quota(
         self,
@@ -145,12 +148,19 @@ class QuotaService:
             raise ServiceDegradedException("AI operations are temporarily disabled by administrator policy.")
 
         limits = await self._get_tier_limits(workspace_id)
-        questions_used = await self.usage_repo.count_monthly_questions(user_id)
+        questions_used = await self.usage_repo.count_monthly_questions(workspace_id)
         if questions_used >= limits.monthly_questions:
             raise QuotaExceededException(
                 f"Monthly limit of {limits.monthly_questions} AI questions reached for {limits.name} tier. Upgrade workspace to continue querying.",
                 code="MONTHLY_QUESTION_LIMIT_REACHED"
             )
+
+        if settings.AI_MONTHLY_BUDGET_USD > 0:
+            platform_spend = await self.usage_repo.get_monthly_cost_usd()
+            if float(platform_spend) >= settings.AI_MONTHLY_BUDGET_USD:
+                raise ServiceDegradedException(
+                    "Monthly platform AI budget threshold reached. Please contact support or your platform administrator."
+                )
 
     async def check_member_invite_quota(self, workspace_id: uuid.UUID) -> None:
         limits = await self._get_tier_limits(workspace_id)
@@ -165,7 +175,7 @@ class QuotaService:
     async def get_usage_summary(self, workspace_id: uuid.UUID, user_id: uuid.UUID) -> UsageSummaryDTO:
         limits = await self._get_tier_limits(workspace_id)
         count, current_bytes = await self.doc_repo.count_workspace_usage(workspace_id)
-        questions_used = await self.usage_repo.count_monthly_questions(user_id)
+        questions_used = await self.usage_repo.count_monthly_questions(workspace_id)
 
         now = datetime.now(timezone.utc)
         if now.month == 12:

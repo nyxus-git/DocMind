@@ -202,9 +202,26 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
           We sent a verification link to <span className="font-medium text-fg">{verifyEmailSentTo}</span>. It expires in
           24 hours. Once you have verified, sign in to open your workspace.
         </p>
-        <Button className="mt-6 w-full" size="lg" onClick={() => switchMode('signin')}>
-          Go to sign in
-        </Button>
+        <div className="mt-6 space-y-2.5">
+          <Button className="w-full" size="lg" onClick={() => switchMode('signin')}>
+            Go to sign in
+          </Button>
+          <Button
+            variant="secondary"
+            className="w-full"
+            onClick={async () => {
+              try {
+                await ApiClient.resendVerification(verifyEmailSentTo);
+                setNotice('Verification link re-sent.');
+              } catch {
+                // fail silently
+              }
+            }}
+          >
+            Resend verification email
+          </Button>
+          {notice && <p className="text-center text-xs text-ok">{notice}</p>}
+        </div>
       </div>
     );
   }

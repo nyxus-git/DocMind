@@ -2,7 +2,7 @@ import uuid
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.api.v1.dependencies import WorkspaceContext, get_current_workspace
+from app.api.v1.dependencies import WorkspaceContext, get_current_workspace, require_write_access
 from app.core.exceptions import EntityNotFoundException
 from app.db.session import get_db
 from app.models.entities import Conversation, Message
@@ -24,7 +24,7 @@ router = APIRouter(prefix="/conversations", tags=["Chat & Conversations"])
 @router.post("", response_model=ConversationDTO, status_code=status.HTTP_201_CREATED)
 async def create_conversation(
     req: CreateConversationRequest,
-    ctx: WorkspaceContext = Depends(get_current_workspace),
+    ctx: WorkspaceContext = Depends(require_write_access),
     db: AsyncSession = Depends(get_db)
 ):
     conv_repo = ConversationRepository(db)
@@ -121,7 +121,7 @@ async def get_conversation(
 async def update_conversation(
     conversation_id: uuid.UUID,
     req: UpdateConversationRequest,
-    ctx: WorkspaceContext = Depends(get_current_workspace),
+    ctx: WorkspaceContext = Depends(require_write_access),
     db: AsyncSession = Depends(get_db)
 ):
     conv_repo = ConversationRepository(db)
@@ -149,7 +149,7 @@ async def update_conversation(
 @router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_conversation(
     conversation_id: uuid.UUID,
-    ctx: WorkspaceContext = Depends(get_current_workspace),
+    ctx: WorkspaceContext = Depends(require_write_access),
     db: AsyncSession = Depends(get_db)
 ):
     conv_repo = ConversationRepository(db)
@@ -163,7 +163,7 @@ async def delete_conversation(
 async def send_message(
     conversation_id: uuid.UUID,
     req: SendMessageRequest,
-    ctx: WorkspaceContext = Depends(get_current_workspace),
+    ctx: WorkspaceContext = Depends(require_write_access),
     db: AsyncSession = Depends(get_db)
 ):
     chat_service = ChatService(db)

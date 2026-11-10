@@ -49,7 +49,7 @@ async def login(req: LoginRequest, response: Response, db: AsyncSession = Depend
         value=refresh_token,
         httponly=True,
         secure=(settings.APP_ENV == "production"),
-        samesite="lax",
+        samesite=("none" if settings.APP_ENV == "production" else "lax"),
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
         path="/api/v1/auth"
     )
@@ -71,7 +71,7 @@ async def demo_login(response: Response, db: AsyncSession = Depends(get_db)):
         value=refresh_token,
         httponly=True,
         secure=(settings.APP_ENV == "production"),
-        samesite="lax",
+        samesite=("none" if settings.APP_ENV == "production" else "lax"),
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
         path="/api/v1/auth"
     )
@@ -100,7 +100,7 @@ async def refresh(
         value=new_refresh_token,
         httponly=True,
         secure=(settings.APP_ENV == "production"),
-        samesite="lax",
+        samesite=("none" if settings.APP_ENV == "production" else "lax"),
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
         path="/api/v1/auth"
     )
@@ -116,7 +116,12 @@ async def logout(
     if docmind_refresh_token:
         auth_service = AuthService(db)
         await auth_service.logout(docmind_refresh_token)
-    response.delete_cookie(key="docmind_refresh_token", path="/api/v1/auth")
+    response.delete_cookie(
+        key="docmind_refresh_token",
+        path="/api/v1/auth",
+        secure=(settings.APP_ENV == "production"),
+        samesite=("none" if settings.APP_ENV == "production" else "lax"),
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -125,6 +130,13 @@ async def verify_email(req: VerifyEmailRequest, db: AsyncSession = Depends(get_d
     auth_service = AuthService(db)
     await auth_service.verify_email(req.token)
     return MessageResponse(message="Email verified successfully. You may now log in to DocMind.")
+
+
+@router.post("/resend-verification", status_code=status.HTTP_202_ACCEPTED)
+async def resend_verification(req: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
+    auth_service = AuthService(db)
+    await auth_service.resend_verification(req.email)
+    return {"message": "If your account exists and is not yet verified, a fresh verification email has been sent."}
 
 
 @router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED)

@@ -1,0 +1,16 @@
+[Unit]
+Description=DocMind Background Document Ingestion & Cleanup Worker
+After=network.target docmind-api.service
+
+[Service]
+User=rohan
+WorkingDirectory=/home/rohan/DocMind/backend
+Environment="PATH=/home/rohan/DocMind/backend/venv/bin"
+Environment="PYTHONPATH=/home/rohan/DocMind/backend"
+EnvironmentFile=/home/rohan/DocMind/.env
+ExecStart=/home/rohan/DocMind/backend/venv/bin/python -m app.workers.runner
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

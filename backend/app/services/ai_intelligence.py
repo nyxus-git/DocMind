@@ -13,7 +13,7 @@ from app.models.enums import DocumentStatus
 from app.repositories.audit import AuditRepository
 from app.repositories.chunk import ChunkRepository
 from app.repositories.document import DocumentRepository
-from app.repositories.usage import UsageRepository
+from app.repositories.usage import UsageRepository, calculate_llm_cost_usd
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.chat import CitationDTO
 from app.schemas.intelligence import (
@@ -212,13 +212,15 @@ class IntelligenceService:
 
         if user_id:
             try:
+                cost = calculate_llm_cost_usd(res.model, res.input_tokens, res.output_tokens)
                 await self.usage_repo.record_event(
                     workspace_id=workspace_id,
                     user_id=user_id,
                     event_type="extraction",
                     provider="gemini",
                     model=res.model,
-                    units=res.input_tokens + res.output_tokens
+                    units=res.input_tokens + res.output_tokens or 1,
+                    cost_usd=cost
                 )
             except Exception as e:
                 logger.warning(f"Failed to record usage event: {e}")
@@ -444,13 +446,15 @@ class IntelligenceService:
         # Record usage event if user_id provided
         if user_id:
             try:
+                cost = calculate_llm_cost_usd(res.model, res.input_tokens, res.output_tokens)
                 await self.usage_repo.record_event(
                     workspace_id=workspace_id,
                     user_id=user_id,
                     event_type="comparison",
                     provider="gemini",
                     model=res.model,
-                    units=res.input_tokens + res.output_tokens
+                    units=res.input_tokens + res.output_tokens or 1,
+                    cost_usd=cost
                 )
                 await self.audit_repo.record_event(
                     workspace_id=workspace_id,

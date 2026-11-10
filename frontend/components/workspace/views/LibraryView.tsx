@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { ApiClient, DocumentDTO, DocumentSummaryResponse } from '../../../lib/api';
+import { ApiClient, DocumentDTO, DocumentSummaryResponse, ExtractionResponse } from '../../../lib/api';
 import { formatBytes, formatDate } from '../../../lib/format';
 import { Button, inputClass, Spinner } from '../../ui/Button';
 import { Icon } from '../../ui/Icon';
@@ -63,6 +63,15 @@ export function LibraryView() {
   const [summaryFor, setSummaryFor] = useState<DocumentDTO | null>(null);
   const [summary, setSummary] = useState<DocumentSummaryResponse | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [extractFor, setExtractFor] = useState<DocumentDTO | null>(null);
+  const [extractPreset, setExtractPreset] = useState('entities');
+  const [extracting, setExtracting] = useState(false);
+  const [extractResult, setExtractResult] = useState<ExtractionResponse | null>(null);
+  const [extractError, setExtractError] = useState<string | null>(null);
+  const [editingDoc, setEditingDoc] = useState<DocumentDTO | null>(null);
+  const [editFilename, setEditFilename] = useState('');
+  const [editTags, setEditTags] = useState('');
+  const [savingMeta, setSavingMeta] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const counts = useMemo(() => {
@@ -71,7 +80,13 @@ export function LibraryView() {
     return c;
   }, [documents]);
 
-  const visible = documents.filter(d => matchesFilter(d, filter) && (!query || d.filename.toLowerCase().includes(query.toLowerCase())));
+  const visible = documents.filter(
+    d =>
+      matchesFilter(d, filter) &&
+      (!query ||
+        d.filename.toLowerCase().includes(query.toLowerCase()) ||
+        (d.tags || []).some(t => t.toLowerCase().includes(query.toLowerCase()))),
+  );
 
   const confirmDelete = async () => {
     if (!toDelete) return;
@@ -96,6 +111,51 @@ export function LibraryView() {
       setSummary(await ApiClient.getDocumentSummary(doc.id));
     } catch (err) {
       if (!handleApiError(err)) setSummaryError(err instanceof Error ? err.message : 'Could not create a summary.');
+    }
+  };
+
+  const runExtraction = async (doc: DocumentDTO, preset: string) => {
+    setExtractFor(doc);
+    setExtractPreset(preset);
+    setExtractResult(null);
+    setExtractError(null);
+    setExtracting(true);
+    try {
+      const res = await ApiClient.extractPreset(doc.id, preset);
+      setExtractResult(res);
+    } catch (err) {
+      if (!handleApiError(err)) setExtractError(err instanceof Error ? err.message : 'Structured extraction failed.');
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  const openEditMeta = (doc: DocumentDTO) => {
+    setEditingDoc(doc);
+    setEditFilename(doc.filename);
+    setEditTags((doc.tags || []).join(', '));
+  };
+
+  const saveMeta = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingDoc) return;
+    setSavingMeta(true);
+    try {
+      const parsedTags = editTags
+        .split(',')
+        .map(t => t.trim())
+        .filter(Boolean);
+      await ApiClient.updateDocument(editingDoc.id, {
+        filename: editFilename.trim() || editingDoc.filename,
+        tags: parsedTags,
+      });
+      toast('Document updated.', 'success');
+      setEditingDoc(null);
+      await refreshDocuments();
+    } catch (err) {
+      if (!handleApiError(err)) toast(err instanceof Error ? err.message : 'Could not update document.', 'error');
+    } finally {
+      setSavingMeta(false);
     }
   };
 
@@ -203,6 +263,15 @@ export function LibraryView() {
                           {d.page_count ? `${d.page_count} pages • ` : ''}
                           {formatBytes(d.size_bytes)} &bull; Added {formatDate(d.created_at)}
                         </p>
+                        {d.tags && d.tags.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {d.tags.map(tag => (
+                              <span key={tag} className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted">
+                                #{tag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         {d.status === 'FAILED' && d.safe_error?.message && (
                           <p className="mt-0.5 text-[13px] text-danger">{d.safe_error.message}</p>
                         )}
@@ -219,6 +288,16 @@ export function LibraryView() {
                         {d.status === 'READY' && (
                           <IconButton label={`Summarize ${d.filename}`} onClick={() => openSummary(d)}>
                             <Icon name="book" />
+                          </IconButton>
+                        )}
+                        {d.status === 'READY' && canAsk && (
+                          <IconButton label={`Extract data from ${d.filename}`} onClick={() => runExtraction(d, 'entities')}>
+                            <Icon name="table" />
+                          </IconButton>
+                        )}
+                        {canUpload && (
+                          <IconButton label={`Rename or tag ${d.filename}`} onClick={() => openEditMeta(d)}>
+                            <Icon name="edit" />
                           </IconButton>
                         )}
                         {d.status === 'FAILED' && canUpload && (
@@ -321,6 +400,131 @@ export function LibraryView() {
             {summary.caveats && <p className="rounded-lg bg-warn-soft px-3.5 py-3 text-sm text-warn">{summary.caveats}</p>}
           </div>
         )}
+      </Modal>
+
+      {/* Structured Extraction Modal */}
+      <Modal
+        open={!!extractFor}
+        onClose={() => setExtractFor(null)}
+        title="Structured Extraction"
+        description={extractFor?.filename}
+        width="max-w-2xl"
+        footer={
+          <>
+            {extractResult && (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  const blob = new Blob([JSON.stringify(extractResult.extracted_data, null, 2)], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `${extractFor?.filename || 'document'}_${extractPreset}.json`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+              >
+                <Icon name="download" /> Export JSON
+              </Button>
+            )}
+            <Button variant="secondary" onClick={() => setExtractFor(null)}>
+              Close
+            </Button>
+          </>
+        }
+      >
+        <div className="mb-4 flex flex-wrap gap-1.5">
+          {[
+            { id: 'entities', label: 'Entities' },
+            { id: 'dates', label: 'Dates & Deadlines' },
+            { id: 'metrics', label: 'Metrics & Numbers' },
+            { id: 'obligations', label: 'Obligations' },
+            { id: 'sections', label: 'Sections' },
+          ].map(p => (
+            <button
+              key={p.id}
+              type="button"
+              disabled={extracting}
+              onClick={() => extractFor && runExtraction(extractFor, p.id)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                extractPreset === p.id ? 'bg-brand text-brand-fg' : 'bg-surface-2 text-muted hover:text-fg'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        {extracting && (
+          <div className="flex items-center gap-3 py-8 text-sm text-muted">
+            <Spinner className="size-4" /> Extracting structured {extractPreset} data&hellip;
+          </div>
+        )}
+        {extractError && (
+          <p role="alert" className="rounded-lg bg-danger-soft px-3.5 py-3 text-sm text-danger">
+            {extractError}
+          </p>
+        )}
+        {extractResult && !extracting && (
+          <div className="space-y-4">
+            <p className="text-xs text-muted">{extractResult.confidence_note}</p>
+            <pre className="scroll-thin max-h-72 overflow-auto rounded-xl border border-line bg-bg p-4 font-mono text-xs leading-relaxed">
+              {JSON.stringify(extractResult.extracted_data, null, 2)}
+            </pre>
+            {extractResult.citations?.length > 0 && (
+              <div className="text-xs text-muted">
+                Verified across {extractResult.citations.length} source passage(s).
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* Rename & Tag Document Modal */}
+      <Modal
+        open={!!editingDoc}
+        onClose={() => setEditingDoc(null)}
+        title="Edit document details"
+        lockClose={savingMeta}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setEditingDoc(null)} disabled={savingMeta}>
+              Cancel
+            </Button>
+            <Button type="submit" form="edit-doc-form" disabled={savingMeta}>
+              {savingMeta && <Spinner />} Save changes
+            </Button>
+          </>
+        }
+      >
+        <form id="edit-doc-form" onSubmit={saveMeta} className="space-y-4">
+          <div>
+            <label htmlFor="doc-rename" className="mb-1.5 block text-sm font-medium">
+              File name
+            </label>
+            <input
+              id="doc-rename"
+              type="text"
+              required
+              value={editFilename}
+              onChange={e => setEditFilename(e.target.value)}
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label htmlFor="doc-tags" className="mb-1.5 block text-sm font-medium">
+              Tags (comma-separated)
+            </label>
+            <input
+              id="doc-tags"
+              type="text"
+              placeholder="contract, vendor, q4-2026"
+              value={editTags}
+              onChange={e => setEditTags(e.target.value)}
+              className={inputClass}
+            />
+          </div>
+        </form>
       </Modal>
     </div>
   );
