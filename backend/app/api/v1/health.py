@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select, text
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.adapters.storage.local import is_r2_configured
 from app.core.config import settings
 from app.db.session import get_db
 from app.models.entities import Job
@@ -18,29 +19,37 @@ async def health_live():
 
 @router.get("/ready")
 async def health_ready(db: AsyncSession = Depends(get_db)):
-    """Readiness probe: validates database connection and queue telemetry."""
+    """Readiness probe: validates database connection and queue telemetry in a single SQL round-trip."""
     try:
-        await db.execute(text("SELECT 1"))
+        row = (
+            await db.execute(
+                select(
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (Job.status.in_([JobStatus.QUEUED.value, JobStatus.RUNNING.value, JobStatus.RETRY_WAIT.value]), 1),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    ),
+                    func.coalesce(
+                        func.sum(case((Job.status == JobStatus.FAILED.value, 1), else_=0)),
+                        0,
+                    ),
+                )
+            )
+        ).one()
         db_status = "connected"
+        queued_jobs = int(row[0] or 0)
+        failed_jobs = int(row[1] or 0)
     except Exception as e:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"status": "unhealthy", "database": str(e)}
         )
 
-    queued_jobs = 0
-    failed_jobs = 0
-    try:
-        queued_jobs = await db.scalar(
-            select(func.count(Job.id)).where(Job.status.in_([JobStatus.QUEUED.value, JobStatus.RUNNING.value, JobStatus.RETRY_WAIT.value]))
-        ) or 0
-        failed_jobs = await db.scalar(
-            select(func.count(Job.id)).where(Job.status == JobStatus.FAILED.value)
-        ) or 0
-    except Exception:
-        pass
-
-    storage_mode = "r2" if (settings.R2_ACCOUNT_ID and settings.R2_ACCESS_KEY_ID) else "local"
+    storage_mode = "r2" if is_r2_configured() else "local"
 
     return {
         "status": "ready",

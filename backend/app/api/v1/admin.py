@@ -3,10 +3,11 @@ import io
 import json
 import re
 import uuid
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from fastapi import APIRouter, Depends, Query, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.adapters.storage.local import is_r2_configured
 from app.api.v1.dependencies import require_platform_admin
 from app.core.config import settings
 from app.core.exceptions import DocMindException
@@ -45,40 +46,66 @@ async def get_admin_overview(
     db: AsyncSession = Depends(get_db)
 ):
     """Retrieves platform-wide metrics, tenant counts, and service statuses."""
-    total_workspaces = await db.scalar(select(func.count(Workspace.id))) or 0
-    total_users = await db.scalar(select(func.count(User.id))) or 0
-    total_documents = await db.scalar(
-        select(func.count(Document.id)).where(Document.status != DocumentStatus.DELETED.value)
-    ) or 0
-    total_chunks = await db.scalar(select(func.count(DocumentChunk.id))) or 0
-    total_storage = await db.scalar(
-        select(func.coalesce(func.sum(Document.size_bytes), 0)).where(Document.status != DocumentStatus.DELETED.value)
-    ) or 0
-    total_questions = await db.scalar(select(func.count(Message.id)).where(Message.role == "user")) or 0
-    pending_jobs = await db.scalar(
-        select(func.count(Job.id)).where(Job.status.in_([JobStatus.QUEUED.value, JobStatus.RUNNING.value, JobStatus.RETRY_WAIT.value]))
-    ) or 0
-    failed_jobs = await db.scalar(
-        select(func.count(Job.id)).where(Job.status == JobStatus.FAILED.value)
-    ) or 0
-    usage_repo = UsageRepository(db)
-    monthly_ai_cost = float(await usage_repo.get_monthly_cost_usd())
+    counts_row = (
+        await db.execute(
+            select(
+                select(func.count(User.id)).scalar_subquery(),
+                select(func.count(DocumentChunk.id)).scalar_subquery(),
+                select(func.count(Message.id)).where(Message.role == "user").scalar_subquery(),
+            )
+        )
+    ).one()
+    total_users = int(counts_row[0] or 0)
+    total_chunks = int(counts_row[1] or 0)
+    total_questions = int(counts_row[2] or 0)
 
     tier_rows = (await db.execute(select(Workspace.tier, func.count(Workspace.id)).group_by(Workspace.tier))).all()
     active_tiers: Dict[str, int] = {str(tier): int(count) for tier, count in tier_rows}
+    total_workspaces = sum(active_tiers.values())
 
-    status_rows = (
+    doc_status_rows = (
         await db.execute(
-            select(Document.status, func.count(Document.id))
+            select(
+                Document.status,
+                func.count(Document.id),
+                func.coalesce(func.sum(Document.size_bytes), 0),
+            )
             .where(Document.status != DocumentStatus.DELETED.value)
             .group_by(Document.status)
         )
     ).all()
-    doc_status: Dict[str, int] = {str(status_val): int(count) for status_val, count in status_rows}
+    doc_status: Dict[str, int] = {str(status_val): int(cnt) for status_val, cnt, _ in doc_status_rows}
+    total_documents = sum(doc_status.values())
+    total_storage = sum(int(sz or 0) for _, _, sz in doc_status_rows)
+
+    job_row = (
+        await db.execute(
+            select(
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (Job.status.in_([JobStatus.QUEUED.value, JobStatus.RUNNING.value, JobStatus.RETRY_WAIT.value]), 1),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ),
+                func.coalesce(
+                    func.sum(case((Job.status == JobStatus.FAILED.value, 1), else_=0)),
+                    0,
+                ),
+            )
+        )
+    ).one()
+    pending_jobs = int(job_row[0] or 0)
+    failed_jobs = int(job_row[1] or 0)
+
+    usage_repo = UsageRepository(db)
+    monthly_ai_cost = float(await usage_repo.get_monthly_cost_usd())
 
     r2_status = (
         f"CONNECTED (Bucket: {settings.R2_BUCKET})"
-        if settings.R2_ACCOUNT_ID and settings.R2_ACCESS_KEY_ID
+        if is_r2_configured()
         else "STANDBY / LOCAL FALLBACK"
     )
 
@@ -127,53 +154,64 @@ async def list_admin_workspaces(
     """Lists all customer workspaces with member counts, document totals, storage used, and AI spend."""
     ws_query = select(Workspace).order_by(Workspace.created_at.desc())
     workspaces = (await db.execute(ws_query)).scalars().all()
+    if not workspaces:
+        return []
+
+    ws_ids = [ws.id for ws in workspaces]
+    ws_repo = WorkspaceRepository(db)
     usage_repo = UsageRepository(db)
 
-    results: List[AdminWorkspaceSummaryDTO] = []
-    for ws in workspaces:
-        owner_res = await db.execute(
-            select(User.email)
-            .join(WorkspaceMember, WorkspaceMember.user_id == User.id)
-            .where(WorkspaceMember.workspace_id == ws.id, WorkspaceMember.role == WorkspaceRole.OWNER.value)
-        )
-        owner_email = owner_res.scalar_one_or_none()
-
-        member_count = await db.scalar(
-            select(func.count(WorkspaceMember.user_id)).where(WorkspaceMember.workspace_id == ws.id)
-        ) or 0
-
-        doc_count = await db.scalar(
-            select(func.count(Document.id)).where(
-                Document.workspace_id == ws.id,
-                Document.status != DocumentStatus.DELETED.value
-            )
-        ) or 0
-
-        storage_bytes = await db.scalar(
-            select(func.coalesce(func.sum(Document.size_bytes), 0)).where(
-                Document.workspace_id == ws.id,
-                Document.status != DocumentStatus.DELETED.value
-            )
-        ) or 0
-
-        ws_cost = float(await usage_repo.get_monthly_cost_usd(ws.id))
-
-        results.append(
-            AdminWorkspaceSummaryDTO(
-                id=ws.id,
-                name=ws.name,
-                slug=ws.slug,
-                tier=ws.tier,
-                created_at=ws.created_at,
-                owner_email=owner_email,
-                member_count=member_count,
-                document_count=doc_count,
-                storage_bytes=storage_bytes,
-                monthly_ai_cost_usd=ws_cost,
+    owner_rows = (
+        await db.execute(
+            select(WorkspaceMember.workspace_id, User.email)
+            .join(User, WorkspaceMember.user_id == User.id)
+            .where(
+                WorkspaceMember.workspace_id.in_(ws_ids),
+                WorkspaceMember.role == WorkspaceRole.OWNER.value,
             )
         )
+    ).all()
+    owners_by_ws: Dict[uuid.UUID, str] = {}
+    for ws_id, owner_email in owner_rows:
+        owners_by_ws.setdefault(ws_id, owner_email)
 
-    return results
+    members_by_ws = await ws_repo.count_members_by_workspace(ws_ids)
+
+    doc_rows = (
+        await db.execute(
+            select(
+                Document.workspace_id,
+                func.count(Document.id),
+                func.coalesce(func.sum(Document.size_bytes), 0),
+            )
+            .where(
+                Document.workspace_id.in_(ws_ids),
+                Document.status != DocumentStatus.DELETED.value,
+            )
+            .group_by(Document.workspace_id)
+        )
+    ).all()
+    docs_by_ws: Dict[uuid.UUID, Tuple[int, int]] = {
+        row[0]: (int(row[1]), int(row[2] or 0)) for row in doc_rows
+    }
+
+    costs_by_ws = await usage_repo.get_monthly_costs_by_workspace(ws_ids)
+
+    return [
+        AdminWorkspaceSummaryDTO(
+            id=ws.id,
+            name=ws.name,
+            slug=ws.slug,
+            tier=ws.tier,
+            created_at=ws.created_at,
+            owner_email=owners_by_ws.get(ws.id),
+            member_count=members_by_ws.get(ws.id, 0),
+            document_count=docs_by_ws.get(ws.id, (0, 0))[0],
+            storage_bytes=docs_by_ws.get(ws.id, (0, 0))[1],
+            monthly_ai_cost_usd=float(costs_by_ws.get(ws.id, 0)),
+        )
+        for ws in workspaces
+    ]
 
 
 @router.post("/workspaces", response_model=AdminWorkspaceSummaryDTO, status_code=status.HTTP_201_CREATED)
@@ -359,24 +397,31 @@ async def list_admin_users(
     """Lists all registered users across all customer companies."""
     users_query = select(User).where(User.status != UserStatus.DELETED.value).order_by(User.created_at.desc())
     users = (await db.execute(users_query)).scalars().all()
+    if not users:
+        return []
 
-    results: List[AdminUserSummaryDTO] = []
-    for u in users:
-        ws_count = await db.scalar(
-            select(func.count(WorkspaceMember.workspace_id)).where(WorkspaceMember.user_id == u.id)
-        ) or 0
-        results.append(
-            AdminUserSummaryDTO(
-                id=u.id,
-                email=u.email,
-                status=u.status,
-                verified=bool(u.verified_at),
-                is_superadmin=bool(u.is_superadmin),
-                workspace_count=ws_count,
-                created_at=u.created_at
-            )
+    user_ids = [u.id for u in users]
+    count_rows = (
+        await db.execute(
+            select(WorkspaceMember.user_id, func.count(WorkspaceMember.workspace_id))
+            .where(WorkspaceMember.user_id.in_(user_ids))
+            .group_by(WorkspaceMember.user_id)
         )
-    return results
+    ).all()
+    ws_counts: Dict[uuid.UUID, int] = {row[0]: int(row[1]) for row in count_rows}
+
+    return [
+        AdminUserSummaryDTO(
+            id=u.id,
+            email=u.email,
+            status=u.status,
+            verified=bool(u.verified_at),
+            is_superadmin=bool(u.is_superadmin),
+            workspace_count=ws_counts.get(u.id, 0),
+            created_at=u.created_at,
+        )
+        for u in users
+    ]
 
 
 @router.patch("/users/{user_id}/status", response_model=AdminUserSummaryDTO)
@@ -621,7 +666,7 @@ async def get_admin_system_diagnostics(
     current_user: User = Depends(require_platform_admin)
 ):
     """Returns runtime infrastructure diagnostics."""
-    storage_provider = "Cloudflare R2" if settings.R2_ACCOUNT_ID and settings.R2_ACCESS_KEY_ID else "Local Filesystem Fallback"
+    storage_provider = "Cloudflare R2" if is_r2_configured() else "Local Filesystem Fallback"
     return AdminSystemDiagnosticsDTO(
         app_env=settings.APP_ENV,
         storage_provider=storage_provider,

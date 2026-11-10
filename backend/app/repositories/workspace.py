@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.entities import User, Workspace, WorkspaceInvitation, WorkspaceMember
@@ -61,6 +61,16 @@ class WorkspaceRepository:
             select(func.count(WorkspaceMember.user_id)).where(WorkspaceMember.workspace_id == workspace_id)
         )
         return int(result.scalar_one_or_none() or 0)
+
+    async def count_members_by_workspace(self, workspace_ids: Optional[List[uuid.UUID]] = None) -> Dict[uuid.UUID, int]:
+        """Returns member counts keyed by workspace_id in one GROUP BY query."""
+        if workspace_ids is not None and not workspace_ids:
+            return {}
+        query = select(WorkspaceMember.workspace_id, func.count(WorkspaceMember.user_id))
+        if workspace_ids is not None:
+            query = query.where(WorkspaceMember.workspace_id.in_(workspace_ids))
+        result = await self.db.execute(query.group_by(WorkspaceMember.workspace_id))
+        return {row[0]: int(row[1]) for row in result.all()}
 
     async def get_members(self, workspace_id: uuid.UUID) -> List[Tuple[WorkspaceMember, str]]:
         """Returns list of (WorkspaceMember, user_email)."""

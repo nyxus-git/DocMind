@@ -1,6 +1,6 @@
 import uuid
 from typing import List
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.dependencies import WorkspaceContext, get_current_workspace
 from app.core.exceptions import EntityNotFoundException
@@ -38,6 +38,7 @@ async def get_tier_catalogue():
 
 @router.get("/dashboard/summary", response_model=DashboardDTO)
 async def get_dashboard_summary(
+    limit: int = Query(50, ge=1, le=100),
     ctx: WorkspaceContext = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db)
 ):
@@ -49,8 +50,8 @@ async def get_dashboard_summary(
     quota_service = QuotaService(doc_repo, usage_repo, ws_repo)
 
     usage = await quota_service.get_usage_summary(ctx.workspace.id, ctx.user.id)
-    recent_docs = await doc_service.list_documents(ctx.workspace.id, limit=5)
-    recent_convs = await conv_repo.list_conversations(ctx.workspace.id, limit=5)
+    recent_docs = await doc_service.list_documents(ctx.workspace.id, limit=limit)
+    recent_convs = await conv_repo.list_conversations(ctx.workspace.id, limit=limit)
 
     recent_conv_dtos = [
         ConversationDTO(
@@ -68,7 +69,8 @@ async def get_dashboard_summary(
     return DashboardDTO(
         usage=usage,
         recent_documents=recent_docs,
-        recent_conversations=recent_conv_dtos
+        recent_conversations=recent_conv_dtos,
+        is_superadmin=bool(ctx.user.is_superadmin),
     )
 
 

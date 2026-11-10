@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import Dict, List, Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.entities import UsageEvent
@@ -36,28 +36,44 @@ class UsageRepository:
         await self.db.flush()
         return event
 
-    async def count_monthly_questions(self, workspace_id: uuid.UUID) -> int:
+    def _current_month_start(self) -> datetime:
         now = datetime.now(timezone.utc)
-        first_of_month = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+        return datetime(now.year, now.month, 1, tzinfo=timezone.utc)
 
+    async def count_monthly_questions(self, workspace_id: uuid.UUID) -> int:
         result = await self.db.execute(
             select(func.count(UsageEvent.id)).where(
                 UsageEvent.workspace_id == workspace_id,
                 UsageEvent.event_type.in_(["question", "comparison", "extraction"]),
-                UsageEvent.created_at >= first_of_month
+                UsageEvent.created_at >= self._current_month_start()
             )
         )
         return int(result.scalar_one() or 0)
 
     async def get_monthly_cost_usd(self, workspace_id: Optional[uuid.UUID] = None) -> Decimal:
-        now = datetime.now(timezone.utc)
-        first_of_month = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
-        query = select(func.coalesce(func.sum(UsageEvent.cost_usd), 0)).where(UsageEvent.created_at >= first_of_month)
+        query = select(func.coalesce(func.sum(UsageEvent.cost_usd), 0)).where(
+            UsageEvent.created_at >= self._current_month_start()
+        )
         if workspace_id:
             query = query.where(UsageEvent.workspace_id == workspace_id)
         result = await self.db.execute(query)
         val = result.scalar_one_or_none()
         return Decimal(str(val or "0.0"))
+
+    async def get_monthly_costs_by_workspace(
+        self, workspace_ids: Optional[List[uuid.UUID]] = None
+    ) -> Dict[uuid.UUID, Decimal]:
+        """Returns current-month USD spend keyed by workspace_id in one GROUP BY query."""
+        if workspace_ids is not None and not workspace_ids:
+            return {}
+        query = select(
+            UsageEvent.workspace_id,
+            func.coalesce(func.sum(UsageEvent.cost_usd), 0),
+        ).where(UsageEvent.created_at >= self._current_month_start())
+        if workspace_ids is not None:
+            query = query.where(UsageEvent.workspace_id.in_(workspace_ids))
+        result = await self.db.execute(query.group_by(UsageEvent.workspace_id))
+        return {row[0]: Decimal(str(row[1] or "0.0")) for row in result.all()}
 
 
 def calculate_llm_cost_usd(model: str, input_tokens: int, output_tokens: int) -> Decimal:

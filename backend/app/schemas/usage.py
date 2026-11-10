@@ -51,3 +51,4 @@ class DashboardDTO(BaseModel):
     usage: UsageSummaryDTO
     recent_documents: List[DocumentDTO]
     recent_conversations: List[ConversationDTO]
+    is_superadmin: bool = False

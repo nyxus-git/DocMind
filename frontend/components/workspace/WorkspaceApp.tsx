@@ -134,29 +134,29 @@ function Shell({ session: initialSession }: { session: UserSession }) {
   }, [handleApiError]);
 
   const reloadAll = useCallback(async () => {
-    await Promise.all([refreshDocuments(), refreshUsage(), refreshConversations()]);
-  }, [refreshDocuments, refreshUsage, refreshConversations]);
+    try {
+      const dash = await ApiClient.getDashboard(50);
+      setUsage(dash.usage);
+      setDocuments(dash.recent_documents);
+      setConversations(dash.recent_conversations);
+      setDocumentsLoaded(true);
+      setLoadError(null);
 
-  useEffect(() => {
-    // Sync super-admin status from live backend on mount
-    let cancelled = false;
-    ApiClient.getMyProfile()
-      .then(profile => {
-        if (cancelled) return;
-        const flag = Boolean(profile.is_superadmin);
+      if (typeof dash.is_superadmin === 'boolean') {
+        const flag = dash.is_superadmin;
         setSession(prev => (Boolean(prev.isSuperAdmin) === flag ? prev : { ...prev, isSuperAdmin: flag }));
         const stored = loadSession();
         if (stored && Boolean(stored.isSuperAdmin) !== flag) {
           saveSession({ ...stored, isSuperAdmin: flag });
         }
-      })
-      .catch(() => {
-        // ignore background sync failures
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [session.email]);
+      }
+    } catch (err) {
+      if (!handleApiError(err)) {
+        setLoadError(err instanceof Error && !(err instanceof TypeError) ? err.message : 'Cannot reach the DocMind server.');
+      }
+      setDocumentsLoaded(true);
+    }
+  }, [handleApiError]);
 
   useEffect(() => {
     if (tab === 'admin' && !session.isSuperAdmin) {

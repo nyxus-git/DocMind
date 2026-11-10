@@ -55,22 +55,22 @@ async def list_user_workspaces(
     """Lists all workspaces the authenticated user belongs to."""
     ws_repo = WorkspaceRepository(db)
     workspaces_with_role = await ws_repo.get_user_workspaces(current_user.id)
+    if not workspaces_with_role:
+        return []
 
-    results = []
-    for ws, role in workspaces_with_role:
-        count = await ws_repo.count_workspace_members(ws.id)
-        results.append(
-            WorkspaceDetailDTO(
-                id=ws.id,
-                name=ws.name,
-                slug=ws.slug,
-                tier=ws.tier,
-                role=role,
-                created_at=ws.created_at,
-                member_count=count
-            )
+    member_counts = await ws_repo.count_members_by_workspace([ws.id for ws, _ in workspaces_with_role])
+    return [
+        WorkspaceDetailDTO(
+            id=ws.id,
+            name=ws.name,
+            slug=ws.slug,
+            tier=ws.tier,
+            role=role,
+            created_at=ws.created_at,
+            member_count=member_counts.get(ws.id, 0),
         )
-    return results
+        for ws, role in workspaces_with_role
+    ]
 
 
 @router.post("/company", response_model=WorkspaceDetailDTO, status_code=status.HTTP_201_CREATED)

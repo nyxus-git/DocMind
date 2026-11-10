@@ -663,12 +663,13 @@ export class ApiClient {
     return this.request<UsageSummaryDTO>('/usage');
   }
 
-  static async getDashboard() {
+  static async getDashboard(limit: number = 50) {
     return this.request<{
       usage: UsageSummaryDTO;
       recent_documents: DocumentDTO[];
       recent_conversations: ConversationDTO[];
-    }>('/dashboard/summary');
+      is_superadmin?: boolean;
+    }>(`/dashboard/summary?limit=${limit}`);
   }
 
   static async listDocuments(status?: string, search?: string): Promise<DocumentDTO[]> {

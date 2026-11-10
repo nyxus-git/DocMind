@@ -74,7 +74,15 @@ class LocalStorage(ObjectStorage):
             f.write(data)
 
 
+def is_r2_configured() -> bool:
+    return bool(
+        settings.R2_ACCOUNT_ID.strip()
+        and settings.R2_ACCESS_KEY_ID.strip()
+        and settings.R2_SECRET_ACCESS_KEY.strip()
+    )
+
+
 def get_storage() -> ObjectStorage:
-    if settings.R2_ACCOUNT_ID and settings.R2_ACCESS_KEY_ID:
+    if is_r2_configured():
         return R2Storage()
     return LocalStorage()

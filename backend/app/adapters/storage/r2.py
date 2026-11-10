@@ -9,15 +9,18 @@ from app.core.config import settings
 
 class R2Storage(ObjectStorage):
     def __init__(self):
-        endpoint = settings.R2_ENDPOINT_URL or f"https://{settings.R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-        self.bucket = settings.R2_BUCKET
+        self.bucket = settings.R2_BUCKET.strip()
+        raw_endpoint = (settings.R2_ENDPOINT_URL or "").strip().rstrip("/")
+        if raw_endpoint and self.bucket and raw_endpoint.endswith(f"/{self.bucket}"):
+            raw_endpoint = raw_endpoint[: -len(f"/{self.bucket}")]
+        endpoint = raw_endpoint or f"https://{settings.R2_ACCOUNT_ID.strip()}.r2.cloudflarestorage.com"
         self.client = boto3.client(
             "s3",
             endpoint_url=endpoint,
-            aws_access_key_id=settings.R2_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.R2_SECRET_ACCESS_KEY,
+            aws_access_key_id=settings.R2_ACCESS_KEY_ID.strip(),
+            aws_secret_access_key=settings.R2_SECRET_ACCESS_KEY.strip(),
             region_name="auto",
-            config=Config(signature_version="s3v4")
+            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
         )
 
     async def create_upload_url(
@@ -92,3 +95,12 @@ class R2Storage(ObjectStorage):
             Key=object_key
         )
         return await asyncio.to_thread(response["Body"].read)
+
+    async def upload_bytes(self, object_key: str, data: bytes, content_type: str = "application/octet-stream") -> None:
+        await asyncio.to_thread(
+            self.client.put_object,
+            Bucket=self.bucket,
+            Key=object_key,
+            Body=data,
+            ContentType=content_type,
+        )
