@@ -8,3 +8,4 @@ export const metadata: Metadata = {
 export default function CompanyPortalPage() {
   return <CompanyPortalShell />;
 }
+

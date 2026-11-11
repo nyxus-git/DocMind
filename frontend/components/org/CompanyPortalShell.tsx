@@ -611,3 +611,4 @@ export function CompanyPortalShell() {
     </ToastProvider>
   );
 }
+
