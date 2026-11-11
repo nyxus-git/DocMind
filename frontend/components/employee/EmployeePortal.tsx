@@ -43,16 +43,20 @@ const subscribeStorage = (cb: () => void) => {
   return () => window.removeEventListener('storage', cb);
 };
 
-function PendingApprovalScreen({
+export function PendingApprovalScreen({
   companyName,
   email,
   onSignOut,
   onRefresh,
+  alternateHref,
+  alternateLabel,
 }: {
   companyName: string;
   email: string;
   onSignOut: () => void;
   onRefresh: () => void;
+  alternateHref?: string;
+  alternateLabel?: string;
 }) {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-bg px-4 text-fg">
@@ -69,6 +73,14 @@ function PendingApprovalScreen({
           <Button className="w-full" onClick={onRefresh}>
             <Icon name="retry" /> Check Approval Status
           </Button>
+          {alternateHref && alternateLabel && (
+            <Link
+              href={alternateHref}
+              className="inline-flex h-10 w-full items-center justify-center rounded-xl border border-line bg-surface px-4 text-sm font-medium hover:bg-surface-2"
+            >
+              {alternateLabel}
+            </Link>
+          )}
           <Button variant="ghost" className="w-full" onClick={onSignOut}>
             Sign out
           </Button>
@@ -78,7 +90,19 @@ function PendingApprovalScreen({
   );
 }
 
-function EmployeePortalInner({ session }: { session: UserSession }) {
+export function EmployeePortalInner({
+  session,
+  embedded = false,
+  portalSlug,
+  onSignOut,
+  onOpenUpload,
+}: {
+  session: UserSession;
+  embedded?: boolean;
+  portalSlug?: string;
+  onSignOut?: () => void;
+  onOpenUpload?: () => void;
+}) {
   const router = useRouter();
   const toast = useToast();
 
@@ -112,8 +136,14 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
   const signOut = useCallback(async () => {
     await ApiClient.logout();
     clearSession();
-    router.replace('/login/');
-  }, [router]);
+    if (onSignOut) {
+      onSignOut();
+    } else if (portalSlug) {
+      router.replace(`/${portalSlug}/`);
+    } else {
+      router.replace('/login/');
+    }
+  }, [onSignOut, portalSlug, router]);
 
   const handleErr = useCallback(
     (err: unknown, fallback: string) => {
@@ -161,6 +191,17 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, sending]);
 
+  const readyDocs = documents.filter(d => d.status === 'READY');
+  const inProgressDocs = documents.filter(d => ['UPLOADING', 'QUEUED', 'PROCESSING'].includes(d.status));
+
+  useEffect(() => {
+    if (inProgressDocs.length === 0) return;
+    const id = setInterval(() => {
+      void loadPortal();
+    }, 4000);
+    return () => clearInterval(id);
+  }, [inProgressDocs.length, loadPortal]);
+
   const recheckApproval = async () => {
     const refreshed = await establishSession(session.email, session.fullName);
     if (refreshed.workspaceId) {
@@ -192,8 +233,6 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
     );
   }
 
-  const readyDocs = documents.filter(d => d.status === 'READY');
-  const inProgressDocs = documents.filter(d => ['UPLOADING', 'QUEUED', 'PROCESSING'].includes(d.status));
   const selectedSpace = portalInfo?.spaces.find(s => s.id === selectedSpaceId) ?? null;
   const starterPrompts = portalInfo?.starter_prompts?.length ? portalInfo.starter_prompts : DEFAULT_PROMPTS;
   const isCompanyAdmin = portalInfo?.role === 'OWNER' || portalInfo?.role === 'ADMIN';
@@ -315,55 +354,83 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
       (d.space_name || '').toLowerCase().includes(docSearch.toLowerCase()),
   );
 
+  const activeSlug = portalSlug || portalInfo?.slug || (session.workspaceSlug !== 'personal' ? session.workspaceSlug : undefined);
+  const roleLabel = portalInfo?.role === 'VIEWER' ? 'Read-Only Portal' : 'Employee Portal';
+
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-bg text-fg">
-      <header className="shrink-0 border-b border-line bg-bg/95 px-4 backdrop-blur sm:px-6">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <Logo />
-            <span className="hidden h-4 w-px bg-line sm:inline-block" />
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="truncate text-sm font-semibold">{portalInfo?.company_name || session.workspaceName}</span>
-              <span className="hidden rounded-md bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-muted sm:inline-block">
-                Employee Knowledge Portal
-              </span>
+    <div className={embedded ? 'flex h-[calc(100vh-13rem)] min-h-[34rem] flex-col overflow-hidden rounded-2xl border border-line bg-bg text-fg' : 'flex h-screen flex-col overflow-hidden bg-bg text-fg'}>
+      {!embedded ? (
+        <header className="shrink-0 border-b border-line bg-bg/95 px-4 backdrop-blur sm:px-6">
+          <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <Logo />
+              <span className="hidden h-4 w-px bg-line sm:inline-block" />
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-sm font-semibold">{portalInfo?.company_name || session.workspaceName}</span>
+                <span className="hidden rounded-md bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-muted sm:inline-block">
+                  {roleLabel}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="flex rounded-lg border border-line bg-surface p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setPortalTab('ask')}
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium ${portalTab === 'ask' ? 'bg-brand text-brand-fg' : 'text-muted hover:text-fg'}`}
+                >
+                  Ask AI
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPortalTab('docs')}
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium ${portalTab === 'docs' ? 'bg-brand text-brand-fg' : 'text-muted hover:text-fg'}`}
+                >
+                  Company Docs ({documents.length})
+                </button>
+              </div>
+              {isCompanyAdmin && (
+                <Link href={activeSlug ? `/${activeSlug}/` : '/company/'} className="hidden h-8 items-center gap-1 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium hover:bg-surface-2 sm:inline-flex">
+                  <Icon name="building" className="size-3.5 text-muted" /> Console
+                </Link>
+              )}
+              {canContributorWorkspace && (
+                <Link href="/app/" className="hidden h-8 items-center gap-1 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium hover:bg-surface-2 lg:inline-flex">
+                  Workspace
+                </Link>
+              )}
+              <ThemeToggle />
+              <Button variant="ghost" size="sm" onClick={() => void signOut()} aria-label="Sign out">
+                <Icon name="logout" className="size-4" />
+              </Button>
             </div>
           </div>
-
+        </header>
+      ) : (
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line bg-surface px-4 py-2.5">
           <div className="flex items-center gap-2">
-            <div className="flex rounded-lg border border-line bg-surface p-0.5">
-              <button
-                type="button"
-                onClick={() => setPortalTab('ask')}
-                className={`rounded-md px-2.5 py-1 text-xs font-medium ${portalTab === 'ask' ? 'bg-brand text-brand-fg' : 'text-muted hover:text-fg'}`}
-              >
-                Ask AI
-              </button>
-              <button
-                type="button"
-                onClick={() => setPortalTab('docs')}
-                className={`rounded-md px-2.5 py-1 text-xs font-medium ${portalTab === 'docs' ? 'bg-brand text-brand-fg' : 'text-muted hover:text-fg'}`}
-              >
-                Company Docs ({documents.length})
-              </button>
-            </div>
-            {isCompanyAdmin && (
-              <Link href="/company/" className="hidden h-8 items-center gap-1 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium hover:bg-surface-2 sm:inline-flex">
-                <Icon name="building" className="size-3.5 text-muted" /> Console
-              </Link>
-            )}
-            {canContributorWorkspace && (
-              <Link href="/app/" className="hidden h-8 items-center gap-1 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium hover:bg-surface-2 lg:inline-flex">
-                Workspace
-              </Link>
-            )}
-            <ThemeToggle />
-            <Button variant="ghost" size="sm" onClick={() => void signOut()} aria-label="Sign out">
-              <Icon name="logout" className="size-4" />
-            </Button>
+            <span className="text-xs font-semibold text-fg">Company Knowledge Assistant</span>
+            <span className="hidden text-xs text-muted sm:inline">&bull; Private Q&amp;A across company documents</span>
+          </div>
+          <div className="flex rounded-lg border border-line bg-bg p-0.5">
+            <button
+              type="button"
+              onClick={() => setPortalTab('ask')}
+              className={`rounded-md px-2.5 py-1 text-xs font-medium ${portalTab === 'ask' ? 'bg-brand text-brand-fg' : 'text-muted hover:text-fg'}`}
+            >
+              Ask AI
+            </button>
+            <button
+              type="button"
+              onClick={() => setPortalTab('docs')}
+              className={`rounded-md px-2.5 py-1 text-xs font-medium ${portalTab === 'docs' ? 'bg-brand text-brand-fg' : 'text-muted hover:text-fg'}`}
+            >
+              Browse Docs ({documents.length})
+            </button>
           </div>
         </div>
-      </header>
+      )}
 
       {/* Sticky space-filter pill row */}
       {(portalInfo?.spaces?.length ?? 0) > 0 && (
@@ -551,12 +618,18 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
                             </Button>
                           )}
                           {isCompanyAdmin && (
-                            <Link
-                              href="/app/?upload=1#library"
-                              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand px-3 text-xs font-medium text-brand-fg hover:opacity-90"
-                            >
-                              <Icon name="upload" className="size-3.5" /> Upload company docs
-                            </Link>
+                            onOpenUpload ? (
+                              <Button size="sm" onClick={onOpenUpload}>
+                                <Icon name="upload" className="size-3.5" /> Upload company docs
+                              </Button>
+                            ) : (
+                              <Link
+                                href="/app/?upload=1#library"
+                                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand px-3 text-xs font-medium text-brand-fg hover:opacity-90"
+                              >
+                                <Icon name="upload" className="size-3.5" /> Upload company docs
+                              </Link>
+                            )
                           )}
                         </div>
                       </div>
@@ -769,12 +842,18 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
                     </Button>
                   )}
                   {isCompanyAdmin && (
-                    <Link
-                      href="/app/?upload=1#library"
-                      className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand px-3 text-xs font-medium text-brand-fg hover:opacity-90"
-                    >
-                      <Icon name="upload" className="size-3.5" /> Upload company docs
-                    </Link>
+                    onOpenUpload ? (
+                      <Button size="sm" onClick={onOpenUpload}>
+                        <Icon name="upload" className="size-3.5" /> Upload company docs
+                      </Button>
+                    ) : (
+                      <Link
+                        href="/app/?upload=1#library"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand px-3 text-xs font-medium text-brand-fg hover:opacity-90"
+                      >
+                        <Icon name="upload" className="size-3.5" /> Upload company docs
+                      </Link>
+                    )
                   )}
                 </div>
               </div>
@@ -888,6 +967,10 @@ export function EmployeePortal() {
   useEffect(() => {
     if (raw !== null && !session) {
       router.replace('/login/');
+    } else if (session && session.isCompany && session.workspaceSlug && session.workspaceSlug !== 'personal') {
+      router.replace(`/${session.workspaceSlug}/`);
+    } else if (session && !session.workspaceId && session.pendingJoinCompany?.companySlug) {
+      router.replace(`/${session.pendingJoinCompany.companySlug}/`);
     }
   }, [raw, session, router]);
 

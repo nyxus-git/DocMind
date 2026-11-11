@@ -14,7 +14,11 @@ export function friendlyError(err: unknown, fallback: string): string {
  * After a successful sign-in: create a pending company workspace if one was requested at
  * sign-up, pick the active workspace (preferring COMPANY workspaces over Personal), and save the session.
  */
-export async function establishSession(email: string, fullName?: string): Promise<UserSession> {
+export async function establishSession(
+  email: string,
+  fullName?: string,
+  preferredSlug?: string,
+): Promise<UserSession> {
   const pending = takePendingWorkspace();
   if (pending) {
     try {
@@ -39,7 +43,9 @@ export async function establishSession(email: string, fullName?: string): Promis
   }
 
   const savedId = ApiClient.getActiveWorkspaceId();
+  const normalizedPreferred = preferredSlug?.trim().toLowerCase();
   const ws =
+    (normalizedPreferred ? workspaces.find(w => w.slug.toLowerCase() === normalizedPreferred) : undefined) ??
     workspaces.find(w => w.id === savedId) ??
     workspaces.find(w => w.workspace_type === 'COMPANY' || !/personal/i.test(w.name)) ??
     workspaces[0];
@@ -52,6 +58,7 @@ export async function establishSession(email: string, fullName?: string): Promis
     ? {
         workspaceId: profile.pending_join_request.workspace_id,
         companyName: profile.pending_join_request.company_name,
+        companySlug: profile.pending_join_request.company_slug,
       }
     : null;
 

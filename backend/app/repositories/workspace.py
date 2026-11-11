@@ -59,7 +59,22 @@ class WorkspaceRepository:
         return result.scalar_one_or_none()
 
     async def get_by_slug(self, slug: str) -> Optional[Workspace]:
-        result = await self.db.execute(select(Workspace).where(Workspace.slug == slug))
+        norm = (slug or "").strip().lower()
+        if not norm:
+            return None
+        result = await self.db.execute(select(Workspace).where(func.lower(Workspace.slug) == norm))
+        return result.scalar_one_or_none()
+
+    async def get_company_by_slug(self, slug: str) -> Optional[Workspace]:
+        norm = (slug or "").strip().lower()
+        if not norm:
+            return None
+        result = await self.db.execute(
+            select(Workspace).where(
+                func.lower(Workspace.slug) == norm,
+                Workspace.workspace_type == WorkspaceType.COMPANY.value,
+            )
+        )
         return result.scalar_one_or_none()
 
     async def get_user_membership(self, workspace_id: uuid.UUID, user_id: uuid.UUID) -> Optional[WorkspaceMember]:
@@ -230,6 +245,22 @@ class WorkspaceRepository:
         inv.status = "REVOKED"
         await self.db.flush()
         return True
+
+    async def has_pending_invitation(self, email: str, workspace_id: Optional[uuid.UUID] = None) -> bool:
+        norm_email = email.strip().lower()
+        now = datetime.now(timezone.utc)
+        stmt = select(WorkspaceInvitation).where(
+            WorkspaceInvitation.email == norm_email,
+            WorkspaceInvitation.status == "PENDING",
+        )
+        if workspace_id is not None:
+            stmt = stmt.where(WorkspaceInvitation.workspace_id == workspace_id)
+        res = await self.db.execute(stmt)
+        for inv in res.scalars().all():
+            exp = inv.expires_at if inv.expires_at.tzinfo else inv.expires_at.replace(tzinfo=timezone.utc)
+            if exp > now:
+                return True
+        return False
 
     async def accept_pending_invitations_for_user(self, user_id: uuid.UUID, email: str) -> List[uuid.UUID]:
         """Auto-links a user to any workspaces with active PENDING invitations matching their email."""

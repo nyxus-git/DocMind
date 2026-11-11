@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.email.smtp import get_email_provider
 from app.api.v1.dependencies import get_current_user
 from app.core.config import settings
+from app.core.domains import sanitize_company_slug
 from app.core.exceptions import CrossTenantAccessException, DocMindException
 from app.core.security import generate_secure_token, hash_token
 from app.db.session import get_db
@@ -84,9 +85,7 @@ async def create_company_workspace(
     ws_repo = WorkspaceRepository(db)
     audit_repo = AuditRepository(db)
 
-    slug = req.slug.strip() if req.slug else slugify(req.name)
-    if not slug:
-        slug = f"ws-{uuid.uuid4().hex[:8]}"
+    slug = sanitize_company_slug(req.slug or req.name, fallback=f"ws-{uuid.uuid4().hex[:8]}")
 
     existing = await ws_repo.get_by_slug(slug)
     if existing:
@@ -272,7 +271,10 @@ async def invite_workspace_member(
 
     ws = await ws_repo.get_by_id(workspace_id)
     ws_name = ws.name if ws else "DocMind Workspace"
-    invite_link = f"{settings.PUBLIC_APP_URL}/auth?action=invite&workspace={workspace_id}&email={req.email}"
+    if ws and ws.workspace_type == WorkspaceType.COMPANY.value:
+        invite_link = f"{settings.PUBLIC_APP_URL}/{ws.slug}/?email={req.email}"
+    else:
+        invite_link = f"{settings.PUBLIC_APP_URL}/auth?action=invite&workspace={workspace_id}&email={req.email}"
     email_provider = get_email_provider()
 
     # Look up user by email

@@ -1,13 +1,18 @@
 from typing import Optional
 from fastapi import APIRouter, Cookie, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.api.v1.dependencies import get_current_user
 from app.core.config import settings
 from app.core.exceptions import DocMindException
 from app.db.session import get_db
+from app.models.entities import User
 from app.schemas.auth import (
     CompanyDomainLookupDTO,
+    CompanyPortalPublicDTO,
     ForgotPasswordRequest,
     LoginRequest,
+    PortalAccessRequestBody,
+    PortalAccessRequestResult,
     RegisterRequest,
     ResetPasswordRequest,
     TokenResponse,
@@ -31,6 +36,32 @@ async def lookup_company_domain(
     return await auth_service.lookup_company_by_email(email)
 
 
+@router.get("/company-portal/{slug}", response_model=CompanyPortalPublicDTO)
+async def get_company_portal_public(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Returns safe public portal branding for a company's customized sign-in URL."""
+    auth_service = AuthService(db)
+    return await auth_service.get_company_portal_public(slug)
+
+
+@router.post("/company-portal/{slug}/request-access", response_model=PortalAccessRequestResult)
+async def request_company_portal_access(
+    slug: str,
+    req: PortalAccessRequestBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Allows an authenticated user to join or request access to a company via its portal URL."""
+    auth_service = AuthService(db)
+    return await auth_service.request_company_portal_access(
+        user=current_user,
+        slug=slug,
+        department_note=req.department_note,
+    )
+
+
 @router.post("/register", response_model=UserSummaryDTO, status_code=status.HTTP_201_CREATED)
 async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     auth_service = AuthService(db)
@@ -40,6 +71,7 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
         account_type=req.account_type,
         company_name=req.company_name,
         company_slug=req.company_slug,
+        target_company_slug=req.target_company_slug,
         claim_domain=req.claim_domain,
         department_note=req.department_note,
     )

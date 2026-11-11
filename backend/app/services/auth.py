@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.email.base import EmailProvider
 from app.adapters.email.smtp import get_email_provider
 from app.core.config import settings
-from app.core.domains import extract_email_domain, is_corporate_domain
+from app.core.domains import extract_email_domain, is_corporate_domain, sanitize_company_slug
 from app.core.exceptions import DocMindException
 from app.core.security import (
     create_access_token,
@@ -26,7 +26,9 @@ from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.auth import (
     CompanyDomainLookupDTO,
+    CompanyPortalPublicDTO,
     PendingJoinRequestDTO,
+    PortalAccessRequestResult,
     TokenResponse,
     UserSummaryDTO,
     WorkspaceSummaryDTO,
@@ -54,6 +56,109 @@ class AuthService:
             slug=ws.slug,
             domain=domain,
             join_policy=ws.join_policy,
+        )
+
+    async def get_company_portal_public(self, slug: str) -> CompanyPortalPublicDTO:
+        ws = await self.workspace_repo.get_company_by_slug(slug)
+        if not ws:
+            raise DocMindException(
+                status_code=404,
+                code="PORTAL_NOT_FOUND",
+                title="Company Portal Not Found",
+                detail="No company knowledge portal exists at this URL.",
+            )
+        return CompanyPortalPublicDTO(
+            exists=True,
+            company_name=ws.name,
+            slug=ws.slug,
+            join_policy=ws.join_policy,
+            allowed_domains=list(ws.allowed_domains or []),
+        )
+
+    def _validate_target_company_eligibility(self, ws: Workspace, email: str) -> None:
+        """Checks whether a user without a pending invite may auto-join or request access to ws."""
+        if ws.join_policy == JoinPolicy.INVITE_ONLY.value:
+            raise DocMindException(
+                status_code=403,
+                code="INVITE_REQUIRED",
+                title="Invitation Required",
+                detail=f"{ws.name} is Invite Only. Ask a {ws.name} Admin to invite your email address.",
+            )
+        domain = extract_email_domain(email)
+        allowed_domains = [str(d).strip().lower() for d in (ws.allowed_domains or []) if str(d).strip()]
+        if allowed_domains:
+            if not domain or domain not in allowed_domains:
+                raise DocMindException(
+                    status_code=403,
+                    code="CORPORATE_EMAIL_REQUIRED",
+                    title="Company Email Required",
+                    detail=f"Please use a corporate email matching {', '.join(allowed_domains)} or ask an Admin to invite you.",
+                )
+        elif ws.join_policy == JoinPolicy.DOMAIN_AUTO_JOIN.value:
+            raise DocMindException(
+                status_code=403,
+                code="INVITE_REQUIRED",
+                title="Verification Policy Incomplete",
+                detail=f"{ws.name} must verify a corporate email domain before auto-join is permitted.",
+            )
+
+    async def request_company_portal_access(
+        self,
+        user: User,
+        slug: str,
+        department_note: Optional[str] = None,
+    ) -> PortalAccessRequestResult:
+        ws = await self.workspace_repo.get_company_by_slug(slug)
+        if not ws:
+            raise DocMindException(
+                status_code=404,
+                code="PORTAL_NOT_FOUND",
+                title="Company Portal Not Found",
+                detail="No company knowledge portal exists at this URL.",
+            )
+
+        existing_mem = await self.workspace_repo.get_user_membership(ws.id, user.id)
+        if existing_mem:
+            return PortalAccessRequestResult(
+                status="ALREADY_MEMBER",
+                company_name=ws.name,
+                slug=ws.slug,
+                role=existing_mem.role,
+            )
+
+        joined_ids = await self.workspace_repo.accept_pending_invitations_for_user(user.id, user.email)
+        if ws.id in joined_ids:
+            mem = await self.workspace_repo.get_user_membership(ws.id, user.id)
+            return PortalAccessRequestResult(
+                status="JOINED",
+                company_name=ws.name,
+                slug=ws.slug,
+                role=mem.role if mem else WorkspaceRole.EMPLOYEE.value,
+            )
+
+        self._validate_target_company_eligibility(ws, user.email)
+
+        if ws.join_policy == JoinPolicy.DOMAIN_AUTO_JOIN.value and (not settings.REQUIRE_EMAIL_VERIFICATION or user.verified_at):
+            role = ws.default_join_role or WorkspaceRole.EMPLOYEE.value
+            await self.workspace_repo.add_member(ws.id, user.id, role)
+            return PortalAccessRequestResult(
+                status="JOINED",
+                company_name=ws.name,
+                slug=ws.slug,
+                role=role,
+            )
+
+        await self.workspace_repo.create_or_get_join_request(
+            workspace_id=ws.id,
+            user_id=user.id,
+            email=user.email,
+            department_note=department_note,
+        )
+        return PortalAccessRequestResult(
+            status="PENDING",
+            company_name=ws.name,
+            slug=ws.slug,
+            role="PENDING",
         )
 
     async def _apply_domain_join_if_eligible(
@@ -90,6 +195,7 @@ class AuthService:
             return None, PendingJoinRequestDTO(
                 workspace_id=ws.id,
                 company_name=ws.name,
+                company_slug=ws.slug,
                 status=req.status,
                 created_at=req.created_at,
             )
@@ -103,6 +209,7 @@ class AuthService:
         account_type: str = "personal",
         company_name: Optional[str] = None,
         company_slug: Optional[str] = None,
+        target_company_slug: Optional[str] = None,
         claim_domain: bool = False,
         department_note: Optional[str] = None,
     ) -> Tuple[User, Optional[Workspace], str]:
@@ -118,18 +225,29 @@ class AuthService:
         mode = (account_type or "personal").strip().lower()
         domain = extract_email_domain(email)
 
-        if mode == "employee":
+        target_ws: Optional[Workspace] = None
+        if target_company_slug and target_company_slug.strip():
+            target_ws = await self.workspace_repo.get_company_by_slug(target_company_slug.strip())
+            if not target_ws:
+                raise DocMindException(
+                    status_code=404,
+                    code="PORTAL_NOT_FOUND",
+                    title="Company Portal Not Found",
+                    detail="No company workspace matches that portal link.",
+                )
+
+        has_invite = await self.workspace_repo.has_pending_invitation(email, workspace_id=target_ws.id if target_ws else None)
+
+        if target_ws and not has_invite:
+            self._validate_target_company_eligibility(target_ws, email)
+        elif mode == "employee" and not has_invite:
             if not is_corporate_domain(domain):
                 raise DocMindException(
                     status_code=400,
                     code="CORPORATE_EMAIL_REQUIRED",
                     title="Company Email Required",
-                    detail="Please use your company email address (personal webmail domains are not allowed for employee sign-in).",
+                    detail="Please use your company email address or register through your company’s invite link.",
                 )
-            matched_ws = await self.workspace_repo.find_company_by_domain(domain or "")
-            if matched_ws and matched_ws.join_policy == JoinPolicy.INVITE_ONLY.value:
-                # Permit signup only if a pending invitation exists for this email
-                pass
 
         password_hash = hash_password(password)
         user = await self.user_repo.create_user(email, password_hash)
@@ -138,8 +256,10 @@ class AuthService:
 
         # 1. Explicit company signup -> create COMPANY workspace directly (no stray Personal Workspace)
         if mode == "company" and company_name and company_name.strip():
-            raw_slug = company_slug.strip().lower() if company_slug else re.sub(r"[^a-z0-9]+", "-", company_name.lower().strip()).strip("-")
-            slug = raw_slug or f"company-{user.id.hex[:6]}"
+            slug = sanitize_company_slug(
+                company_slug if company_slug and company_slug.strip() else company_name,
+                fallback=f"company-{user.id.hex[:6]}",
+            )
             if await self.workspace_repo.get_by_slug(slug):
                 slug = f"{slug}-{uuid.uuid4().hex[:4]}"
 
@@ -169,16 +289,40 @@ class AuthService:
         except Exception:
             pass
         if not active_workspace and joined_ids:
-            active_workspace = await self.workspace_repo.get_by_id(joined_ids[0])
+            if target_ws and target_ws.id in joined_ids:
+                active_workspace = target_ws
+            else:
+                active_workspace = await self.workspace_repo.get_by_id(joined_ids[0])
 
-        # 3. Domain auto-join or approval request for corporate email users
+        # 3. Direct portal join request/auto-join or domain auto-join
         pending_req = None
-        if not active_workspace:
+        if not active_workspace and target_ws:
+            if target_ws.join_policy == JoinPolicy.DOMAIN_AUTO_JOIN.value:
+                if not settings.REQUIRE_EMAIL_VERIFICATION or user.verified_at:
+                    role = target_ws.default_join_role or WorkspaceRole.EMPLOYEE.value
+                    await self.workspace_repo.add_member(target_ws.id, user.id, role)
+                    active_workspace = target_ws
+            elif target_ws.join_policy == JoinPolicy.DOMAIN_APPROVAL.value:
+                req_row = await self.workspace_repo.create_or_get_join_request(
+                    workspace_id=target_ws.id,
+                    user_id=user.id,
+                    email=user.email,
+                    department_note=department_note,
+                )
+                pending_req = PendingJoinRequestDTO(
+                    workspace_id=target_ws.id,
+                    company_name=target_ws.name,
+                    company_slug=target_ws.slug,
+                    status=req_row.status,
+                    created_at=req_row.created_at,
+                )
+
+        if not active_workspace and not pending_req and not target_ws:
             domain_ws, pending_req = await self._apply_domain_join_if_eligible(user, department_note=department_note)
             if domain_ws:
                 active_workspace = domain_ws
 
-        if mode == "employee" and not active_workspace and not pending_req:
+        if mode == "employee" and not target_ws and not active_workspace and not pending_req:
             matched_ws = await self.workspace_repo.find_company_by_domain(domain or "")
             if matched_ws and matched_ws.join_policy == JoinPolicy.INVITE_ONLY.value:
                 raise DocMindException(
@@ -192,11 +336,11 @@ class AuthService:
                     status_code=404,
                     code="COMPANY_DOMAIN_NOT_FOUND",
                     title="Company Not Found",
-                    detail=f"No company workspace has registered '@{domain}' yet. Ask your IT admin to register your company first.",
+                    detail=f"No company workspace has registered '@{domain}' yet. Ask your IT admin to register your company or share your company portal link.",
                 )
 
         # 4. Individual signup with no company association -> create Personal Workspace
-        if not active_workspace and not pending_req and mode != "employee":
+        if not active_workspace and not pending_req and not target_ws and mode != "employee":
             active_workspace = await self.workspace_repo.create_workspace(
                 name="Personal Workspace",
                 slug=f"ws-{user.id.hex[:8]}",
@@ -395,6 +539,7 @@ class AuthService:
                 pending_dto = PendingJoinRequestDTO(
                     workspace_id=req_ws.id,
                     company_name=req_ws.name,
+                    company_slug=req_ws.slug,
                     status=req_row.status,
                     created_at=req_row.created_at,
                 )

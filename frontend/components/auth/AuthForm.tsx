@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ApiClient, CompanyDomainLookupDTO } from '../../lib/api';
 import { establishSession, friendlyError, slugify } from '../../lib/auth-flow';
@@ -433,9 +434,13 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
                     className={inputClass}
                   />
                 </Field>
-                <Field label="Company URL slug" htmlFor="slug" hint="Lowercase letters, numbers and hyphens.">
+                <Field
+                  label="Company Portal URL"
+                  htmlFor="slug"
+                  hint={`Customized sign-in link you can share with admins & employees: /${slug || 'your-company'}/`}
+                >
                   <div className="flex h-10 items-center rounded-lg border border-line-strong bg-surface px-3 text-sm focus-within:border-fg focus-within:ring-2 focus-within:ring-fg/15">
-                    <span className="text-faint">docmind/</span>
+                    <span className="text-faint">/</span>
                     <input
                       id="slug"
                       type="text"
@@ -444,8 +449,10 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
                         setSlugTouched(true);
                         setSlug(slugify(e.target.value));
                       }}
+                      placeholder="infosys"
                       className="ml-0.5 w-full bg-transparent outline-none"
                     />
+                    <span className="text-faint">/</span>
                   </div>
                 </Field>
                 <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-line bg-surface p-3 text-sm">
@@ -492,16 +499,26 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
             className={inputClass}
           />
           {domainMatch?.matched && domainMatch.company_name && (
-            <div className="mt-2 flex items-center gap-2 rounded-lg border border-ok/30 bg-ok-soft px-3 py-2 text-xs text-fg">
-              <Icon name="building" className="size-4 shrink-0 text-ok" />
-              <span>
-                Company workspace detected: <strong>{domainMatch.company_name}</strong>
-                {domainMatch.join_policy === 'DOMAIN_AUTO_JOIN'
-                  ? ' — instant employee access'
-                  : domainMatch.join_policy === 'DOMAIN_APPROVAL'
-                    ? ' — admin approval enabled'
-                    : ' — invite required'}
-              </span>
+            <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-ok/30 bg-ok-soft px-3 py-2 text-xs text-fg">
+              <div className="flex min-w-0 items-center gap-2">
+                <Icon name="building" className="size-4 shrink-0 text-ok" />
+                <span>
+                  Company workspace detected: <strong>{domainMatch.company_name}</strong>
+                  {domainMatch.join_policy === 'DOMAIN_AUTO_JOIN'
+                    ? ' — instant employee access'
+                    : domainMatch.join_policy === 'DOMAIN_APPROVAL'
+                      ? ' — admin approval enabled'
+                      : ' — invite required'}
+                </span>
+              </div>
+              {domainMatch.slug && (
+                <Link
+                  href={`/${domainMatch.slug}/`}
+                  className="shrink-0 font-semibold underline underline-offset-2 hover:no-underline"
+                >
+                  Open /{domainMatch.slug}/
+                </Link>
+              )}
             </div>
           )}
         </Field>

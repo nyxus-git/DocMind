@@ -9,6 +9,12 @@ export function CompanyContextBanner() {
   const { session, canManageMembers } = useWorkspace();
   const isCompany = session.isCompany || session.workspaceType === 'COMPANY';
   if (!isCompany) return null;
+  const portalHref =
+    session.workspaceSlug && session.workspaceSlug !== 'personal'
+      ? `/${session.workspaceSlug}/`
+      : canManageMembers
+        ? '/company/'
+        : '/employee/';
 
   return (
     <div className="border-b border-line bg-surface-2/60 px-3 py-2 sm:px-5">
@@ -19,26 +25,17 @@ export function CompanyContextBanner() {
             Company Workspace
           </span>
           <span className="hidden text-muted md:inline">
-            Documents uploaded here become searchable to employees in the Employee Portal.
+            Documents uploaded here become searchable to employees in the {session.workspaceName} portal.
           </span>
         </div>
 
         <nav aria-label="Company portal views" className="flex flex-wrap items-center gap-1.5">
-          {canManageMembers && (
-            <Link
-              href="/company/"
-              className="inline-flex items-center gap-1 rounded-md border border-line bg-surface px-2.5 py-1 font-medium text-fg transition-colors hover:bg-surface-2"
-            >
-              <Icon name="sliders" className="size-3.5 text-muted" />
-              Company Console
-            </Link>
-          )}
           <Link
-            href="/employee/"
+            href={portalHref}
             className="inline-flex items-center gap-1 rounded-md border border-line bg-surface px-2.5 py-1 font-medium text-fg transition-colors hover:bg-surface-2"
           >
-            <Icon name="userCheck" className="size-3.5 text-muted" />
-            Employee Portal
+            <Icon name="building" className="size-3.5 text-muted" />
+            Open {session.workspaceName} Portal
           </Link>
         </nav>
       </div>

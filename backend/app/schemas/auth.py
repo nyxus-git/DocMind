@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -10,6 +10,7 @@ class RegisterRequest(BaseModel):
     account_type: str = Field(default="personal", description="personal | company | employee")
     company_name: Optional[str] = Field(default=None, min_length=2, max_length=128)
     company_slug: Optional[str] = Field(default=None, min_length=2, max_length=128)
+    target_company_slug: Optional[str] = Field(default=None, max_length=128)
     claim_domain: bool = False
     department_note: Optional[str] = Field(default=None, max_length=200)
 
@@ -49,8 +50,28 @@ class WorkspaceSummaryDTO(BaseModel):
 class PendingJoinRequestDTO(BaseModel):
     workspace_id: uuid.UUID
     company_name: str
+    company_slug: Optional[str] = None
     status: str = "PENDING"
     created_at: datetime
+
+
+class CompanyPortalPublicDTO(BaseModel):
+    exists: bool = True
+    company_name: str
+    slug: str
+    join_policy: str
+    allowed_domains: List[str] = Field(default_factory=list)
+
+
+class PortalAccessRequestBody(BaseModel):
+    department_note: Optional[str] = Field(default=None, max_length=200)
+
+
+class PortalAccessRequestResult(BaseModel):
+    status: str
+    company_name: str
+    slug: str
+    role: Optional[str] = None
 
 
 class CompanyDomainLookupDTO(BaseModel):

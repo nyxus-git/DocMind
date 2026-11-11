@@ -293,24 +293,20 @@ export function TopBar({
               >
                 <Icon name="sliders" className="size-4 text-muted" /> Settings
               </button>
-              {session.isCompany && (session.role === 'OWNER' || session.role === 'ADMIN') && (
-                <Link
-                  role="menuitem"
-                  href="/company/"
-                  onClick={() => setMenu(false)}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-fg hover:bg-surface-2"
-                >
-                  <Icon name="building" className="size-4 text-muted" /> Company Console
-                </Link>
-              )}
               {session.isCompany && (
                 <Link
                   role="menuitem"
-                  href="/employee/"
+                  href={
+                    session.workspaceSlug && session.workspaceSlug !== 'personal'
+                      ? `/${session.workspaceSlug}/`
+                      : session.role === 'OWNER' || session.role === 'ADMIN'
+                        ? '/company/'
+                        : '/employee/'
+                  }
                   onClick={() => setMenu(false)}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm hover:bg-surface-2"
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-fg hover:bg-surface-2"
                 >
-                  <Icon name="userCheck" className="size-4 text-muted" /> Employee Portal
+                  <Icon name="building" className="size-4 text-muted" /> {session.workspaceName} Portal
                 </Link>
               )}
               {Boolean(session.isSuperAdmin) && (

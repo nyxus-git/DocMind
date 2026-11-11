@@ -13,6 +13,7 @@ import {
   KnowledgeGapDTO,
   KnowledgeSpaceDTO,
   PendingInviteDTO,
+  UsageSummaryDTO,
   WorkspaceMemberDTO,
 } from '../../lib/api';
 import { formatBytes, formatDate, timeAgo } from '../../lib/format';
@@ -22,9 +23,13 @@ import { Icon } from '../ui/Icon';
 import { Logo } from '../ui/Logo';
 import { ThemeToggle } from '../ui/ThemeToggle';
 import { ToastProvider, useToast } from '../ui/Toast';
+import { EmployeePortalInner } from '../employee/EmployeePortal';
 import { FileTypeIcon, Meter, Panel, StatusBadge } from '../workspace/parts';
+import { UploadModal } from '../workspace/UploadModal';
+import { WorkspaceContextValue, WorkspaceProvider } from '../workspace/WorkspaceContext';
+import { LibraryView } from '../workspace/views/LibraryView';
 
-type CompanyTab = 'overview' | 'employees' | 'spaces' | 'policy' | 'gaps';
+type CompanyTab = 'overview' | 'ask' | 'documents' | 'employees' | 'spaces' | 'policy' | 'gaps';
 
 const subscribeStorage = (cb: () => void) => {
   window.addEventListener('storage', cb);
@@ -41,14 +46,25 @@ function StatCard({ label, value, hint }: { label: string; value: string | numbe
   );
 }
 
-function CompanyConsoleInner({ session }: { session: UserSession }) {
+export function CompanyConsoleInner({
+  session,
+  portalSlug,
+  onSignOut,
+}: {
+  session: UserSession;
+  portalSlug?: string;
+  onSignOut?: () => void;
+}) {
   const router = useRouter();
   const toast = useToast();
+  const isAdmin = session.role === 'OWNER' || session.role === 'ADMIN';
+  const activeSlug = portalSlug || (session.workspaceSlug && session.workspaceSlug !== 'personal' ? session.workspaceSlug : undefined);
 
-  const [tab, setTab] = useState<CompanyTab>('overview');
+  const [tab, setTab] = useState<CompanyTab>(isAdmin ? 'overview' : 'ask');
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<CompanyOverviewDTO | null>(null);
   const [settings, setSettings] = useState<CompanySettingsDTO | null>(null);
+  const [usage, setUsage] = useState<UsageSummaryDTO | null>(null);
   const [joinRequests, setJoinRequests] = useState<CompanyJoinRequestDTO[]>([]);
   const [members, setMembers] = useState<WorkspaceMemberDTO[]>([]);
   const [pendingInvites, setPendingInvites] = useState<PendingInviteDTO[]>([]);
@@ -56,6 +72,8 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
   const [documents, setDocuments] = useState<DocumentDTO[]>([]);
   const [gaps, setGaps] = useState<KnowledgeGapDTO[]>([]);
   const [showGuide, setShowGuide] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   // Policy edit state
   const [companyName, setCompanyName] = useState('');
@@ -82,8 +100,14 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
   const signOut = useCallback(async () => {
     await ApiClient.logout();
     clearSession();
-    router.replace('/login/');
-  }, [router]);
+    if (onSignOut) {
+      onSignOut();
+    } else if (activeSlug) {
+      router.replace(`/${activeSlug}/`);
+    } else {
+      router.replace('/login/');
+    }
+  }, [activeSlug, onSignOut, router]);
 
   const handleErr = useCallback(
     (err: unknown, fallback: string) => {
@@ -91,21 +115,34 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
         void signOut();
         return;
       }
-      if (err instanceof ApiError && err.status === 403) {
-        router.replace('/employee/');
+      if (err instanceof ApiError && err.status === 403 && !isAdmin) {
+        if (activeSlug) router.replace(`/${activeSlug}/`);
         return;
       }
       toast(err instanceof Error ? err.message : fallback, 'error');
     },
-    [router, signOut, toast],
+    [activeSlug, isAdmin, router, signOut, toast],
   );
 
   const loadAll = useCallback(async () => {
     if (!session.workspaceId) return;
     try {
-      const [ov, st, jr, mems, invs, sp, docs, gp] = await Promise.all([
+      if (!isAdmin) {
+        const [docs, usg, portal] = await Promise.all([
+          ApiClient.listDocuments().catch(() => []),
+          ApiClient.getUsage().catch(() => null),
+          ApiClient.getEmployeePortalInfo().catch(() => null),
+        ]);
+        setDocuments(docs);
+        setUsage(usg);
+        setSpaces(portal?.spaces ?? []);
+        setLoading(false);
+        return;
+      }
+      const [ov, st, usg, jr, mems, invs, sp, docs, gp] = await Promise.all([
         ApiClient.getCompanyOverview(),
         ApiClient.getCompanySettings(),
+        ApiClient.getUsage().catch(() => null),
         ApiClient.listCompanyJoinRequests(),
         ApiClient.getWorkspaceMembers(session.workspaceId),
         ApiClient.listPendingInvites(session.workspaceId).catch(() => []),
@@ -115,6 +152,7 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
       ]);
       setOverview(ov);
       setSettings(st);
+      setUsage(usg);
       setCompanyName(st.name);
       setDomainsInput((st.allowed_domains || []).join(', '));
       setJoinPolicy(st.join_policy);
@@ -131,7 +169,7 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
     } finally {
       setLoading(false);
     }
-  }, [handleErr, session.workspaceId]);
+  }, [handleErr, isAdmin, session.workspaceId]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -139,6 +177,15 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
     }, 0);
     return () => clearTimeout(t);
   }, [loadAll]);
+
+  const hasInFlightDocs = documents.some(d => ['UPLOADING', 'QUEUED', 'PROCESSING', 'DELETING'].includes(d.status));
+  useEffect(() => {
+    if (!hasInFlightDocs) return;
+    const id = setInterval(() => {
+      void loadAll();
+    }, 4000);
+    return () => clearInterval(id);
+  }, [hasInFlightDocs, loadAll]);
 
   const pendingJoinReqs = useMemo(() => joinRequests.filter(r => r.status === 'PENDING'), [joinRequests]);
 
@@ -286,13 +333,100 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
     }
   };
 
-  const tabs: { id: CompanyTab; label: string; badge?: number }[] = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'employees', label: 'Employees', badge: pendingJoinReqs.length || undefined },
-    { id: 'spaces', label: 'Departments' },
-    { id: 'policy', label: 'Domain & Policy' },
-    { id: 'gaps', label: 'Knowledge Gaps', badge: gaps.length || undefined },
-  ];
+  const shareSlug = activeSlug || settings?.slug || overview?.slug;
+  const shareUrl = useMemo(() => {
+    if (!shareSlug) return '';
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    return origin ? `${origin}/${shareSlug}/` : `/${shareSlug}/`;
+  }, [shareSlug]);
+
+  const copyShareUrl = async () => {
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopiedLink(true);
+      toast(`Copied ${shareUrl} — share with admins & employees.`, 'success');
+      setTimeout(() => setCopiedLink(false), 2000);
+    } catch {
+      toast('Could not copy URL cleanly; copy it from the Share card.', 'info');
+    }
+  };
+
+  const enableLinkApproval = async () => {
+    setSavingPolicy(true);
+    try {
+      const updated = await ApiClient.updateCompanySettings({ join_policy: 'DOMAIN_APPROVAL' });
+      setSettings(updated);
+      setJoinPolicy(updated.join_policy);
+      toast('Approval Queue enabled! Staff opening your company link can now request access safely.', 'success');
+      await loadAll();
+    } catch (err) {
+      handleErr(err, 'Could not update join policy.');
+    } finally {
+      setSavingPolicy(false);
+    }
+  };
+
+  const docWorkspaceCtx = useMemo<WorkspaceContextValue>(
+    () => ({
+      session,
+      usage,
+      documents,
+      documentsLoaded: !loading,
+      conversations: [],
+      spaces,
+      starterPrompts: settings?.starter_prompts || [],
+      loadError: null,
+      refreshDocuments: loadAll,
+      refreshUsage: loadAll,
+      refreshConversations: async () => {},
+      reloadAll: loadAll,
+      tab: 'library',
+      setTab: next => {
+        if (next === 'chat') setTab('ask');
+        else if (next === 'settings') setTab('policy');
+        else if (next === 'library') setTab('documents');
+        else setTab('overview');
+      },
+      chatScope: [],
+      setChatScope: () => {},
+      askDocuments: () => {
+        setTab('ask');
+      },
+      openUpload: () => setUploadOpen(true),
+      openCitation: () => {},
+      handleApiError: err => {
+        if (err instanceof ApiError && err.status === 401) {
+          void signOut();
+          return true;
+        }
+        return false;
+      },
+      updateWorkspaceTitle: () => {},
+      signOut,
+      role: session.role,
+      canUpload: true,
+      canAsk: true,
+      canManageMembers: isAdmin,
+      isOwner: session.role === 'OWNER',
+    }),
+    [documents, isAdmin, loadAll, loading, session, settings?.starter_prompts, signOut, spaces, usage],
+  );
+
+  const tabs: { id: CompanyTab; label: string; badge?: number }[] = isAdmin
+    ? [
+        { id: 'overview', label: 'Overview' },
+        { id: 'ask', label: 'Ask AI' },
+        { id: 'documents', label: 'Documents', badge: documents.length || undefined },
+        { id: 'employees', label: 'Employees', badge: pendingJoinReqs.length || undefined },
+        { id: 'spaces', label: 'Departments' },
+        { id: 'policy', label: 'Domain & Policy' },
+        { id: 'gaps', label: 'Knowledge Gaps', badge: gaps.length || undefined },
+      ]
+    : [
+        { id: 'ask', label: 'Ask AI' },
+        { id: 'documents', label: 'Documents', badge: documents.length || undefined },
+      ];
 
   return (
     <div className="min-h-screen bg-bg text-fg">
@@ -300,41 +434,46 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
       <header className="sticky top-0 z-30 border-b border-line bg-bg/90 px-4 backdrop-blur sm:px-6">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <Link href="/app/" aria-label="DocMind">
+            <Link href="/" aria-label="DocMind">
               <Logo />
             </Link>
             <span className="hidden h-4 w-px bg-line sm:inline-block" />
             <div className="hidden min-w-0 items-center gap-2 sm:flex">
               <span className="truncate text-sm font-semibold">{overview?.company_name || session.workspaceName}</span>
-              <span className="rounded-md bg-brand/10 px-2 py-0.5 text-[11px] font-semibold text-fg">Company Console</span>
+              <span className="rounded-md bg-brand/10 px-2 py-0.5 text-[11px] font-semibold text-fg">
+                {isAdmin ? 'Admin Console' : 'Contributor Workspace'}
+              </span>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <Link
-              href="/employee/"
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium hover:bg-surface-2"
-            >
-              <Icon name="userCheck" className="size-3.5 text-muted" />
-              <span className="hidden sm:inline">Employee Portal</span>
-            </Link>
-            <Link
-              href="/app/?upload=1#library"
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand px-3 text-xs font-medium text-brand-fg hover:opacity-90"
-            >
+            {shareUrl && (
+              <Button variant="secondary" size="sm" onClick={() => void copyShareUrl()}>
+                <Icon name={copiedLink ? 'check' : 'copy'} className="size-3.5" />
+                <span className="hidden sm:inline">{copiedLink ? 'Copied Link' : 'Share Link'}</span>
+              </Button>
+            )}
+            <Button size="sm" onClick={() => setUploadOpen(true)}>
               <Icon name="upload" className="size-3.5" />
               <span>Upload Docs</span>
+            </Button>
+            <Link
+              href="/app/"
+              className="hidden h-8 items-center gap-1 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium hover:bg-surface-2 md:inline-flex"
+              title="Open Compare matrix and workspace tools"
+            >
+              Workspace Tools
             </Link>
             {session.isSuperAdmin && (
               <Link
                 href="/admin/"
-                className="hidden h-8 items-center gap-1 rounded-lg border border-amber-500/30 px-2.5 text-xs font-medium text-amber-500 hover:bg-amber-500/10 md:inline-flex"
+                className="hidden h-8 items-center gap-1 rounded-lg border border-amber-500/30 px-2.5 text-xs font-medium text-amber-500 hover:bg-amber-500/10 lg:inline-flex"
               >
                 <Icon name="shield" className="size-3.5" /> Super Admin
               </Link>
             )}
             <ThemeToggle />
-            <Button variant="ghost" size="sm" onClick={() => void signOut()}>
+            <Button variant="ghost" size="sm" onClick={() => void signOut()} aria-label="Sign out">
               <Icon name="logout" className="size-4" />
             </Button>
           </div>
@@ -397,6 +536,32 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
                   </div>
                 </div>
 
+                {shareUrl && (
+                  <Panel className="flex flex-col gap-3 border-brand/25 bg-surface p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted">
+                        Customized Company Portal Link
+                      </p>
+                      <p className="mt-1 truncate font-mono text-sm font-medium text-fg">{shareUrl}</p>
+                      <p className="mt-1 text-xs text-muted">
+                        Share this private URL with admins and employees. Each user signs in and automatically gets their role-based dashboard ({settings?.join_policy === 'DOMAIN_AUTO_JOIN' ? 'Auto-Join Domain' : settings?.join_policy === 'DOMAIN_APPROVAL' ? 'Admin Approval Queue' : 'Invite Only'}).
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                      {settings?.join_policy === 'INVITE_ONLY' && (
+                        <Button variant="secondary" size="sm" disabled={savingPolicy} onClick={() => void enableLinkApproval()}>
+                          {savingPolicy && <Spinner />}
+                          Allow Approval Requests
+                        </Button>
+                      )}
+                      <Button size="sm" onClick={() => void copyShareUrl()}>
+                        <Icon name={copiedLink ? 'check' : 'copy'} className="size-3.5" />
+                        {copiedLink ? 'Copied!' : 'Copy Portal Link'}
+                      </Button>
+                    </div>
+                  </Panel>
+                )}
+
                 {guideVisible && (
                   <Panel className="border-brand/30 bg-brand/5 p-5 sm:p-6">
                     <div className="flex items-start justify-between gap-3">
@@ -414,26 +579,27 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
                           </div>
                           <p className="mt-2 text-sm font-medium">Add handbooks, policies &amp; SOPs</p>
                           <p className="mt-1 text-xs leading-5 text-muted">
-                            Upload files in the Workspace Library. By default they go to General (visible to all staff).
+                            Upload files right in your Documents tab. By default they go to General (visible to all staff).
                           </p>
                         </div>
-                        <Link
-                          href="/app/?upload=1#library"
-                          className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-fg underline underline-offset-2 hover:no-underline"
+                        <button
+                          type="button"
+                          onClick={() => setUploadOpen(true)}
+                          className="mt-3 inline-flex items-center gap-1 text-left text-xs font-semibold text-fg underline underline-offset-2 hover:no-underline"
                         >
                           Upload documents <Icon name="arrowRight" className="size-3" />
-                        </Link>
+                        </button>
                       </div>
 
                       <div className="flex flex-col justify-between rounded-xl border border-line bg-surface p-4">
                         <div>
                           <div className="flex items-center gap-2 text-xs font-semibold text-muted">
                             <span className="inline-flex size-5 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-brand-fg">2</span>
-                            Invite Employees &amp; Set Spaces
+                            Invite Employees &amp; Share Link
                           </div>
                           <p className="mt-2 text-sm font-medium">Control who accesses what</p>
                           <p className="mt-1 text-xs leading-5 text-muted">
-                            Invite teammates or claim your corporate email domain, then organize docs into Department Spaces.
+                            Invite teammates or share your company URL, then organize docs into Department Spaces.
                           </p>
                         </div>
                         <button
@@ -449,19 +615,20 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
                         <div>
                           <div className="flex items-center gap-2 text-xs font-semibold text-muted">
                             <span className="inline-flex size-5 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-brand-fg">3</span>
-                            Employees Ask &amp; Flag Gaps
+                            Ask AI &amp; Track Gaps
                           </div>
                           <p className="mt-2 text-sm font-medium">Instant cited Q&amp;A for staff</p>
                           <p className="mt-1 text-xs leading-5 text-muted">
-                            Staff sign in at the Employee Portal to browse approved docs and get cited answers. Missing info shows up in Gaps.
+                            Staff get an Employee-only Ask AI dashboard here. Admins can also query &amp; test answers directly.
                           </p>
                         </div>
-                        <Link
-                          href="/employee/"
-                          className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-fg underline underline-offset-2 hover:no-underline"
+                        <button
+                          type="button"
+                          onClick={() => setTab('ask')}
+                          className="mt-3 inline-flex items-center gap-1 text-left text-xs font-semibold text-fg underline underline-offset-2 hover:no-underline"
                         >
-                          Preview Employee Portal <Icon name="arrowRight" className="size-3" />
-                        </Link>
+                          Open Ask AI <Icon name="arrowRight" className="size-3" />
+                        </button>
                       </div>
                     </div>
                   </Panel>
@@ -472,7 +639,7 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
                     <div className="flex items-center gap-2 text-muted">
                       <Icon name="info" className="size-4 shrink-0 text-fg" />
                       <span>
-                        Docs uploaded in <Link href="/app/#library" className="font-semibold text-fg underline underline-offset-2">Workspace Library</Link> are indexed automatically. Once <strong>Ready</strong>, employees can browse &amp; query them in <Link href="/employee/" className="font-semibold text-fg underline underline-offset-2">Employee Portal</Link>.
+                        Docs uploaded in <button type="button" onClick={() => setTab('documents')} className="font-semibold text-fg underline underline-offset-2">Documents</button> are indexed automatically. Once <strong>Ready</strong>, staff can query them in <button type="button" onClick={() => setTab('ask')} className="font-semibold text-fg underline underline-offset-2">Ask AI</button>.
                       </span>
                     </div>
                   </div>
@@ -498,18 +665,12 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <Link
-                        href="/app/#library"
-                        className="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium hover:bg-surface-2"
-                      >
-                        Full Library
-                      </Link>
-                      <Link
-                        href="/app/?upload=1#library"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand px-3 text-xs font-medium text-brand-fg hover:opacity-90"
-                      >
+                      <Button variant="secondary" size="sm" onClick={() => setTab('documents')}>
+                        Manage All ({documents.length})
+                      </Button>
+                      <Button size="sm" onClick={() => setUploadOpen(true)}>
                         <Icon name="upload" className="size-3.5" /> Upload Doc
-                      </Link>
+                      </Button>
                     </div>
                   </div>
 
@@ -528,12 +689,9 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
                       <p className="mt-1 text-xs text-muted">
                         Upload your first policy, handbook, or guide so employees can search and ask questions in the Employee Portal.
                       </p>
-                      <Link
-                        href="/app/?upload=1#library"
-                        className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-lg bg-brand px-3.5 text-xs font-medium text-brand-fg hover:opacity-90"
-                      >
+                      <Button className="mt-4" size="sm" onClick={() => setUploadOpen(true)}>
                         <Icon name="upload" className="size-3.5" /> Upload your first company doc
-                      </Link>
+                      </Button>
                     </div>
                   ) : (
                     <ul className="divide-y divide-line">
@@ -623,8 +781,35 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
               );
             })()}
 
+            {tab === 'ask' && (
+              <EmployeePortalInner
+                session={session}
+                embedded
+                portalSlug={activeSlug}
+                onOpenUpload={() => setUploadOpen(true)}
+              />
+            )}
+
+            {tab === 'documents' && (
+              <WorkspaceProvider value={docWorkspaceCtx}>
+                <LibraryView />
+              </WorkspaceProvider>
+            )}
+
             {tab === 'employees' && (
               <div className="space-y-6">
+                {shareUrl && (
+                  <Panel className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                    <div className="min-w-0">
+                      <h2 className="text-sm font-semibold">Shareable Employee Sign-In Link</h2>
+                      <p className="mt-0.5 truncate font-mono text-xs text-muted">{shareUrl}</p>
+                    </div>
+                    <Button size="sm" variant="secondary" onClick={() => void copyShareUrl()}>
+                      <Icon name={copiedLink ? 'check' : 'copy'} className="size-3.5" />
+                      {copiedLink ? 'Copied!' : 'Copy Link'}
+                    </Button>
+                  </Panel>
+                )}
                 {pendingJoinReqs.length > 0 && (
                   <Panel className="border-ok/40 p-5 sm:p-6">
                     <h2 className="text-base font-semibold">Pending Company Email Access Requests ({pendingJoinReqs.length})</h2>
@@ -769,9 +954,9 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
                       Overview
                     </button>{' '}
                     or{' '}
-                    <Link href="/app/#library" className="font-semibold text-fg underline underline-offset-2">
-                      Workspace Library
-                    </Link>
+                    <button type="button" onClick={() => setTab('documents')} className="font-semibold text-fg underline underline-offset-2">
+                      Documents
+                    </button>
                     . Restricted spaces stay hidden in the Employee Portal unless an employee is checked below.
                   </p>
                 </div>
@@ -891,9 +1076,9 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
                                     Overview
                                   </button>{' '}
                                   or{' '}
-                                  <Link href="/app/#library" className="text-fg underline underline-offset-2">
-                                    Library
-                                  </Link>
+                                  <button type="button" onClick={() => setTab('documents')} className="text-fg underline underline-offset-2">
+                                    Documents
+                                  </button>
                                 </span>
                               ) : (
                                 <span className="flex flex-wrap items-center gap-1.5">
@@ -1045,6 +1230,16 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
           </>
         )}
       </main>
+
+      <UploadModal
+        open={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        onUploaded={() => {
+          void loadAll();
+        }}
+        maxFileMb={usage?.max_file_mb ?? 25}
+        spaces={spaces}
+      />
     </div>
   );
 }
@@ -1066,12 +1261,14 @@ export function CompanyConsole() {
   useEffect(() => {
     if (raw !== null && !session) {
       router.replace('/login/');
-    } else if (session && session.role !== 'OWNER' && session.role !== 'ADMIN') {
+    } else if (session && session.isCompany && session.workspaceSlug && session.workspaceSlug !== 'personal') {
+      router.replace(`/${session.workspaceSlug}/`);
+    } else if (session && session.role !== 'OWNER' && session.role !== 'ADMIN' && session.role !== 'MEMBER') {
       router.replace('/employee/');
     }
   }, [raw, session, router]);
 
-  if (!session || (session.role !== 'OWNER' && session.role !== 'ADMIN')) {
+  if (!session || (session.role !== 'OWNER' && session.role !== 'ADMIN' && session.role !== 'MEMBER')) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Spinner className="size-6 text-fg" />

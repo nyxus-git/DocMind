@@ -8,13 +8,18 @@ export interface UserSession {
   isCompany: boolean;
   role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'EMPLOYEE' | 'VIEWER' | 'PENDING';
   isSuperAdmin?: boolean;
-  pendingJoinCompany?: { workspaceId: string; companyName: string } | null;
+  pendingJoinCompany?: { workspaceId: string; companyName: string; companySlug?: string } | null;
 }
 
 export function portalHomeForSession(session: UserSession): string {
   if (session.isSuperAdmin) return '/admin/';
-  if (!session.workspaceId && session.pendingJoinCompany) return '/employee/';
+  if (!session.workspaceId && session.pendingJoinCompany) {
+    return session.pendingJoinCompany.companySlug ? `/${session.pendingJoinCompany.companySlug}/` : '/employee/';
+  }
   if (session.workspaceType === 'COMPANY' || session.isCompany) {
+    if (session.workspaceSlug && session.workspaceSlug !== 'personal') {
+      return `/${session.workspaceSlug}/`;
+    }
     if (session.role === 'EMPLOYEE') return '/employee/';
     if (session.role === 'OWNER' || session.role === 'ADMIN') return '/company/';
   }

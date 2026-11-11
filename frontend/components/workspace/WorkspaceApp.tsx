@@ -12,7 +12,7 @@ import {
   UsageSummaryDTO,
   WorkspaceDetailDTO,
 } from '../../lib/api';
-import { clearSession, readRawSession, saveSession, UserSession } from '../../lib/session';
+import { clearSession, portalHomeForSession, readRawSession, saveSession, UserSession } from '../../lib/session';
 import { Spinner } from '../ui/Button';
 import { ToastProvider, useToast } from '../ui/Toast';
 import { MobileNav, Sidebar, TopBar } from './Chrome';
@@ -199,16 +199,20 @@ function Shell({ session: initialSession }: { session: UserSession }) {
     } catch (err) {
       if (!handleApiError(err)) {
         if (err instanceof ApiError && err.status === 403 && session.pendingJoinCompany) {
-          router.replace('/employee/');
+          router.replace(portalHomeForSession(session));
           return;
         }
         setLoadError(err instanceof Error && !(err instanceof TypeError) ? err.message : 'Cannot reach the DocMind server.');
       }
       setDocumentsLoaded(true);
     }
-  }, [handleApiError, router, session.isCompany, session.isSuperAdmin, session.pendingJoinCompany, session.role, session.workspaceType]);
+  }, [handleApiError, router, session]);
 
   useEffect(() => {
+    if (session.isCompany && (session.role === 'EMPLOYEE' || session.role === 'PENDING')) {
+      router.replace(portalHomeForSession(session));
+      return;
+    }
     if (tab === 'admin' && !session.isSuperAdmin) {
       setTab('dashboard');
       return;
@@ -219,7 +223,7 @@ function Shell({ session: initialSession }: { session: UserSession }) {
         router.replace('/admin/');
       }
     }
-  }, [tab, session.isSuperAdmin, setTab, router]);
+  }, [tab, session, setTab, router]);
 
   useEffect(() => {
     // Fetch on mount and whenever the workspace changes.

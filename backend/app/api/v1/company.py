@@ -121,9 +121,11 @@ async def get_employee_portal_info(
             return EmployeePortalInfoDTO(
                 workspace_id=None,
                 company_name=req_ws.name,
+                slug=req_ws.slug,
                 workspace_type="COMPANY",
                 role="PENDING",
                 pending_company_name=req_ws.name,
+                pending_company_slug=req_ws.slug,
             )
         raise DocMindException(
             status_code=403,
@@ -145,6 +147,7 @@ async def get_employee_portal_info(
     return EmployeePortalInfoDTO(
         workspace_id=active_ws.id,
         company_name=active_ws.name,
+        slug=active_ws.slug,
         workspace_type=active_ws.workspace_type,
         role=role_val,
         starter_prompts=list(active_ws.starter_prompts or []),
@@ -457,7 +460,7 @@ async def bulk_invite_employees(
             await ws_repo.add_member(ctx.workspace.id, target_user.id, target_role)
             added_count += 1
             results.append(BulkInviteResultItem(email=addr, status="ACTIVE", detail=f"Added directly as {target_role}."))
-            invite_link = f"{settings.PUBLIC_APP_URL}/login?email={addr}"
+            invite_link = f"{settings.PUBLIC_APP_URL}/{ctx.workspace.slug}/?email={addr}"
         else:
             await quota_svc.check_member_invite_quota(ctx.workspace.id)
             raw_tok = generate_secure_token(24)
@@ -471,7 +474,7 @@ async def bulk_invite_employees(
             )
             invited_count += 1
             results.append(BulkInviteResultItem(email=addr, status="INVITED", detail=f"Invitation created as {target_role}."))
-            invite_link = f"{settings.PUBLIC_APP_URL}/signup?email={addr}&invite_token={raw_tok}"
+            invite_link = f"{settings.PUBLIC_APP_URL}/{ctx.workspace.slug}/?email={addr}&invite_token={raw_tok}"
 
         try:
             await email_provider.send_member_invite_email(

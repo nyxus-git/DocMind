@@ -1,11 +1,23 @@
 import type { NextConfig } from "next";
+import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 
-const nextConfig: NextConfig = {
-  output: "export",
-  trailingSlash: true,
-  images: {
-    unoptimized: true,
-  },
-};
+export default function config(phase: string): NextConfig {
+  const base: NextConfig = {
+    output: "export",
+    trailingSlash: true,
+    images: {
+      unoptimized: true,
+    },
+  };
 
-export default nextConfig;
+  if (phase === PHASE_DEVELOPMENT_SERVER) {
+    base.rewrites = async () => [
+      {
+        source: "/:slug((?!(?:api|app|admin|auth|company|employee|login|signup|org|_next|_not-found|404)(?:/|$))[^/.]+)/:rest*",
+        destination: "/org/",
+      },
+    ];
+  }
+
+  return base;
+}

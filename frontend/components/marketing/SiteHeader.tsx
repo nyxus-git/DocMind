@@ -6,7 +6,7 @@ import { Logo } from '../ui/Logo';
 import { LinkButton } from '../ui/Button';
 import { ThemeToggle } from '../ui/ThemeToggle';
 import { Icon } from '../ui/Icon';
-import { readRawSession } from '../../lib/session';
+import { portalHomeForSession, readRawSession, UserSession } from '../../lib/session';
 
 const subscribeStorage = (cb: () => void) => {
   window.addEventListener('storage', cb);
@@ -24,15 +24,22 @@ const NAV = [
 export function SiteHeader() {
   const [open, setOpen] = useState(false);
   const rawSession = useSyncExternalStore(subscribeStorage, readRawSession, () => '');
-  const signedIn = !!rawSession;
-  let isSuperAdmin = false;
+  let parsedSession: UserSession | null = null;
   if (rawSession) {
     try {
-      isSuperAdmin = Boolean(JSON.parse(rawSession).isSuperAdmin);
+      parsedSession = JSON.parse(rawSession) as UserSession;
     } catch {
-      // ignore
+      parsedSession = null;
     }
   }
+  const signedIn = !!parsedSession;
+  const isSuperAdmin = Boolean(parsedSession?.isSuperAdmin);
+  const homeHref = parsedSession ? portalHomeForSession(parsedSession) : '/app/';
+  const homeLabel = isSuperAdmin
+    ? 'Admin Console'
+    : parsedSession?.isCompany
+      ? `Open ${parsedSession.workspaceName}`
+      : 'Open workspace';
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -67,8 +74,8 @@ export function SiteHeader() {
         <div className="hidden items-center gap-2 md:flex">
           <ThemeToggle />
           {signedIn ? (
-            <LinkButton href={isSuperAdmin ? '/admin' : '/app'} size="sm">
-              {isSuperAdmin ? 'Admin Console' : 'Open workspace'}
+            <LinkButton href={homeHref} size="sm">
+              {homeLabel}
             </LinkButton>
           ) : (
             <>
@@ -113,8 +120,8 @@ export function SiteHeader() {
           </nav>
           <div className="mt-3 flex gap-2">
             {signedIn ? (
-              <LinkButton href={isSuperAdmin ? '/admin' : '/app'} className="flex-1">
-                {isSuperAdmin ? 'Admin Console' : 'Open workspace'}
+              <LinkButton href={homeHref} className="flex-1">
+                {homeLabel}
               </LinkButton>
             ) : (
               <>

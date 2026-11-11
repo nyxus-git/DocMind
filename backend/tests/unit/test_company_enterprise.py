@@ -292,6 +292,92 @@ async def _run_test_company_and_employee_enterprise_flow():
             assert reg_emp2.json()["active_workspace"]["name"] == "Infosys"
             assert reg_emp2.json()["active_workspace"]["role"] == "EMPLOYEE"
 
+            # 9. Public company portal resolution exposes company branding only (never personal slugs)
+            portal_pub = await client.get("/api/v1/auth/company-portal/infosys")
+            assert portal_pub.status_code == 200
+            assert portal_pub.json()["company_name"] == "Infosys"
+            assert portal_pub.json()["slug"] == "infosys"
+            assert (await client.get("/api/v1/auth/company-portal/ws-personal-test")).status_code == 404
+
+            # 10. Create a completely separate Company B ("Acme") with confidential document -> enforce strict cross-company isolation
+            reg_acme = await client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": "boss@acme.io",
+                    "password": "StrongPassword123!",
+                    "account_type": "company",
+                    "company_name": "Acme Corp",
+                    "claim_domain": False,
+                },
+            )
+            assert reg_acme.status_code == 201
+            acme_ws_id = uuid.UUID(reg_acme.json()["active_workspace"]["id"])
+            acme_slug = reg_acme.json()["active_workspace"]["slug"]
+
+            async with async_session() as s:
+                acme_doc = Document(
+                    workspace_id=acme_ws_id,
+                    uploaded_by=uuid.UUID(reg_acme.json()["id"]),
+                    filename="acme_secret_roadmap.pdf",
+                    mime_type="application/pdf",
+                    size_bytes=2048,
+                    checksum_sha256="b" * 64,
+                    object_key=f"raw/{acme_ws_id}/acme_secret.bin",
+                    status=DocumentStatus.READY.value,
+                    page_count=3,
+                )
+                s.add(acme_doc)
+                await s.flush()
+                s.add(
+                    DocumentChunk(
+                        workspace_id=acme_ws_id,
+                        document_id=acme_doc.id,
+                        chunk_index=0,
+                        content="TOP SECRET ACME SALARY MATRIX AND M&A TARGETS",
+                        page_start=1,
+                        page_end=1,
+                        section_path="Confidential",
+                        token_count=10,
+                    )
+                )
+                await s.commit()
+                acme_doc_id = acme_doc.id
+
+            # Infosys employee tries to pass Acme's X-Workspace-ID -> 403 Forbidden
+            cross_ws_docs = await client.get(
+                "/api/v1/documents",
+                headers={"Authorization": f"Bearer {emp_tok}", "X-Workspace-ID": str(acme_ws_id)},
+            )
+            assert cross_ws_docs.status_code == 403
+
+            # Infosys employee tries to search or chat passing Acme's document ID explicitly -> never retrieves Acme content
+            cross_search = await client.post(
+                "/api/v1/search",
+                headers=emp_headers,
+                json={"query": "ACME SALARY MATRIX", "document_ids": [str(acme_doc_id)]},
+            )
+            assert cross_search.status_code == 200
+            assert cross_search.json()["total_found"] == 0
+
+            cross_chat = await client.post(
+                f"/api/v1/conversations/{conv_id}/messages",
+                headers=emp_headers,
+                json={"content": "What is ACME SALARY MATRIX?", "document_ids": [str(acme_doc_id)]},
+            )
+            assert cross_chat.status_code == 400
+
+            # Invite-only portal registration via target_company_slug is blocked unless invited or DOMAIN_APPROVAL enabled
+            blocked_req = await client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": "outsider@gmail.com",
+                    "password": "StrongPassword123!",
+                    "account_type": "employee",
+                    "target_company_slug": acme_slug,
+                },
+            )
+            assert blocked_req.status_code == 403
+
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

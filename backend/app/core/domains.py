@@ -1,4 +1,37 @@
+import re
 from typing import Iterable, List, Optional
+
+RESERVED_PORTAL_SLUGS = frozenset({
+    "app",
+    "admin",
+    "auth",
+    "company",
+    "employee",
+    "login",
+    "signup",
+    "org",
+    "portal",
+    "api",
+    "health",
+    "docs",
+    "openapi",
+    "redoc",
+    "pricing",
+    "privacy",
+    "terms",
+    "static",
+    "_next",
+})
+
+
+def sanitize_company_slug(raw: str, fallback: str = "company") -> str:
+    """Produces a URL-safe lowercase slug that never collides with reserved application routes."""
+    cleaned = re.sub(r"[^a-z0-9]+", "-", (raw or "").strip().lower()).strip("-")
+    if not cleaned:
+        return fallback
+    if cleaned in RESERVED_PORTAL_SLUGS:
+        return f"{cleaned}-org"
+    return cleaned[:100]
 
 # Well-known consumer / free webmail providers that cannot be claimed as exclusive company domains.
 PUBLIC_EMAIL_DOMAINS = frozenset({

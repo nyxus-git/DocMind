@@ -76,7 +76,7 @@ class IntelligenceService:
         # Fetch document chunks for summary synthesis
         chunks_res = await self.db.execute(
             select(DocumentChunk)
-            .where(DocumentChunk.document_id == doc.id)
+            .where(DocumentChunk.workspace_id == workspace_id, DocumentChunk.document_id == doc.id)
             .order_by(DocumentChunk.chunk_index.asc())
             .limit(15)
         )
@@ -148,7 +148,7 @@ class IntelligenceService:
         # Retrieve chunks for document
         chunks_res = await self.db.execute(
             select(DocumentChunk)
-            .where(DocumentChunk.document_id == doc.id)
+            .where(DocumentChunk.workspace_id == workspace_id, DocumentChunk.document_id == doc.id)
             .order_by(DocumentChunk.chunk_index.asc())
             .limit(10)
         )
@@ -323,7 +323,7 @@ class IntelligenceService:
             if not chunks:
                 c_res = await self.db.execute(
                     select(DocumentChunk)
-                    .where(DocumentChunk.document_id == doc.id)
+                    .where(DocumentChunk.workspace_id == workspace_id, DocumentChunk.document_id == doc.id)
                     .order_by(DocumentChunk.chunk_index.asc())
                     .limit(4)
                 )

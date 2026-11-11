@@ -57,6 +57,7 @@ export function LibraryView() {
   const { session, documents, documentsLoaded, spaces, refreshDocuments, refreshUsage, openUpload, askDocuments, canUpload, canAsk, canManageMembers, handleApiError } = useWorkspace();
   const toast = useToast();
   const isCompany = session.isCompany || session.workspaceType === 'COMPANY';
+  const companySlug = session.workspaceSlug && session.workspaceSlug !== 'personal' ? session.workspaceSlug : null;
 
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('ALL');
@@ -225,12 +226,12 @@ export function LibraryView() {
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <Link
-              href="/employee/"
+              href={companySlug ? `/${companySlug}/` : '/employee/'}
               className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-medium hover:bg-surface-2"
             >
-              Employee Portal <Icon name="arrowRight" className="size-3" />
+              {companySlug ? `${session.workspaceName} Portal` : 'Employee Portal'} <Icon name="arrowRight" className="size-3" />
             </Link>
-            {canManageMembers && (
+            {canManageMembers && !companySlug && (
               <Link
                 href="/company/"
                 className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-medium hover:bg-surface-2"

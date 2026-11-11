@@ -85,8 +85,24 @@ export interface AdminUserSummaryDTO {
 export interface PendingJoinRequestDTO {
   workspace_id: string;
   company_name: string;
+  company_slug?: string;
   status: string;
   created_at: string;
+}
+
+export interface CompanyPortalPublicDTO {
+  exists: boolean;
+  company_name: string;
+  slug: string;
+  join_policy: 'INVITE_ONLY' | 'DOMAIN_APPROVAL' | 'DOMAIN_AUTO_JOIN';
+  allowed_domains: string[];
+}
+
+export interface PortalAccessRequestResult {
+  status: 'JOINED' | 'PENDING' | 'ALREADY_MEMBER';
+  company_name: string;
+  slug: string;
+  role?: string;
 }
 
 export interface CompanyDomainLookupDTO {
@@ -168,11 +184,13 @@ export interface CompanyOverviewDTO {
 export interface EmployeePortalInfoDTO {
   workspace_id?: string;
   company_name: string;
+  slug?: string;
   workspace_type: string;
   role: string;
   starter_prompts: string[];
   spaces: KnowledgeSpaceDTO[];
   pending_company_name?: string;
+  pending_company_slug?: string;
 }
 
 export interface BulkInviteResponse {
@@ -683,6 +701,17 @@ export class ApiClient {
     return this.request<CompanyDomainLookupDTO>(`/auth/company-lookup?email=${encodeURIComponent(email)}`);
   }
 
+  static async getCompanyPortalBySlug(slug: string): Promise<CompanyPortalPublicDTO> {
+    return this.request<CompanyPortalPublicDTO>(`/auth/company-portal/${encodeURIComponent(slug)}`);
+  }
+
+  static async requestCompanyPortalAccess(slug: string, departmentNote?: string): Promise<PortalAccessRequestResult> {
+    return this.request<PortalAccessRequestResult>(`/auth/company-portal/${encodeURIComponent(slug)}/request-access`, {
+      method: 'POST',
+      body: JSON.stringify({ department_note: departmentNote || undefined }),
+    });
+  }
+
   static async register(
     email: string,
     password: string,
@@ -690,6 +719,7 @@ export class ApiClient {
       account_type?: 'personal' | 'company' | 'employee';
       company_name?: string;
       company_slug?: string;
+      target_company_slug?: string;
       claim_domain?: boolean;
       department_note?: string;
     },

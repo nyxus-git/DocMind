@@ -52,6 +52,7 @@ async def get_my_profile(
             pending_dto = PendingJoinRequestDTO(
                 workspace_id=req_ws.id,
                 company_name=req_ws.name,
+                company_slug=req_ws.slug,
                 status=req_row.status,
                 created_at=req_row.created_at,
             )

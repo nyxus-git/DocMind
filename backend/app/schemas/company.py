@@ -122,9 +122,11 @@ class CompanyOverviewDTO(BaseModel):
 class EmployeePortalInfoDTO(BaseModel):
     workspace_id: Optional[uuid.UUID] = None
     company_name: str
+    slug: Optional[str] = None
     workspace_type: str = "COMPANY"
     role: str
     starter_prompts: List[str] = Field(default_factory=list)
     spaces: List[KnowledgeSpaceDTO] = Field(default_factory=list)
     pending_company_name: Optional[str] = None
+    pending_company_slug: Optional[str] = None
 
