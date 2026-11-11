@@ -1,4 +1,5 @@
 import hashlib
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
@@ -6,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.email.base import EmailProvider
 from app.adapters.email.smtp import get_email_provider
 from app.core.config import settings
+from app.core.domains import extract_email_domain, is_corporate_domain
 from app.core.exceptions import DocMindException
 from app.core.security import (
     create_access_token,
@@ -19,10 +21,16 @@ from app.core.security import (
     verify_password,
 )
 from app.models.entities import RefreshSession, User, Workspace
-from app.models.enums import UserStatus, WorkspaceRole
+from app.models.enums import JoinPolicy, UserStatus, WorkspaceRole, WorkspaceTier, WorkspaceType
 from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
-from app.schemas.auth import TokenResponse, UserSummaryDTO, WorkspaceSummaryDTO
+from app.schemas.auth import (
+    CompanyDomainLookupDTO,
+    PendingJoinRequestDTO,
+    TokenResponse,
+    UserSummaryDTO,
+    WorkspaceSummaryDTO,
+)
 
 
 class AuthService:
@@ -32,7 +40,72 @@ class AuthService:
         self.workspace_repo = WorkspaceRepository(db)
         self.email_provider = email_provider or get_email_provider()
 
-    async def register(self, email: str, password: str) -> Tuple[User, Workspace, str]:
+    async def lookup_company_by_email(self, email: str) -> CompanyDomainLookupDTO:
+        domain = extract_email_domain(email)
+        if not is_corporate_domain(domain):
+            return CompanyDomainLookupDTO(matched=False, domain=domain)
+        ws = await self.workspace_repo.find_company_by_domain(domain or "")
+        if not ws:
+            return CompanyDomainLookupDTO(matched=False, domain=domain)
+        return CompanyDomainLookupDTO(
+            matched=True,
+            workspace_id=ws.id,
+            company_name=ws.name,
+            slug=ws.slug,
+            domain=domain,
+            join_policy=ws.join_policy,
+        )
+
+    async def _apply_domain_join_if_eligible(
+        self,
+        user: User,
+        department_note: Optional[str] = None,
+    ) -> Tuple[Optional[Workspace], Optional[PendingJoinRequestDTO]]:
+        """Routes corporate-domain users into auto-join membership or an admin-approval request."""
+        domain = extract_email_domain(user.email)
+        if not is_corporate_domain(domain):
+            return None, None
+        ws = await self.workspace_repo.find_company_by_domain(domain or "")
+        if not ws:
+            return None, None
+
+        existing_mem = await self.workspace_repo.get_user_membership(ws.id, user.id)
+        if existing_mem:
+            return ws, None
+
+        if ws.join_policy == JoinPolicy.DOMAIN_AUTO_JOIN.value:
+            if not settings.REQUIRE_EMAIL_VERIFICATION or user.verified_at:
+                role = ws.default_join_role or WorkspaceRole.EMPLOYEE.value
+                await self.workspace_repo.add_member(ws.id, user.id, role)
+                return ws, None
+            return None, None
+
+        if ws.join_policy == JoinPolicy.DOMAIN_APPROVAL.value:
+            req = await self.workspace_repo.create_or_get_join_request(
+                workspace_id=ws.id,
+                user_id=user.id,
+                email=user.email,
+                department_note=department_note,
+            )
+            return None, PendingJoinRequestDTO(
+                workspace_id=ws.id,
+                company_name=ws.name,
+                status=req.status,
+                created_at=req.created_at,
+            )
+
+        return None, None
+
+    async def register(
+        self,
+        email: str,
+        password: str,
+        account_type: str = "personal",
+        company_name: Optional[str] = None,
+        company_slug: Optional[str] = None,
+        claim_domain: bool = False,
+        department_note: Optional[str] = None,
+    ) -> Tuple[User, Optional[Workspace], str]:
         existing = await self.user_repo.get_by_email(email)
         if existing:
             raise DocMindException(
@@ -42,23 +115,95 @@ class AuthService:
                 detail="An account with this email address already exists."
             )
 
+        mode = (account_type or "personal").strip().lower()
+        domain = extract_email_domain(email)
+
+        if mode == "employee":
+            if not is_corporate_domain(domain):
+                raise DocMindException(
+                    status_code=400,
+                    code="CORPORATE_EMAIL_REQUIRED",
+                    title="Company Email Required",
+                    detail="Please use your company email address (personal webmail domains are not allowed for employee sign-in).",
+                )
+            matched_ws = await self.workspace_repo.find_company_by_domain(domain or "")
+            if matched_ws and matched_ws.join_policy == JoinPolicy.INVITE_ONLY.value:
+                # Permit signup only if a pending invitation exists for this email
+                pass
+
         password_hash = hash_password(password)
         user = await self.user_repo.create_user(email, password_hash)
 
-        # Auto-create personal workspace per FR-006
-        workspace_name = "Personal Workspace"
-        workspace_slug = f"ws-{user.id.hex[:8]}"
-        workspace = await self.workspace_repo.create_workspace(
-            name=workspace_name,
-            slug=workspace_slug,
-            created_by=user.id
-        )
+        active_workspace: Optional[Workspace] = None
 
-        # Auto-accept any pending workspace invitations for this email
+        # 1. Explicit company signup -> create COMPANY workspace directly (no stray Personal Workspace)
+        if mode == "company" and company_name and company_name.strip():
+            raw_slug = company_slug.strip().lower() if company_slug else re.sub(r"[^a-z0-9]+", "-", company_name.lower().strip()).strip("-")
+            slug = raw_slug or f"company-{user.id.hex[:6]}"
+            if await self.workspace_repo.get_by_slug(slug):
+                slug = f"{slug}-{uuid.uuid4().hex[:4]}"
+
+            allowed_domains = []
+            join_policy = JoinPolicy.INVITE_ONLY.value
+            if claim_domain and is_corporate_domain(domain):
+                conflicts = await self.workspace_repo.find_domain_conflicts([domain or ""])
+                if not conflicts and domain:
+                    allowed_domains = [domain]
+                    join_policy = JoinPolicy.DOMAIN_APPROVAL.value
+
+            active_workspace = await self.workspace_repo.create_workspace(
+                name=company_name.strip(),
+                slug=slug,
+                created_by=user.id,
+                tier=WorkspaceTier.PRO.value,
+                workspace_type=WorkspaceType.COMPANY.value,
+                allowed_domains=allowed_domains,
+                join_policy=join_policy,
+                default_join_role=WorkspaceRole.EMPLOYEE.value,
+            )
+
+        # 2. Accept any pending workspace invitations matching this email
+        joined_ids = []
         try:
-            await self.workspace_repo.accept_pending_invitations_for_user(user.id, user.email)
+            joined_ids = await self.workspace_repo.accept_pending_invitations_for_user(user.id, user.email)
         except Exception:
             pass
+        if not active_workspace and joined_ids:
+            active_workspace = await self.workspace_repo.get_by_id(joined_ids[0])
+
+        # 3. Domain auto-join or approval request for corporate email users
+        pending_req = None
+        if not active_workspace:
+            domain_ws, pending_req = await self._apply_domain_join_if_eligible(user, department_note=department_note)
+            if domain_ws:
+                active_workspace = domain_ws
+
+        if mode == "employee" and not active_workspace and not pending_req:
+            matched_ws = await self.workspace_repo.find_company_by_domain(domain or "")
+            if matched_ws and matched_ws.join_policy == JoinPolicy.INVITE_ONLY.value:
+                raise DocMindException(
+                    status_code=403,
+                    code="INVITE_REQUIRED",
+                    title="Invitation Required",
+                    detail=f"{matched_ws.name} requires an invitation from a Company Admin before joining.",
+                )
+            if not matched_ws:
+                raise DocMindException(
+                    status_code=404,
+                    code="COMPANY_DOMAIN_NOT_FOUND",
+                    title="Company Not Found",
+                    detail=f"No company workspace has registered '@{domain}' yet. Ask your IT admin to register your company first.",
+                )
+
+        # 4. Individual signup with no company association -> create Personal Workspace
+        if not active_workspace and not pending_req and mode != "employee":
+            active_workspace = await self.workspace_repo.create_workspace(
+                name="Personal Workspace",
+                slug=f"ws-{user.id.hex[:8]}",
+                created_by=user.id,
+                tier=WorkspaceTier.STARTER.value,
+                workspace_type=WorkspaceType.PERSONAL.value,
+            )
 
         verification_token = create_email_verification_token(str(user.id))
         verification_link = f"{settings.PUBLIC_APP_URL}/auth?token={verification_token}&action=verify"
@@ -67,7 +212,7 @@ class AuthService:
         except Exception:
             pass
 
-        return user, workspace, verification_token
+        return user, active_workspace, verification_token
 
     async def verify_email(self, token: str) -> User:
         user_id_str = verify_email_verification_token(token)
@@ -97,6 +242,10 @@ class AuthService:
                 title="User Not Found",
                 detail="No account found associated with this token."
             )
+        try:
+            await self._apply_domain_join_if_eligible(user)
+        except Exception:
+            pass
         return user
 
     async def forgot_password(self, email: str) -> None:
@@ -208,6 +357,10 @@ class AuthService:
             pass
 
         workspaces = await self.workspace_repo.get_user_workspaces(user.id)
+        if not workspaces:
+            await self._apply_domain_join_if_eligible(user)
+            workspaces = await self.workspace_repo.get_user_workspaces(user.id)
+
         active_ws, active_role = workspaces[0] if workspaces else (None, None)
         active_ws_id = str(active_ws.id) if active_ws else None
 
@@ -230,8 +383,21 @@ class AuthService:
                 id=active_ws.id,
                 name=active_ws.name,
                 slug=active_ws.slug,
-                role=active_role or WorkspaceRole.OWNER.value
+                role=active_role or WorkspaceRole.OWNER.value,
+                workspace_type=active_ws.workspace_type,
             )
+
+        pending_dto = None
+        if not active_ws:
+            pending_reqs = await self.workspace_repo.get_pending_join_requests_for_user(user.id)
+            if pending_reqs:
+                req_row, req_ws = pending_reqs[0]
+                pending_dto = PendingJoinRequestDTO(
+                    workspace_id=req_ws.id,
+                    company_name=req_ws.name,
+                    status=req_row.status,
+                    created_at=req_row.created_at,
+                )
 
         user_dto = UserSummaryDTO(
             id=user.id,
@@ -239,7 +405,8 @@ class AuthService:
             status=user.status,
             verified=(user.verified_at is not None),
             is_superadmin=user.is_superadmin,
-            active_workspace=ws_dto
+            active_workspace=ws_dto,
+            pending_join_request=pending_dto,
         )
 
         return token_resp, refresh_raw, user_dto

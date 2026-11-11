@@ -53,7 +53,7 @@ function IconButton({
 }
 
 export function LibraryView() {
-  const { documents, documentsLoaded, refreshDocuments, refreshUsage, openUpload, askDocuments, canUpload, canAsk, handleApiError } = useWorkspace();
+  const { documents, documentsLoaded, spaces, refreshDocuments, refreshUsage, openUpload, askDocuments, canUpload, canAsk, handleApiError } = useWorkspace();
   const toast = useToast();
 
   const [query, setQuery] = useState('');
@@ -71,6 +71,7 @@ export function LibraryView() {
   const [editingDoc, setEditingDoc] = useState<DocumentDTO | null>(null);
   const [editFilename, setEditFilename] = useState('');
   const [editTags, setEditTags] = useState('');
+  const [editSpaceId, setEditSpaceId] = useState('');
   const [savingMeta, setSavingMeta] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -134,6 +135,7 @@ export function LibraryView() {
     setEditingDoc(doc);
     setEditFilename(doc.filename);
     setEditTags((doc.tags || []).join(', '));
+    setEditSpaceId(doc.space_id || '');
   };
 
   const saveMeta = async (e: React.FormEvent) => {
@@ -148,6 +150,7 @@ export function LibraryView() {
       await ApiClient.updateDocument(editingDoc.id, {
         filename: editFilename.trim() || editingDoc.filename,
         tags: parsedTags,
+        ...(editSpaceId ? { space_id: editSpaceId, clear_space: false } : { clear_space: true }),
       });
       toast('Document updated.', 'success');
       setEditingDoc(null);
@@ -263,9 +266,14 @@ export function LibraryView() {
                           {d.page_count ? `${d.page_count} pages • ` : ''}
                           {formatBytes(d.size_bytes)} &bull; Added {formatDate(d.created_at)}
                         </p>
-                        {d.tags && d.tags.length > 0 && (
+                        {(d.space_name || (d.tags && d.tags.length > 0)) && (
                           <div className="mt-1 flex flex-wrap gap-1">
-                            {d.tags.map(tag => (
+                            {d.space_name && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-brand/10 px-1.5 py-0.5 text-[11px] font-medium text-fg">
+                                <Icon name="folder" className="size-3" /> {d.space_name}
+                              </span>
+                            )}
+                            {(d.tags || []).map(tag => (
                               <span key={tag} className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted">
                                 #{tag}
                               </span>
@@ -524,6 +532,26 @@ export function LibraryView() {
               className={inputClass}
             />
           </div>
+          {spaces.length > 0 && (
+            <div>
+              <label htmlFor="doc-space" className="mb-1.5 block text-sm font-medium">
+                Department / Knowledge Space
+              </label>
+              <select
+                id="doc-space"
+                value={editSpaceId}
+                onChange={e => setEditSpaceId(e.target.value)}
+                className={inputClass}
+              >
+                <option value="">General (All members)</option>
+                {spaces.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.visibility === 'RESTRICTED' ? 'Restricted' : 'All members'})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </form>
       </Modal>
     </div>

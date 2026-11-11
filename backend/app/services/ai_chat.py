@@ -51,7 +51,9 @@ class ChatService:
         conversation_id: uuid.UUID,
         content: str,
         document_ids: Optional[List[uuid.UUID]] = None,
-        idempotency_key: Optional[str] = None
+        idempotency_key: Optional[str] = None,
+        allowed_space_ids: Optional[Set[uuid.UUID]] = None,
+        space_id: Optional[uuid.UUID] = None,
     ) -> SendMessageResponse:
         # 1. Check AI kill-switch and dynamic tier question quota (FR-041, FR-044)
         await self.quota_service.check_question_quota(workspace_id, user_id)
@@ -61,9 +63,14 @@ class ChatService:
         if not conv:
             raise EntityNotFoundException("Conversation", conversation_id)
 
-        # 4. Resolve document scope (must be in READY status and in same workspace)
+        # 4. Resolve document scope (must be READY, in same workspace, and within accessible spaces)
         target_doc_ids = document_ids or [uuid.UUID(i) for i in (conv.selected_doc_ids or [])]
-        ready_docs = await self.doc_repo.get_ready_documents(workspace_id, target_doc_ids)
+        ready_docs = await self.doc_repo.get_ready_documents(
+            workspace_id,
+            target_doc_ids,
+            allowed_space_ids=allowed_space_ids,
+            space_id=space_id,
+        )
         if not ready_docs:
             raise DocMindException(
                 status_code=400,
@@ -300,7 +307,8 @@ class ChatService:
             model=llm_result.model,
             input_tokens=llm_result.input_tokens,
             output_tokens=llm_result.output_tokens,
-            latency_ms=llm_result.latency_ms
+            latency_ms=llm_result.latency_ms,
+            insufficient_evidence=bool(is_insufficient),
         )
 
         if citations_to_persist:
@@ -334,9 +342,16 @@ class ChatService:
         workspace_id: uuid.UUID,
         query: str,
         document_ids: Optional[List[uuid.UUID]] = None,
-        limit: int = 10
+        limit: int = 10,
+        allowed_space_ids: Optional[Set[uuid.UUID]] = None,
+        space_id: Optional[uuid.UUID] = None,
     ) -> List[SearchResultItemDTO]:
-        ready_docs = await self.doc_repo.get_ready_documents(workspace_id, document_ids)
+        ready_docs = await self.doc_repo.get_ready_documents(
+            workspace_id,
+            document_ids,
+            allowed_space_ids=allowed_space_ids,
+            space_id=space_id,
+        )
         if not ready_docs:
             return []
 

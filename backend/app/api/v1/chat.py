@@ -3,15 +3,18 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.dependencies import WorkspaceContext, get_current_workspace, require_write_access
-from app.core.exceptions import EntityNotFoundException
+from app.core.exceptions import DocMindException, EntityNotFoundException
 from app.db.session import get_db
 from app.models.entities import Conversation, Message
 from app.repositories.conversation import ConversationRepository
+from app.repositories.workspace import WorkspaceRepository
 from app.schemas.chat import (
     CitationDTO,
     ConversationDTO,
     CreateConversationRequest,
     MessageDTO,
+    MessageFeedbackRequest,
+    MessageFeedbackResponse,
     SendMessageRequest,
     SendMessageResponse,
     UpdateConversationRequest,
@@ -53,7 +56,7 @@ async def list_conversations(
     db: AsyncSession = Depends(get_db)
 ):
     conv_repo = ConversationRepository(db)
-    convs = await conv_repo.list_conversations(ctx.workspace.id, limit=limit)
+    convs = await conv_repo.list_conversations(ctx.workspace.id, limit=limit, user_id=ctx.user.id)
     return [
         ConversationDTO(
             id=c.id,
@@ -76,9 +79,10 @@ async def get_conversation(
 ):
     conv_repo = ConversationRepository(db)
     conv = await conv_repo.get_by_id(ctx.workspace.id, conversation_id)
-    if not conv:
+    if not conv or conv.created_by != ctx.user.id:
         raise EntityNotFoundException("Conversation", conversation_id)
 
+    feedback_map = await conv_repo.get_feedback_map([m.id for m in conv.messages], ctx.user.id)
     message_dtos: List[MessageDTO] = []
     for msg in conv.messages:
         cit_dtos = [
@@ -101,6 +105,7 @@ async def get_conversation(
             role=msg.role,
             content=msg.content,
             status=msg.status,
+            user_feedback=feedback_map.get(msg.id),
             citations=cit_dtos,
             created_at=msg.created_at
         ))
@@ -125,6 +130,10 @@ async def update_conversation(
     db: AsyncSession = Depends(get_db)
 ):
     conv_repo = ConversationRepository(db)
+    existing = await conv_repo.get_by_id(ctx.workspace.id, conversation_id)
+    if not existing or existing.created_by != ctx.user.id:
+        raise EntityNotFoundException("Conversation", conversation_id)
+
     conv = await conv_repo.update_conversation(
         workspace_id=ctx.workspace.id,
         conversation_id=conversation_id,
@@ -153,6 +162,9 @@ async def delete_conversation(
     db: AsyncSession = Depends(get_db)
 ):
     conv_repo = ConversationRepository(db)
+    existing = await conv_repo.get_by_id(ctx.workspace.id, conversation_id)
+    if not existing or existing.created_by != ctx.user.id:
+        raise EntityNotFoundException("Conversation", conversation_id)
     deleted = await conv_repo.delete_conversation(ctx.workspace.id, conversation_id)
     if not deleted:
         raise EntityNotFoundException("Conversation", conversation_id)
@@ -166,6 +178,12 @@ async def send_message(
     ctx: WorkspaceContext = Depends(require_write_access),
     db: AsyncSession = Depends(get_db)
 ):
+    conv_repo = ConversationRepository(db)
+    existing = await conv_repo.get_by_id(ctx.workspace.id, conversation_id)
+    if not existing or existing.created_by != ctx.user.id:
+        raise EntityNotFoundException("Conversation", conversation_id)
+
+    allowed_spaces = await WorkspaceRepository(db).get_accessible_space_ids(ctx.workspace.id, ctx.user.id, ctx.role)
     chat_service = ChatService(db)
     return await chat_service.send_message(
         workspace_id=ctx.workspace.id,
@@ -173,8 +191,49 @@ async def send_message(
         conversation_id=conversation_id,
         content=req.content,
         document_ids=req.document_ids,
-        idempotency_key=req.idempotency_key
+        idempotency_key=req.idempotency_key,
+        allowed_space_ids=allowed_spaces,
+        space_id=req.space_id,
     )
+
+
+@router.post("/{conversation_id}/messages/{message_id}/feedback", response_model=MessageFeedbackResponse)
+async def submit_message_feedback(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    req: MessageFeedbackRequest,
+    ctx: WorkspaceContext = Depends(require_write_access),
+    db: AsyncSession = Depends(get_db),
+):
+    if req.rating not in (1, -1):
+        raise DocMindException(status_code=400, code="INVALID_RATING", title="Bad Request", detail="Rating must be 1 or -1.")
+
+    conv_repo = ConversationRepository(db)
+    conv = await conv_repo.get_by_id(ctx.workspace.id, conversation_id)
+    if not conv or conv.created_by != ctx.user.id:
+        raise EntityNotFoundException("Conversation", conversation_id)
+
+    target_msg = next((m for m in conv.messages if m.id == message_id and m.role == "assistant"), None)
+    if not target_msg:
+        raise EntityNotFoundException("Message", message_id)
+
+    question_text: Optional[str] = None
+    for m in conv.messages:
+        if m.id == target_msg.id:
+            break
+        if m.role == "user":
+            question_text = m.content
+
+    await conv_repo.upsert_feedback(
+        workspace_id=ctx.workspace.id,
+        conversation_id=conv.id,
+        message_id=target_msg.id,
+        user_id=ctx.user.id,
+        rating=req.rating,
+        comment=req.comment,
+        question_text=question_text,
+    )
+    return MessageFeedbackResponse(message_id=target_msg.id, rating=req.rating)
 
 
 @router.get("/{conversation_id}/export")
@@ -185,7 +244,7 @@ async def export_conversation_markdown(
 ):
     conv_repo = ConversationRepository(db)
     conv = await conv_repo.get_by_id(ctx.workspace.id, conversation_id)
-    if not conv:
+    if not conv or conv.created_by != ctx.user.id:
         raise EntityNotFoundException("Conversation", conversation_id)
 
     lines = [f"# DocMind Chat Export: {conv.title}", f"Exported: {conv.updated_at.isoformat()}\n"]

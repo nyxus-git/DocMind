@@ -52,3 +52,5 @@ class DashboardDTO(BaseModel):
     recent_documents: List[DocumentDTO]
     recent_conversations: List[ConversationDTO]
     is_superadmin: bool = False
+    workspace_type: str = "PERSONAL"
+    role: str = "OWNER"

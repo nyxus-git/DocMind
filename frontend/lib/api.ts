@@ -82,6 +82,106 @@ export interface AdminUserSummaryDTO {
   created_at: string;
 }
 
+export interface PendingJoinRequestDTO {
+  workspace_id: string;
+  company_name: string;
+  status: string;
+  created_at: string;
+}
+
+export interface CompanyDomainLookupDTO {
+  matched: boolean;
+  workspace_id?: string;
+  company_name?: string;
+  slug?: string;
+  domain?: string;
+  join_policy?: string;
+}
+
+export interface KnowledgeSpaceDTO {
+  id: string;
+  workspace_id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  visibility: 'ALL_MEMBERS' | 'RESTRICTED';
+  allowed_roles: string[];
+  member_user_ids: string[];
+  document_count: number;
+  created_at: string;
+}
+
+export interface CompanyJoinRequestDTO {
+  id: string;
+  workspace_id: string;
+  user_id: string;
+  email: string;
+  department_note?: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  assigned_role: string;
+  created_at: string;
+  reviewed_at?: string;
+}
+
+export interface CompanySettingsDTO {
+  workspace_id: string;
+  name: string;
+  slug: string;
+  tier: string;
+  workspace_type: string;
+  allowed_domains: string[];
+  join_policy: 'INVITE_ONLY' | 'DOMAIN_APPROVAL' | 'DOMAIN_AUTO_JOIN';
+  default_join_role: 'EMPLOYEE' | 'MEMBER' | 'VIEWER';
+  starter_prompts: string[];
+}
+
+export interface KnowledgeGapDTO {
+  id: string;
+  message_id: string;
+  conversation_id: string;
+  question: string;
+  answer_excerpt: string;
+  reason: string;
+  comment?: string;
+  user_email: string;
+  created_at: string;
+}
+
+export interface CompanyOverviewDTO {
+  workspace_id: string;
+  company_name: string;
+  slug: string;
+  tier: string;
+  member_count: number;
+  pending_join_requests: number;
+  total_documents: number;
+  ready_documents: number;
+  storage_bytes: number;
+  monthly_questions: number;
+  monthly_questions_limit: number;
+  helpful_rate_pct?: number;
+  total_feedback_count: number;
+  spaces_count: number;
+  recent_gaps: KnowledgeGapDTO[];
+}
+
+export interface EmployeePortalInfoDTO {
+  workspace_id?: string;
+  company_name: string;
+  workspace_type: string;
+  role: string;
+  starter_prompts: string[];
+  spaces: KnowledgeSpaceDTO[];
+  pending_company_name?: string;
+}
+
+export interface BulkInviteResponse {
+  results: Array<{ email: string; status: string; detail: string }>;
+  invited_count: number;
+  added_count: number;
+  skipped_count: number;
+}
+
 export interface UserProfileDTO {
   id: string;
   email: string;
@@ -94,12 +194,16 @@ export interface UserProfileDTO {
     name: string;
     slug: string;
     role: string;
+    workspace_type?: 'PERSONAL' | 'COMPANY';
   };
+  pending_join_request?: PendingJoinRequestDTO;
 }
 
 export interface DocumentDTO {
   id: string;
   workspace_id: string;
+  space_id?: string | null;
+  space_name?: string | null;
   filename: string;
   mime_type: string;
   size_bytes: number;
@@ -136,6 +240,7 @@ export interface MessageDTO {
   role: 'user' | 'assistant' | 'system';
   content: string;
   status: string;
+  user_feedback?: number | null;
   citations: CitationDTO[];
   suggested_followups?: string[];
   created_at: string;
@@ -232,6 +337,7 @@ export interface WorkspaceDetailDTO {
   name: string;
   slug: string;
   tier?: string;
+  workspace_type?: 'PERSONAL' | 'COMPANY';
   role: string;
   created_at: string;
   member_count: number;
@@ -573,10 +679,28 @@ export class ApiClient {
     }
   }
 
-  static async register(email: string, password: string): Promise<{ id: string; email: string; active_workspace: { id: string; name: string; slug: string; role: string } }> {
+  static async lookupCompanyByEmail(email: string): Promise<CompanyDomainLookupDTO> {
+    return this.request<CompanyDomainLookupDTO>(`/auth/company-lookup?email=${encodeURIComponent(email)}`);
+  }
+
+  static async register(
+    email: string,
+    password: string,
+    opts?: {
+      account_type?: 'personal' | 'company' | 'employee';
+      company_name?: string;
+      company_slug?: string;
+      claim_domain?: boolean;
+      department_note?: string;
+    },
+  ): Promise<{
+    id: string;
+    email: string;
+    active_workspace?: { id: string; name: string; slug: string; role: string; workspace_type?: string } | null;
+  }> {
     return this.request('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, ...opts }),
     });
   }
 
@@ -669,17 +793,26 @@ export class ApiClient {
       recent_documents: DocumentDTO[];
       recent_conversations: ConversationDTO[];
       is_superadmin?: boolean;
+      workspace_type?: 'PERSONAL' | 'COMPANY';
+      role?: string;
     }>(`/dashboard/summary?limit=${limit}`);
   }
 
-  static async listDocuments(status?: string, search?: string): Promise<DocumentDTO[]> {
+  static async listDocuments(status?: string, search?: string, spaceId?: string): Promise<DocumentDTO[]> {
     const params = new URLSearchParams();
     if (status) params.append('status', status);
     if (search) params.append('q', search);
+    if (spaceId) params.append('space_id', spaceId);
     return this.request<DocumentDTO[]>(`/documents?${params.toString()}`);
   }
 
-  static async createUploadIntent(filename: string, declared_mime: string, size_bytes: number, checksum_sha256: string) {
+  static async createUploadIntent(
+    filename: string,
+    declared_mime: string,
+    size_bytes: number,
+    checksum_sha256: string,
+    space_id?: string,
+  ) {
     return this.request<{
       document_id: string;
       upload_url: string;
@@ -688,7 +821,7 @@ export class ApiClient {
       expires_at: string;
     }>('/documents/upload-intents', {
       method: 'POST',
-      body: JSON.stringify({ filename, declared_mime, size_bytes, checksum_sha256 }),
+      body: JSON.stringify({ filename, declared_mime, size_bytes, checksum_sha256, ...(space_id ? { space_id } : {}) }),
     });
   }
 
@@ -733,7 +866,7 @@ export class ApiClient {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
   }
 
-  static async sendMessage(conversation_id: string, content: string, document_ids?: string[]) {
+  static async sendMessage(conversation_id: string, content: string, document_ids?: string[], space_id?: string) {
     let targetConvId = conversation_id;
     if (!this.isUUID(targetConvId)) {
       const conv = await this.createConversation('DocMind Research Chat');
@@ -750,8 +883,23 @@ export class ApiClient {
       created_at: string;
     }>(`/conversations/${targetConvId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ content, document_ids }),
+      body: JSON.stringify({ content, document_ids, ...(space_id ? { space_id } : {}) }),
     });
+  }
+
+  static async submitMessageFeedback(
+    conversationId: string,
+    messageId: string,
+    rating: 1 | -1,
+    comment?: string,
+  ): Promise<{ message_id: string; rating: number }> {
+    return this.request<{ message_id: string; rating: number }>(
+      `/conversations/${conversationId}/messages/${messageId}/feedback`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ rating, comment }),
+      },
+    );
   }
 
   static async compareDocuments(document_ids: string[], focus_topic?: string): Promise<CompareResponse> {
@@ -885,17 +1033,25 @@ export class ApiClient {
     return this.request<void>('/delete-account', { method: 'POST' });
   }
 
-  static async updateDocument(documentId: string, data: { filename?: string; tags?: string[] }): Promise<DocumentDTO> {
+  static async updateDocument(
+    documentId: string,
+    data: { filename?: string; tags?: string[]; space_id?: string; clear_space?: boolean },
+  ): Promise<DocumentDTO> {
     return this.request<DocumentDTO>(`/documents/${documentId}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
   }
 
-  static async searchWorkspace(query: string, document_ids?: string[], limit: number = 10): Promise<{ query: string; results: SearchResultItemDTO[]; total_found: number }> {
+  static async searchWorkspace(
+    query: string,
+    document_ids?: string[],
+    limit: number = 10,
+    space_id?: string,
+  ): Promise<{ query: string; results: SearchResultItemDTO[]; total_found: number }> {
     return this.request<{ query: string; results: SearchResultItemDTO[]; total_found: number }>('/search', {
       method: 'POST',
-      body: JSON.stringify({ query, document_ids, limit }),
+      body: JSON.stringify({ query, document_ids, limit, ...(space_id ? { space_id } : {}) }),
     });
   }
 
@@ -946,5 +1102,96 @@ export class ApiClient {
 
   static async revokeApiKey(workspaceId: string, keyId: string): Promise<void> {
     return this.request<void>(`/workspaces/${workspaceId}/api-keys/${keyId}`, { method: 'DELETE' });
+  }
+
+  // Enterprise Company & Employee Portal Methods
+  static async getEmployeePortalInfo(): Promise<EmployeePortalInfoDTO> {
+    return this.request<EmployeePortalInfoDTO>('/company/portal-info');
+  }
+
+  static async getCompanyOverview(): Promise<CompanyOverviewDTO> {
+    return this.request<CompanyOverviewDTO>('/company/overview');
+  }
+
+  static async getCompanySettings(): Promise<CompanySettingsDTO> {
+    return this.request<CompanySettingsDTO>('/company/settings');
+  }
+
+  static async updateCompanySettings(payload: {
+    name?: string;
+    allowed_domains?: string[];
+    join_policy?: string;
+    default_join_role?: string;
+    starter_prompts?: string[];
+  }): Promise<CompanySettingsDTO> {
+    return this.request<CompanySettingsDTO>('/company/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  static async listCompanyJoinRequests(status?: string): Promise<CompanyJoinRequestDTO[]> {
+    const q = status ? `?status=${encodeURIComponent(status)}` : '';
+    return this.request<CompanyJoinRequestDTO[]>(`/company/join-requests${q}`);
+  }
+
+  static async decideJoinRequest(
+    requestId: string,
+    decision: 'APPROVE' | 'REJECT',
+    role: string = 'EMPLOYEE',
+    spaceIds?: string[],
+  ): Promise<CompanyJoinRequestDTO> {
+    return this.request<CompanyJoinRequestDTO>(`/company/join-requests/${requestId}/decision`, {
+      method: 'POST',
+      body: JSON.stringify({ decision, role, space_ids: spaceIds }),
+    });
+  }
+
+  static async bulkInviteEmployees(emails: string[], role: string = 'EMPLOYEE'): Promise<BulkInviteResponse> {
+    return this.request<BulkInviteResponse>('/company/invites/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ emails, role }),
+    });
+  }
+
+  static async listCompanySpaces(): Promise<KnowledgeSpaceDTO[]> {
+    return this.request<KnowledgeSpaceDTO[]>('/company/spaces');
+  }
+
+  static async createCompanySpace(payload: {
+    name: string;
+    description?: string;
+    visibility: 'ALL_MEMBERS' | 'RESTRICTED';
+    allowed_roles: string[];
+    member_user_ids?: string[];
+  }): Promise<KnowledgeSpaceDTO> {
+    return this.request<KnowledgeSpaceDTO>('/company/spaces', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  static async updateCompanySpace(
+    spaceId: string,
+    payload: {
+      name?: string;
+      description?: string;
+      visibility?: 'ALL_MEMBERS' | 'RESTRICTED';
+      allowed_roles?: string[];
+      member_user_ids?: string[];
+    },
+  ): Promise<KnowledgeSpaceDTO> {
+    return this.request<KnowledgeSpaceDTO>(`/company/spaces/${spaceId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  static async deleteCompanySpace(spaceId: string): Promise<void> {
+    return this.request<void>(`/company/spaces/${spaceId}`, { method: 'DELETE' });
+  }
+
+  static async listCompanyKnowledgeGaps(limit: number = 50): Promise<KnowledgeGapDTO[]> {
+    return this.request<KnowledgeGapDTO[]>(`/company/knowledge-gaps?limit=${limit}`);
   }
 }

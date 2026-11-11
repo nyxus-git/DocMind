@@ -8,10 +8,11 @@ import {
   CitationDTO,
   ConversationDTO,
   DocumentDTO,
+  KnowledgeSpaceDTO,
   UsageSummaryDTO,
   WorkspaceDetailDTO,
 } from '../../lib/api';
-import { clearSession, loadSession, readRawSession, saveSession, UserSession } from '../../lib/session';
+import { clearSession, readRawSession, saveSession, UserSession } from '../../lib/session';
 import { Spinner } from '../ui/Button';
 import { ToastProvider, useToast } from '../ui/Toast';
 import { MobileNav, Sidebar, TopBar } from './Chrome';
@@ -54,6 +55,8 @@ function Shell({ session: initialSession }: { session: UserSession }) {
   const [documents, setDocuments] = useState<DocumentDTO[]>([]);
   const [documentsLoaded, setDocumentsLoaded] = useState(false);
   const [conversations, setConversations] = useState<ConversationDTO[]>([]);
+  const [spaces, setSpaces] = useState<KnowledgeSpaceDTO[]>([]);
+  const [starterPrompts, setStarterPrompts] = useState<string[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [chatScope, setChatScope] = useState<string[]>([]);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -142,21 +145,55 @@ function Shell({ session: initialSession }: { session: UserSession }) {
       setDocumentsLoaded(true);
       setLoadError(null);
 
-      if (typeof dash.is_superadmin === 'boolean') {
-        const flag = dash.is_superadmin;
-        setSession(prev => (Boolean(prev.isSuperAdmin) === flag ? prev : { ...prev, isSuperAdmin: flag }));
-        const stored = loadSession();
-        if (stored && Boolean(stored.isSuperAdmin) !== flag) {
-          saveSession({ ...stored, isSuperAdmin: flag });
+      const superFlag = typeof dash.is_superadmin === 'boolean' ? dash.is_superadmin : Boolean(session.isSuperAdmin);
+      const wsType = dash.workspace_type ?? session.workspaceType;
+      const liveRole = (dash.role as UserSession['role']) ?? session.role;
+      const isComp = wsType === 'COMPANY' || session.isCompany;
+
+      setSession(prev => {
+        if (
+          Boolean(prev.isSuperAdmin) === superFlag &&
+          prev.workspaceType === wsType &&
+          prev.role === liveRole &&
+          prev.isCompany === isComp
+        ) {
+          return prev;
         }
+        const next: UserSession = {
+          ...prev,
+          isSuperAdmin: superFlag,
+          workspaceType: wsType,
+          role: liveRole,
+          isCompany: isComp,
+        };
+        saveSession(next);
+        return next;
+      });
+
+      if (isComp) {
+        ApiClient.getEmployeePortalInfo()
+          .then(info => {
+            setSpaces(info.spaces || []);
+            setStarterPrompts(info.starter_prompts || []);
+          })
+          .catch(() => {
+            // optional metadata
+          });
+      } else {
+        setSpaces([]);
+        setStarterPrompts([]);
       }
     } catch (err) {
       if (!handleApiError(err)) {
+        if (err instanceof ApiError && err.status === 403 && session.pendingJoinCompany) {
+          router.replace('/employee/');
+          return;
+        }
         setLoadError(err instanceof Error && !(err instanceof TypeError) ? err.message : 'Cannot reach the DocMind server.');
       }
       setDocumentsLoaded(true);
     }
-  }, [handleApiError]);
+  }, [handleApiError, router, session.isCompany, session.isSuperAdmin, session.pendingJoinCompany, session.role, session.workspaceType]);
 
   useEffect(() => {
     if (tab === 'admin' && !session.isSuperAdmin) {
@@ -202,7 +239,8 @@ function Shell({ session: initialSession }: { session: UserSession }) {
       workspaceId: ws.id,
       workspaceName: ws.name,
       workspaceSlug: ws.slug,
-      isCompany: !/personal/i.test(ws.name),
+      workspaceType: ws.workspace_type ?? (!/personal/i.test(ws.name) ? 'COMPANY' : 'PERSONAL'),
+      isCompany: ws.workspace_type === 'COMPANY' || !/personal/i.test(ws.name),
       role: ws.role as UserSession['role'],
     };
     saveSession(next);
@@ -210,6 +248,8 @@ function Shell({ session: initialSession }: { session: UserSession }) {
     setDocuments([]);
     setDocumentsLoaded(false);
     setConversations([]);
+    setSpaces([]);
+    setStarterPrompts([]);
     setUsage(null);
     setChatScope([]);
     setWorkspaceKey(k => k + 1);
@@ -218,8 +258,8 @@ function Shell({ session: initialSession }: { session: UserSession }) {
 
   /* ---- permissions ---- */
   const role = session.role;
-  const canUpload = role !== 'VIEWER';
-  const canAsk = role !== 'VIEWER';
+  const canUpload = role === 'OWNER' || role === 'ADMIN' || role === 'MEMBER';
+  const canAsk = role !== 'VIEWER' && role !== 'PENDING';
   const canManageMembers = role === 'OWNER' || role === 'ADMIN';
   const isOwner = role === 'OWNER';
 
@@ -230,6 +270,8 @@ function Shell({ session: initialSession }: { session: UserSession }) {
       documents,
       documentsLoaded,
       conversations,
+      spaces,
+      starterPrompts,
       loadError,
       refreshDocuments,
       refreshUsage,
@@ -262,7 +304,7 @@ function Shell({ session: initialSession }: { session: UserSession }) {
     }),
     [
       session, usage, documents, documentsLoaded, conversations, loadError, refreshDocuments, refreshUsage,
-      refreshConversations, reloadAll, tab, setTab, chatScope, handleApiError, signOut, role, canUpload, canAsk,
+      refreshConversations, reloadAll, spaces, starterPrompts, tab, setTab, chatScope, handleApiError, signOut, role, canUpload, canAsk,
       canManageMembers, isOwner,
     ],
   );
@@ -307,6 +349,7 @@ function Shell({ session: initialSession }: { session: UserSession }) {
           void refreshUsage();
         }}
         maxFileMb={usage?.max_file_mb ?? 20}
+        spaces={spaces}
       />
       <GlobalSearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
       <CitationDrawer

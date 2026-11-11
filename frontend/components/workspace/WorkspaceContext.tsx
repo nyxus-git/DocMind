@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext } from 'react';
-import { CitationDTO, ConversationDTO, DocumentDTO, UsageSummaryDTO } from '../../lib/api';
+import { CitationDTO, ConversationDTO, DocumentDTO, KnowledgeSpaceDTO, UsageSummaryDTO } from '../../lib/api';
 import { UserSession } from '../../lib/session';
 
 export type TabId = 'dashboard' | 'library' | 'chat' | 'compare' | 'settings' | 'admin';
@@ -12,6 +12,8 @@ export interface WorkspaceContextValue {
   documents: DocumentDTO[];
   documentsLoaded: boolean;
   conversations: ConversationDTO[];
+  spaces: KnowledgeSpaceDTO[];
+  starterPrompts: string[];
   loadError: string | null;
 
   refreshDocuments: () => Promise<void>;

@@ -34,6 +34,7 @@ class MessageDTO(BaseModel):
     role: str
     content: str
     status: str
+    user_feedback: Optional[int] = None
     citations: List[CitationDTO] = Field(default_factory=list)
     created_at: datetime
 
@@ -52,8 +53,19 @@ class ConversationDTO(BaseModel):
 class SendMessageRequest(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
     document_ids: Optional[List[uuid.UUID]] = None
+    space_id: Optional[uuid.UUID] = None
     response_mode: str = "source_only"
     idempotency_key: Optional[str] = None
+
+
+class MessageFeedbackRequest(BaseModel):
+    rating: int = Field(description="1 for helpful, -1 for not helpful")
+    comment: Optional[str] = Field(default=None, max_length=500)
+
+
+class MessageFeedbackResponse(BaseModel):
+    message_id: uuid.UUID
+    rating: int
 
 
 class UsageDTO(BaseModel):
@@ -75,6 +87,7 @@ class SendMessageResponse(BaseModel):
 class ContentSearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=500)
     document_ids: Optional[List[uuid.UUID]] = None
+    space_id: Optional[uuid.UUID] = None
     limit: int = Field(default=10, ge=1, le=50)
 
 

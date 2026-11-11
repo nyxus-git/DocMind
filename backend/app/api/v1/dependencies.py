@@ -187,6 +187,34 @@ async def require_write_access(
     return ctx
 
 
+async def require_document_write_access(
+    ctx: WorkspaceContext = Depends(require_write_access),
+) -> WorkspaceContext:
+    """Blocks EMPLOYEE and VIEWER roles from uploading, editing, or deleting company documents."""
+    if ctx.role == WorkspaceRole.EMPLOYEE.value:
+        raise DocMindException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="INSUFFICIENT_PERMISSIONS",
+            title="Company Admin or Contributor Required",
+            detail="Employees can read and ask AI questions, but cannot upload, modify, or delete company documents."
+        )
+    return ctx
+
+
+async def require_company_admin(
+    ctx: WorkspaceContext = Depends(get_current_workspace),
+) -> WorkspaceContext:
+    """Restricts company management endpoints to workspace OWNER and ADMIN roles."""
+    if ctx.role not in (WorkspaceRole.OWNER.value, WorkspaceRole.ADMIN.value):
+        raise DocMindException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="INSUFFICIENT_PERMISSIONS",
+            title="Company Admin Required",
+            detail="Only Company Owners and Admins can manage company settings, spaces, or employees."
+        )
+    return ctx
+
+
 async def require_platform_admin(
     current_user: User = Depends(get_current_user),
 ) -> User:

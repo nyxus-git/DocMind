@@ -48,7 +48,7 @@ function SourceList({ citations, onOpen }: { citations: CitationDTO[]; onOpen: (
 }
 
 export function ChatView() {
-  const { documents, conversations, refreshConversations, refreshUsage, chatScope, setChatScope, openCitation, canAsk, usage, handleApiError } =
+  const { documents, conversations, starterPrompts, refreshConversations, refreshUsage, chatScope, setChatScope, openCitation, canAsk, usage, handleApiError } =
     useWorkspace();
   const toast = useToast();
 
@@ -63,6 +63,18 @@ export function ChatView() {
 
   const ready = documents.filter(d => d.status === 'READY');
   const limitReached = !!usage && usage.questions_used >= usage.questions_limit;
+  const activeSuggestions = starterPrompts.length > 0 ? starterPrompts : SUGGESTIONS;
+
+  const giveFeedback = async (msgId: string, rating: 1 | -1) => {
+    if (!convId) return;
+    setMessages(prev => prev.map(m => (m.id === msgId ? { ...m, user_feedback: rating } : m)));
+    try {
+      await ApiClient.submitMessageFeedback(convId, msgId, rating);
+      toast(rating === 1 ? 'Marked as helpful.' : 'Feedback recorded for company admins.', 'success');
+    } catch (err) {
+      if (!handleApiError(err)) toast('Could not save feedback.', 'error');
+    }
+  };
 
   const openConversation = useCallback(
     async (id: string) => {
@@ -278,7 +290,7 @@ export function ChatView() {
               </p>
               {ready.length > 0 && canAsk && (
                 <ul className="mt-6 space-y-2">
-                  {SUGGESTIONS.map(s => (
+                  {activeSuggestions.map(s => (
                     <li key={s}>
                       <button
                         type="button"
@@ -316,6 +328,32 @@ export function ChatView() {
                   )}
                   <RichText content={m.content} citations={m.citations} onCite={openCitation} />
                   <SourceList citations={m.citations} onOpen={openCitation} />
+                  {convId && ApiClient.isUUID(m.id) && canAsk && (
+                    <div className="mt-3 flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => void giveFeedback(m.id, 1)}
+                        aria-label="Helpful answer"
+                        aria-pressed={m.user_feedback === 1}
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors ${
+                          m.user_feedback === 1 ? 'bg-ok-soft text-ok font-medium' : 'text-faint hover:bg-surface-2 hover:text-fg'
+                        }`}
+                      >
+                        <Icon name="thumbUp" className="size-3.5" /> Helpful
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void giveFeedback(m.id, -1)}
+                        aria-label="Not helpful"
+                        aria-pressed={m.user_feedback === -1}
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors ${
+                          m.user_feedback === -1 ? 'bg-danger-soft text-danger font-medium' : 'text-faint hover:bg-surface-2 hover:text-fg'
+                        }`}
+                      >
+                        <Icon name="thumbDown" className="size-3.5" /> Needs info
+                      </button>
+                    </div>
+                  )}
                   {m.followups && m.followups.length > 0 && m.id === messages[messages.length - 1]?.id && canAsk && (
                     <div className="mt-4 flex flex-wrap gap-2">
                       {m.followups.slice(0, 3).map(f => (

@@ -50,8 +50,13 @@ async def get_dashboard_summary(
     quota_service = QuotaService(doc_repo, usage_repo, ws_repo)
 
     usage = await quota_service.get_usage_summary(ctx.workspace.id, ctx.user.id)
-    recent_docs = await doc_service.list_documents(ctx.workspace.id, limit=limit)
-    recent_convs = await conv_repo.list_conversations(ctx.workspace.id, limit=limit)
+    allowed_spaces = await ws_repo.get_accessible_space_ids(ctx.workspace.id, ctx.user.id, ctx.role)
+    recent_docs = await doc_service.list_documents(
+        ctx.workspace.id,
+        limit=limit,
+        allowed_space_ids=allowed_spaces,
+    )
+    recent_convs = await conv_repo.list_conversations(ctx.workspace.id, limit=limit, user_id=ctx.user.id)
 
     recent_conv_dtos = [
         ConversationDTO(
@@ -71,6 +76,8 @@ async def get_dashboard_summary(
         recent_documents=recent_docs,
         recent_conversations=recent_conv_dtos,
         is_superadmin=bool(ctx.user.is_superadmin),
+        workspace_type=ctx.workspace.workspace_type,
+        role=ctx.role,
     )
 
 

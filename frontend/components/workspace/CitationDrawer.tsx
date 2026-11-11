@@ -18,6 +18,8 @@ export function CitationDrawer({
 }) {
   const toast = useToast();
   const [opening, setOpening] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewDocId, setPreviewDocId] = useState<string | null>(null);
 
   const openSource = async () => {
     if (!citation) return;
@@ -32,17 +34,47 @@ export function CitationDrawer({
     }
   };
 
+  const togglePreview = async () => {
+    if (!citation) return;
+    if (previewUrl && previewDocId === citation.document_id) {
+      setPreviewUrl(null);
+      setPreviewDocId(null);
+      return;
+    }
+    setOpening(true);
+    try {
+      const { download_url } = await ApiClient.getDownloadUrl(citation.document_id);
+      const pageAnchor = citation.page_start ? `#page=${citation.page_start}` : '';
+      setPreviewUrl(`${download_url}${pageAnchor}`);
+      setPreviewDocId(citation.document_id);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not load document preview.', 'error');
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  const showingPreview = Boolean(citation && previewUrl && previewDocId === citation.document_id);
+
   return (
     <Drawer
       open={!!citation}
-      onClose={onClose}
+      onClose={() => {
+        setPreviewUrl(null);
+        setPreviewDocId(null);
+        onClose();
+      }}
       title="Source"
       footer={
         citation && !citation.is_source_deleted ? (
           <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" size="sm" onClick={togglePreview} disabled={opening}>
+              {opening ? <Spinner className="size-3.5" /> : <Icon name="book" />}
+              {showingPreview ? 'Show passage' : 'Preview PDF'}
+            </Button>
             <Button variant="secondary" size="sm" onClick={openSource} disabled={opening}>
-              {opening ? <Spinner className="size-3.5" /> : <Icon name="external" />}
-              Open file
+              <Icon name="external" />
+              Open in tab
             </Button>
             <Button
               variant="ghost"
@@ -78,13 +110,18 @@ export function CitationDrawer({
             </div>
           </div>
 
-          {/* The cited passage, shown on a page like the one it came from */}
-          <div className="mt-5 rounded-lg bg-surface-2 p-3">
-            <div className="rounded-[3px] bg-paper px-5 py-5 font-serif text-[15px] leading-[1.8] text-paper-fg shadow-page">
-              <span className="mark-strong">{citation.excerpt}</span>
+          {showingPreview && previewUrl ? (
+            <div className="mt-4 overflow-hidden rounded-lg border border-line bg-bg">
+              <iframe title={citation.filename} src={previewUrl} className="h-[28rem] w-full" />
             </div>
-            <p className="mt-2 px-1 text-xs text-muted">Passage as it appears in the document.</p>
-          </div>
+          ) : (
+            <div className="mt-5 rounded-lg bg-surface-2 p-3">
+              <div className="rounded-[3px] bg-paper px-5 py-5 font-serif text-[15px] leading-[1.8] text-paper-fg shadow-page">
+                <span className="mark-strong">{citation.excerpt}</span>
+              </div>
+              <p className="mt-2 px-1 text-xs text-muted">Passage as it appears in the document.</p>
+            </div>
+          )}
 
           {citation.is_source_deleted && (
             <div className="mt-4 flex items-start gap-2 rounded-lg bg-warn-soft px-3.5 py-3 text-sm text-warn">

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useState } from 'react';
-import { ApiClient } from '../../lib/api';
+import { ApiClient, KnowledgeSpaceDTO } from '../../lib/api';
 import { formatBytes } from '../../lib/format';
 import { Button, Spinner } from '../ui/Button';
 import { Icon } from '../ui/Icon';
@@ -39,6 +39,7 @@ interface UploadModalProps {
   onClose: () => void;
   onUploaded: () => void;
   maxFileMb: number;
+  spaces?: KnowledgeSpaceDTO[];
 }
 
 /** State lives in the body, so closing the dialog resets the queue. */
@@ -46,11 +47,12 @@ export function UploadModal(props: UploadModalProps) {
   return props.open ? <UploadModalBody {...props} /> : null;
 }
 
-function UploadModalBody({ open, onClose, onUploaded, maxFileMb }: UploadModalProps) {
+function UploadModalBody({ open, onClose, onUploaded, maxFileMb, spaces = [] }: UploadModalProps) {
   const [items, setItems] = useState<Item[]>([]);
   const [dragging, setDragging] = useState(false);
   const [running, setRunning] = useState(false);
   const [rejected, setRejected] = useState<string | null>(null);
+  const [selectedSpaceId, setSelectedSpaceId] = useState<string>('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   const addFiles = (list: FileList | File[]) => {
@@ -85,6 +87,7 @@ function UploadModalBody({ open, onClose, onUploaded, maxFileMb }: UploadModalPr
           item.file.type || 'application/octet-stream',
           item.file.size,
           checksum,
+          selectedSpaceId || undefined,
         );
         patch(item.id, { status: 'uploading' });
         const put = await fetch(intent.upload_url, { method: intent.method || 'PUT', headers: intent.headers, body: item.file });
@@ -125,6 +128,28 @@ function UploadModalBody({ open, onClose, onUploaded, maxFileMb }: UploadModalPr
         </>
       }
     >
+      {spaces.length > 0 && (
+        <div className="mb-4">
+          <label htmlFor="upload-space" className="mb-1.5 block text-sm font-medium">
+            Department / Knowledge Space
+          </label>
+          <select
+            id="upload-space"
+            value={selectedSpaceId}
+            onChange={e => setSelectedSpaceId(e.target.value)}
+            disabled={running}
+            className="h-10 w-full rounded-lg border border-line-strong bg-surface px-3 text-sm text-fg focus:border-fg focus:outline-none"
+          >
+            <option value="">General (All company members)</option>
+            {spaces.map(s => (
+              <option key={s.id} value={s.id}>
+                {s.name} ({s.visibility === 'RESTRICTED' ? 'Restricted' : 'All members'})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       <div
         onDragEnter={e => {
           e.preventDefault();

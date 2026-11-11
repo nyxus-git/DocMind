@@ -20,7 +20,19 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
 
 from app.db.session import Base
-from app.models.enums import DocumentErrorCode, DocumentStatus, JobStatus, JobType, UserStatus, WorkspaceRole, WorkspaceTier
+from app.models.enums import (
+    DocumentErrorCode,
+    DocumentStatus,
+    JobStatus,
+    JobType,
+    JoinPolicy,
+    JoinRequestStatus,
+    SpaceVisibility,
+    UserStatus,
+    WorkspaceRole,
+    WorkspaceTier,
+    WorkspaceType,
+)
 
 
 @compiles(TSVECTOR, "sqlite")
@@ -60,6 +72,11 @@ class Workspace(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     slug: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
     tier: Mapped[str] = mapped_column(String(32), default=WorkspaceTier.STARTER.value, nullable=False)
+    workspace_type: Mapped[str] = mapped_column(String(32), default=WorkspaceType.PERSONAL.value, nullable=False)
+    allowed_domains: Mapped[Optional[list]] = mapped_column(JSONB, default=list, nullable=True)
+    join_policy: Mapped[str] = mapped_column(String(32), default=JoinPolicy.INVITE_ONLY.value, nullable=False)
+    default_join_role: Mapped[str] = mapped_column(String(32), default=WorkspaceRole.EMPLOYEE.value, nullable=False)
+    starter_prompts: Mapped[Optional[list]] = mapped_column(JSONB, default=list, nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
@@ -125,11 +142,58 @@ class RefreshSession(Base):
     user = relationship("User", back_populates="sessions")
 
 
+class KnowledgeSpace(Base):
+    __tablename__ = "knowledge_spaces"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    slug: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    visibility: Mapped[str] = mapped_column(String(32), default=SpaceVisibility.ALL_MEMBERS.value, nullable=False)
+    allowed_roles: Mapped[Optional[list]] = mapped_column(JSONB, default=lambda: ["OWNER", "ADMIN"], nullable=True)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "slug", name="uq_space_ws_slug"),
+    )
+
+
+class SpaceMember(Base):
+    __tablename__ = "space_members"
+
+    space_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("knowledge_spaces.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class WorkspaceJoinRequest(Base):
+    __tablename__ = "workspace_join_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    department_note: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default=JoinRequestStatus.PENDING.value, index=True, nullable=False)
+    assigned_role: Mapped[str] = mapped_column(String(32), default=WorkspaceRole.EMPLOYEE.value, nullable=False)
+    reviewed_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "user_id", name="uq_join_req_ws_user"),
+    )
+
+
 class Document(Base):
     __tablename__ = "documents"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True, nullable=False)
+    space_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("knowledge_spaces.id", ondelete="SET NULL"), index=True, nullable=True)
     uploaded_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -233,11 +297,31 @@ class Message(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     latency_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    insufficient_evidence: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     request_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True, nullable=False)
 
     conversation = relationship("Conversation", back_populates="messages")
     citations = relationship("MessageCitation", back_populates="message", cascade="all, delete-orphan")
+
+
+class MessageFeedback(Base):
+    __tablename__ = "message_feedback"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True, nullable=False)
+    conversation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), index=True, nullable=False)
+    message_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("messages.id", ondelete="CASCADE"), index=True, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)  # 1 = helpful, -1 = not helpful
+    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    question_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("message_id", "user_id", name="uq_feedback_msg_user"),
+    )
 
 
 class MessageCitation(Base):

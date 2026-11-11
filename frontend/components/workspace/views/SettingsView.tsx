@@ -346,6 +346,7 @@ function TeamTab() {
             <select id="invite-role" value={role} onChange={e => setRole(e.target.value)} className={`${inputClass} sm:w-36`}>
               <option value="ADMIN">Admin</option>
               <option value="MEMBER">Member</option>
+              <option value="EMPLOYEE">Employee</option>
               <option value="VIEWER">Viewer</option>
             </select>
             <Button type="submit" disabled={inviting}>
@@ -394,6 +395,7 @@ function TeamTab() {
                       >
                         <option value="ADMIN">Admin</option>
                         <option value="MEMBER">Member</option>
+                        <option value="EMPLOYEE">Employee</option>
                         <option value="VIEWER">Viewer</option>
                       </select>
                     ) : (

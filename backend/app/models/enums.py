@@ -12,7 +12,30 @@ class WorkspaceRole(str, enum.Enum):
     OWNER = "OWNER"
     ADMIN = "ADMIN"
     MEMBER = "MEMBER"
+    EMPLOYEE = "EMPLOYEE"
     VIEWER = "VIEWER"
+
+
+class WorkspaceType(str, enum.Enum):
+    PERSONAL = "PERSONAL"
+    COMPANY = "COMPANY"
+
+
+class JoinPolicy(str, enum.Enum):
+    INVITE_ONLY = "INVITE_ONLY"
+    DOMAIN_APPROVAL = "DOMAIN_APPROVAL"
+    DOMAIN_AUTO_JOIN = "DOMAIN_AUTO_JOIN"
+
+
+class JoinRequestStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class SpaceVisibility(str, enum.Enum):
+    ALL_MEMBERS = "ALL_MEMBERS"
+    RESTRICTED = "RESTRICTED"
 
 
 class WorkspaceTier(str, enum.Enum):

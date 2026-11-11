@@ -191,9 +191,12 @@ function WorkspaceSwitcher({
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-surface-2"
                 >
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">{ws.name}</span>
+                    <span className="flex items-center gap-1.5 truncate text-sm font-medium">
+                      <Icon name={ws.workspace_type === 'COMPANY' || !/personal/i.test(ws.name) ? 'building' : 'user'} className="size-3.5 shrink-0 text-muted" />
+                      <span className="truncate">{ws.name}</span>
+                    </span>
                     <span className="block text-xs text-muted">
-                      {ws.role.charAt(0) + ws.role.slice(1).toLowerCase()} &bull; {ws.member_count} {ws.member_count === 1 ? 'member' : 'members'}
+                      {ws.workspace_type === 'COMPANY' ? 'Company' : 'Personal'} &bull; {ws.role.charAt(0) + ws.role.slice(1).toLowerCase()} &bull; {ws.member_count} {ws.member_count === 1 ? 'member' : 'members'}
                     </span>
                   </span>
                   {ws.id === session.workspaceId && <Icon name="check" className="size-4 text-ok" strokeWidth={2.2} />}
@@ -290,6 +293,26 @@ export function TopBar({
               >
                 <Icon name="sliders" className="size-4 text-muted" /> Settings
               </button>
+              {session.isCompany && (session.role === 'OWNER' || session.role === 'ADMIN') && (
+                <Link
+                  role="menuitem"
+                  href="/company/"
+                  onClick={() => setMenu(false)}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-fg hover:bg-surface-2"
+                >
+                  <Icon name="building" className="size-4 text-muted" /> Company Console
+                </Link>
+              )}
+              {session.isCompany && (
+                <Link
+                  role="menuitem"
+                  href="/employee/"
+                  onClick={() => setMenu(false)}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm hover:bg-surface-2"
+                >
+                  <Icon name="userCheck" className="size-4 text-muted" /> Employee Portal
+                </Link>
+              )}
               {Boolean(session.isSuperAdmin) && (
                 <Link
                   role="menuitem"

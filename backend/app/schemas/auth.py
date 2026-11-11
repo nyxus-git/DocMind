@@ -7,6 +7,11 @@ from pydantic import BaseModel, EmailStr, Field
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
+    account_type: str = Field(default="personal", description="personal | company | employee")
+    company_name: Optional[str] = Field(default=None, min_length=2, max_length=128)
+    company_slug: Optional[str] = Field(default=None, min_length=2, max_length=128)
+    claim_domain: bool = False
+    department_note: Optional[str] = Field(default=None, max_length=200)
 
 
 class LoginRequest(BaseModel):
@@ -38,6 +43,23 @@ class WorkspaceSummaryDTO(BaseModel):
     name: str
     slug: str
     role: str
+    workspace_type: str = "PERSONAL"
+
+
+class PendingJoinRequestDTO(BaseModel):
+    workspace_id: uuid.UUID
+    company_name: str
+    status: str = "PENDING"
+    created_at: datetime
+
+
+class CompanyDomainLookupDTO(BaseModel):
+    matched: bool
+    workspace_id: Optional[uuid.UUID] = None
+    company_name: Optional[str] = None
+    slug: Optional[str] = None
+    domain: Optional[str] = None
+    join_policy: Optional[str] = None
 
 
 class UserSummaryDTO(BaseModel):
@@ -47,6 +69,7 @@ class UserSummaryDTO(BaseModel):
     verified: bool
     is_superadmin: bool = False
     active_workspace: Optional[WorkspaceSummaryDTO] = None
+    pending_join_request: Optional[PendingJoinRequestDTO] = None
 
 
 class UserProfileDTO(BaseModel):
@@ -57,6 +80,7 @@ class UserProfileDTO(BaseModel):
     is_superadmin: bool = False
     created_at: datetime
     active_workspace: Optional[WorkspaceSummaryDTO] = None
+    pending_join_request: Optional[PendingJoinRequestDTO] = None
 
 
 class UpdateProfileRequest(BaseModel):

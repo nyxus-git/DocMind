@@ -14,7 +14,7 @@ from app.core.exceptions import DocMindException
 from app.core.security import hash_password
 from app.db.session import get_db
 from app.models.entities import AuditEvent, Document, DocumentChunk, Job, Message, User, Workspace, WorkspaceMember, utc_now
-from app.models.enums import DocumentStatus, JobStatus, JobType, UserStatus, WorkspaceRole, WorkspaceTier
+from app.models.enums import DocumentStatus, JobStatus, JobType, UserStatus, WorkspaceRole, WorkspaceTier, WorkspaceType
 from app.repositories.audit import AuditRepository
 from app.repositories.document import DocumentRepository
 from app.repositories.job import JobRepository
@@ -258,6 +258,7 @@ async def admin_provision_workspace(
         slug=slug,
         created_by=owner.id,
         tier=target_tier,
+        workspace_type=WorkspaceType.COMPANY.value,
     )
 
     await audit_repo.record_event(

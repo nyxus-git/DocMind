@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.dependencies import WorkspaceContext, get_current_workspace
 from app.db.session import get_db
+from app.repositories.workspace import WorkspaceRepository
 from app.schemas.chat import ContentSearchRequest, SearchResponse
 from app.services.ai_chat import ChatService
 
@@ -14,12 +15,15 @@ async def search_content(
     ctx: WorkspaceContext = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db)
 ):
+    allowed_spaces = await WorkspaceRepository(db).get_accessible_space_ids(ctx.workspace.id, ctx.user.id, ctx.role)
     chat_service = ChatService(db)
     results = await chat_service.search_content(
         workspace_id=ctx.workspace.id,
         query=req.query,
         document_ids=req.document_ids,
-        limit=req.limit
+        limit=req.limit,
+        allowed_space_ids=allowed_spaces,
+        space_id=req.space_id,
     )
     return SearchResponse(
         query=req.query,

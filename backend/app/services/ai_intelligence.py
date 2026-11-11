@@ -1,7 +1,7 @@
 import json
 import logging
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.ai.base import EmbeddingProvider, LLMProvider
@@ -48,9 +48,10 @@ class IntelligenceService:
     async def get_or_generate_summary(
         self,
         workspace_id: uuid.UUID,
-        document_id: uuid.UUID
+        document_id: uuid.UUID,
+        allowed_space_ids: Optional[Set[uuid.UUID]] = None,
     ) -> DocumentSummaryResponse:
-        doc = await self.doc_repo.get_by_id(workspace_id, document_id)
+        doc = await self.doc_repo.get_by_id(workspace_id, document_id, allowed_space_ids=allowed_space_ids)
         if not doc or doc.status != DocumentStatus.READY.value:
             raise EntityNotFoundException("Ready Document", document_id)
 
@@ -137,9 +138,10 @@ class IntelligenceService:
         workspace_id: uuid.UUID,
         document_id: uuid.UUID,
         preset_id: str,
-        user_id: Optional[uuid.UUID] = None
+        user_id: Optional[uuid.UUID] = None,
+        allowed_space_ids: Optional[Set[uuid.UUID]] = None,
     ) -> ExtractionResponse:
-        doc = await self.doc_repo.get_by_id(workspace_id, document_id)
+        doc = await self.doc_repo.get_by_id(workspace_id, document_id, allowed_space_ids=allowed_space_ids)
         if not doc or doc.status != DocumentStatus.READY.value:
             raise EntityNotFoundException("Ready Document", document_id)
 
@@ -238,7 +240,8 @@ class IntelligenceService:
         workspace_id: uuid.UUID,
         document_ids: List[uuid.UUID],
         focus_topic: Optional[str] = None,
-        user_id: Optional[uuid.UUID] = None
+        user_id: Optional[uuid.UUID] = None,
+        allowed_space_ids: Optional[Set[uuid.UUID]] = None,
     ) -> CompareDocumentsResponse:
         # 1. Enforce tier quota check if user authenticated
         if user_id:
@@ -254,14 +257,15 @@ class IntelligenceService:
                 detail="Document comparison requires selecting between 2 and 5 distinct documents."
             )
 
-        # 2. Verify all documents exist within workspace (prevent scope widening / leaking)
-        docs_res = await self.db.execute(
+        # 2. Verify all documents exist within workspace and caller's accessible spaces
+        docs_query = self.doc_repo._apply_space_scope(
             select(Document).where(
                 Document.workspace_id == workspace_id,
-                Document.id.in_(unique_ids)
-            )
+                Document.id.in_(unique_ids),
+            ),
+            allowed_space_ids=allowed_space_ids,
         )
-        found_docs_list = list(docs_res.scalars().all())
+        found_docs_list = list((await self.db.execute(docs_query)).scalars().all())
         found_docs_map = {d.id: d for d in found_docs_list}
 
         missing_ids = [did for did in unique_ids if did not in found_docs_map]

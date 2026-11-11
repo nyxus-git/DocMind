@@ -4,9 +4,21 @@ export interface UserSession {
   workspaceName: string;
   workspaceSlug: string;
   workspaceId?: string;
+  workspaceType?: 'PERSONAL' | 'COMPANY';
   isCompany: boolean;
-  role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
+  role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'EMPLOYEE' | 'VIEWER' | 'PENDING';
   isSuperAdmin?: boolean;
+  pendingJoinCompany?: { workspaceId: string; companyName: string } | null;
+}
+
+export function portalHomeForSession(session: UserSession): string {
+  if (session.isSuperAdmin) return '/admin/';
+  if (!session.workspaceId && session.pendingJoinCompany) return '/employee/';
+  if (session.workspaceType === 'COMPANY' || session.isCompany) {
+    if (session.role === 'EMPLOYEE') return '/employee/';
+    if (session.role === 'OWNER' || session.role === 'ADMIN') return '/company/';
+  }
+  return '/app/';
 }
 
 const SESSION_KEY = 'docmind_user_session';

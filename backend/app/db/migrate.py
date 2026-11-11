@@ -6,7 +6,7 @@ from app.core.config import settings
 from app.core.security import hash_password
 from app.db.session import AsyncSessionLocal, async_engine, Base
 from app.models.entities import User
-from app.models.enums import UserStatus, WorkspaceTier
+from app.models.enums import UserStatus, WorkspaceTier, WorkspaceType
 from app.repositories.workspace import WorkspaceRepository
 import app.models.entities  # noqa: F401
 
@@ -18,10 +18,19 @@ MIGRATION_STATEMENTS = [
     'CREATE EXTENSION IF NOT EXISTS "citext";',
     'CREATE EXTENSION IF NOT EXISTS "vector";',
     "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS tier VARCHAR(32) NOT NULL DEFAULT 'STARTER';",
+    "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS workspace_type VARCHAR(32) NOT NULL DEFAULT 'PERSONAL';",
+    "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS allowed_domains JSONB DEFAULT '[]'::jsonb;",
+    "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS join_policy VARCHAR(32) NOT NULL DEFAULT 'INVITE_ONLY';",
+    "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS default_join_role VARCHAR(32) NOT NULL DEFAULT 'EMPLOYEE';",
+    "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS starter_prompts JSONB DEFAULT '[]'::jsonb;",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS space_id UUID NULL REFERENCES knowledge_spaces(id) ON DELETE SET NULL;",
+    "CREATE INDEX IF NOT EXISTS ix_documents_space_id ON documents (space_id);",
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS insufficient_evidence BOOLEAN NOT NULL DEFAULT FALSE;",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP WITH TIME ZONE NULL;",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(32) NOT NULL DEFAULT 'UNVERIFIED';",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN NOT NULL DEFAULT FALSE;",
     "CREATE INDEX IF NOT EXISTS ix_workspaces_tier ON workspaces (tier);",
+    "UPDATE workspaces SET workspace_type = 'COMPANY' WHERE workspace_type = 'PERSONAL' AND name != 'Personal Workspace' AND slug NOT LIKE 'ws-%';",
 ]
 
 
@@ -77,6 +86,7 @@ async def seed_platform_admin() -> None:
                     slug=f"docmind-hq-{user.id.hex[:6]}",
                     created_by=user.id,
                     tier=WorkspaceTier.ENTERPRISE.value,
+                    workspace_type=WorkspaceType.COMPANY.value,
                 )
                 logger.info("Created default platform HQ workspace for %s", admin_email)
 

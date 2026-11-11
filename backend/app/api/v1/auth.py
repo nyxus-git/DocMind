@@ -1,10 +1,11 @@
 from typing import Optional
-from fastapi import APIRouter, Cookie, Depends, Response, status
+from fastapi import APIRouter, Cookie, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.exceptions import DocMindException
 from app.db.session import get_db
 from app.schemas.auth import (
+    CompanyDomainLookupDTO,
     ForgotPasswordRequest,
     LoginRequest,
     RegisterRequest,
@@ -20,21 +21,45 @@ from app.services.auth import AuthService
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
+@router.get("/company-lookup", response_model=CompanyDomainLookupDTO)
+async def lookup_company_domain(
+    email: str = Query(..., min_length=3),
+    db: AsyncSession = Depends(get_db),
+):
+    """Detects whether an email address belongs to a registered corporate domain."""
+    auth_service = AuthService(db)
+    return await auth_service.lookup_company_by_email(email)
+
+
 @router.post("/register", response_model=UserSummaryDTO, status_code=status.HTTP_201_CREATED)
 async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     auth_service = AuthService(db)
-    user, workspace, _ = await auth_service.register(req.email, req.password)
+    user, workspace, _ = await auth_service.register(
+        req.email,
+        req.password,
+        account_type=req.account_type,
+        company_name=req.company_name,
+        company_slug=req.company_slug,
+        claim_domain=req.claim_domain,
+        department_note=req.department_note,
+    )
+    active_ws_dto = (
+        WorkspaceSummaryDTO(
+            id=workspace.id,
+            name=workspace.name,
+            slug=workspace.slug,
+            role="OWNER" if req.account_type != "employee" else (workspace.default_join_role or "EMPLOYEE"),
+            workspace_type=workspace.workspace_type,
+        )
+        if workspace
+        else None
+    )
     return UserSummaryDTO(
         id=user.id,
         email=user.email,
         status=user.status,
-        verified=False,
-        active_workspace=WorkspaceSummaryDTO(
-            id=workspace.id,
-            name=workspace.name,
-            slug=workspace.slug,
-            role="OWNER"
-        )
+        verified=bool(user.verified_at),
+        active_workspace=active_ws_dto,
     )
 
 

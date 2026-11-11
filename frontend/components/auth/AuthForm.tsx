@@ -2,9 +2,9 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ApiClient } from '../../lib/api';
+import { ApiClient, CompanyDomainLookupDTO } from '../../lib/api';
 import { establishSession, friendlyError, slugify } from '../../lib/auth-flow';
-import { loadSession, saveSession, savePendingWorkspace } from '../../lib/session';
+import { loadSession, portalHomeForSession, saveSession } from '../../lib/session';
 import { Button, inputClass, Spinner } from '../ui/Button';
 import { Icon } from '../ui/Icon';
 
@@ -43,12 +43,15 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
   const demoRequested = params.get('demo') === '1';
 
   const [mode, setMode] = useState<Mode>(initialMode);
-  const [accountType, setAccountType] = useState<'personal' | 'company'>('personal');
+  const [accountType, setAccountType] = useState<'personal' | 'company' | 'employee'>('personal');
   const [fullName, setFullName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [slug, setSlug] = useState('');
   const [slugTouched, setSlugTouched] = useState(false);
+  const [claimDomain, setClaimDomain] = useState(true);
+  const [departmentNote, setDepartmentNote] = useState('');
   const [email, setEmail] = useState('');
+  const [domainMatch, setDomainMatch] = useState<CompanyDomainLookupDTO | null>(null);
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
@@ -95,13 +98,38 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
     }
   };
 
-  // Already signed in? Go straight to the workspace or super-admin dashboard (unless a demo was requested).
+  // Already signed in? Go straight to the appropriate portal (unless a demo was requested).
   useEffect(() => {
     const existing = loadSession();
     if (!demoRequested && existing && ApiClient.getToken()) {
-      router.replace(existing.isSuperAdmin ? '/admin/' : '/app/');
+      router.replace(portalHomeForSession(existing));
     }
   }, [router, demoRequested]);
+
+  // Live company domain discovery for corporate email login / signup
+  useEffect(() => {
+    if (mode === 'forgot') return;
+    const trimmed = email.trim();
+    const atIdx = trimmed.indexOf('@');
+    if (atIdx < 1 || !trimmed.slice(atIdx + 1).includes('.')) {
+      const clearId = setTimeout(() => setDomainMatch(null), 0);
+      return () => clearTimeout(clearId);
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      ApiClient.lookupCompanyByEmail(trimmed)
+        .then(res => {
+          if (!cancelled) setDomainMatch(res);
+        })
+        .catch(() => {
+          if (!cancelled) setDomainMatch(null);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [email, mode]);
 
   const startDemo = async () => {
     setError(null);
@@ -158,14 +186,23 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
       if (accountType === 'company' && !companyName.trim()) return setError('Enter your company name.');
       setLoading(true);
       try {
-        await ApiClient.register(email, password);
-        if (accountType === 'company') {
-          savePendingWorkspace({ name: companyName.trim(), slug: slug || slugify(companyName) || 'company' });
-        }
+        await ApiClient.register(email, password, {
+          account_type: accountType,
+          ...(accountType === 'company'
+            ? {
+                company_name: companyName.trim(),
+                company_slug: slug || slugify(companyName) || 'company',
+                claim_domain: claimDomain,
+              }
+            : {}),
+          ...(accountType === 'employee' && departmentNote.trim()
+            ? { department_note: departmentNote.trim() }
+            : {}),
+        });
         try {
           await ApiClient.login(email, password);
           const session = await establishSession(email, fullName.trim());
-          router.push(session.isSuperAdmin ? '/admin/' : '/app/');
+          router.push(portalHomeForSession(session));
         } catch {
           // Sign-in is usually blocked until the email is verified.
           setLoading(false);
@@ -183,7 +220,7 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
     try {
       await ApiClient.login(email, password);
       const session = await establishSession(email);
-      router.push(session.isSuperAdmin ? '/admin/' : '/app/');
+      router.push(portalHomeForSession(session));
     } catch (err) {
       setLoading(false);
       setError(friendlyError(err, 'Could not sign in. Check your email and password.'));
@@ -315,12 +352,13 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
         {mode === 'signup' && (
           <>
             <fieldset>
-              <legend className="mb-1.5 text-sm font-medium">What will you use DocMind for?</legend>
-              <div className="grid grid-cols-2 gap-2">
+              <legend className="mb-1.5 text-sm font-medium">How will you use DocMind?</legend>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 {(
                   [
-                    { id: 'personal', label: 'Just me', icon: 'user', desc: 'A private workspace' },
-                    { id: 'company', label: 'My company', icon: 'building', desc: 'A team workspace' },
+                    { id: 'personal', label: 'Personal', icon: 'user', desc: 'Private docs' },
+                    { id: 'company', label: 'New company', icon: 'building', desc: 'Admin setup' },
+                    { id: 'employee', label: 'Employee', icon: 'userCheck', desc: 'Join company' },
                   ] as const
                 ).map(opt => (
                   <label
@@ -339,7 +377,7 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
                     />
                     <Icon name={opt.icon} className="size-[18px] text-muted" />
                     <span className="mt-1.5 block text-sm font-semibold">{opt.label}</span>
-                    <span className="block text-[13px] text-muted">{opt.desc}</span>
+                    <span className="block text-[12px] text-muted">{opt.desc}</span>
                   </label>
                 ))}
               </div>
@@ -373,7 +411,7 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
                     className={inputClass}
                   />
                 </Field>
-                <Field label="Workspace address" htmlFor="slug" hint="Lowercase letters, numbers and hyphens.">
+                <Field label="Company URL slug" htmlFor="slug" hint="Lowercase letters, numbers and hyphens.">
                   <div className="flex h-10 items-center rounded-lg border border-line-strong bg-surface px-3 text-sm focus-within:border-fg focus-within:ring-2 focus-within:ring-fg/15">
                     <span className="text-faint">docmind/</span>
                     <input
@@ -388,12 +426,39 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
                     />
                   </div>
                 </Field>
+                <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-line bg-surface p-3 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={claimDomain}
+                    onChange={e => setClaimDomain(e.target.checked)}
+                    className="mt-0.5 size-4 rounded border-line-strong"
+                  />
+                  <span>
+                    <span className="block font-medium text-fg">Allow employees with your company email domain</span>
+                    <span className="block text-[12px] text-muted">
+                      Colleagues signing up with your corporate email (e.g. @company.com) will request access to this company instead of getting a separate Personal Workspace.
+                    </span>
+                  </span>
+                </label>
               </>
+            )}
+
+            {accountType === 'employee' && (
+              <Field label="Department / Team (optional)" htmlFor="deptNote" hint="Helps your Company Admin approve access quickly.">
+                <input
+                  id="deptNote"
+                  type="text"
+                  placeholder="e.g. Engineering, HR, Finance"
+                  value={departmentNote}
+                  onChange={e => setDepartmentNote(e.target.value)}
+                  className={inputClass}
+                />
+              </Field>
             )}
           </>
         )}
 
-        <Field label={accountType === 'company' && mode === 'signup' ? 'Work email' : 'Email'} htmlFor="email">
+        <Field label={accountType !== 'personal' && mode === 'signup' ? 'Company work email' : 'Email'} htmlFor="email">
           <input
             id="email"
             type="email"
@@ -401,9 +466,22 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
             autoComplete="email"
             value={email}
             onChange={e => setEmail(e.target.value)}
-            placeholder={mode === 'signup' && accountType === 'company' ? 'you@company.com' : 'you@example.com'}
+            placeholder={mode === 'signup' && accountType !== 'personal' ? 'you@company.com' : 'you@example.com'}
             className={inputClass}
           />
+          {domainMatch?.matched && domainMatch.company_name && (
+            <div className="mt-2 flex items-center gap-2 rounded-lg border border-ok/30 bg-ok-soft px-3 py-2 text-xs text-fg">
+              <Icon name="building" className="size-4 shrink-0 text-ok" />
+              <span>
+                Company workspace detected: <strong>{domainMatch.company_name}</strong>
+                {domainMatch.join_policy === 'DOMAIN_AUTO_JOIN'
+                  ? ' — instant employee access'
+                  : domainMatch.join_policy === 'DOMAIN_APPROVAL'
+                    ? ' — admin approval enabled'
+                    : ' — invite required'}
+              </span>
+            </div>
+          )}
         </Field>
 
         {mode !== 'forgot' && (

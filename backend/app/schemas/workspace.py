@@ -43,6 +43,7 @@ class WorkspaceDetailDTO(BaseModel):
     name: str
     slug: str
     tier: str = "STARTER"
+    workspace_type: str = "PERSONAL"
     role: str
     created_at: datetime
     member_count: int = 1

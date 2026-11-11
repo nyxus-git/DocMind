@@ -1,10 +1,10 @@
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from app.models.entities import Conversation, Document, Message, MessageCitation
+from app.models.entities import Conversation, Document, Message, MessageCitation, MessageFeedback, User
 from app.models.enums import DocumentStatus
 
 
@@ -31,13 +31,16 @@ class ConversationRepository:
         await self.db.flush()
         return conv
 
-    async def list_conversations(self, workspace_id: uuid.UUID, limit: int = 50) -> List[Conversation]:
-        result = await self.db.execute(
-            select(Conversation)
-            .where(Conversation.workspace_id == workspace_id)
-            .order_by(Conversation.updated_at.desc())
-            .limit(limit)
-        )
+    async def list_conversations(
+        self,
+        workspace_id: uuid.UUID,
+        limit: int = 50,
+        user_id: Optional[uuid.UUID] = None,
+    ) -> List[Conversation]:
+        query = select(Conversation).where(Conversation.workspace_id == workspace_id)
+        if user_id is not None:
+            query = query.where(Conversation.created_by == user_id)
+        result = await self.db.execute(query.order_by(Conversation.updated_at.desc()).limit(limit))
         return list(result.scalars().all())
 
     async def get_by_id(self, workspace_id: uuid.UUID, conversation_id: uuid.UUID) -> Optional[Conversation]:
@@ -87,7 +90,8 @@ class ConversationRepository:
         output_tokens: int = 0,
         latency_ms: int = 0,
         request_id: Optional[str] = None,
-        status: str = "completed"
+        status: str = "completed",
+        insufficient_evidence: bool = False,
     ) -> Message:
         msg = Message(
             conversation_id=conversation_id,
@@ -98,6 +102,7 @@ class ConversationRepository:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             latency_ms=latency_ms,
+            insufficient_evidence=insufficient_evidence,
             request_id=request_id
         )
         self.db.add(msg)
@@ -124,3 +129,121 @@ class ConversationRepository:
             )
             self.db.add(cit)
         await self.db.flush()
+
+    async def upsert_feedback(
+        self,
+        workspace_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+        message_id: uuid.UUID,
+        user_id: uuid.UUID,
+        rating: int,
+        comment: Optional[str] = None,
+        question_text: Optional[str] = None,
+    ) -> MessageFeedback:
+        res = await self.db.execute(
+            select(MessageFeedback).where(
+                MessageFeedback.message_id == message_id,
+                MessageFeedback.user_id == user_id,
+            )
+        )
+        rec = res.scalar_one_or_none()
+        if rec:
+            rec.rating = rating
+            if comment is not None:
+                rec.comment = comment
+            if question_text is not None:
+                rec.question_text = question_text
+            rec.updated_at = datetime.now(timezone.utc)
+        else:
+            rec = MessageFeedback(
+                workspace_id=workspace_id,
+                conversation_id=conversation_id,
+                message_id=message_id,
+                user_id=user_id,
+                rating=rating,
+                comment=comment,
+                question_text=question_text,
+            )
+            self.db.add(rec)
+        await self.db.flush()
+        return rec
+
+    async def get_feedback_map(self, message_ids: List[uuid.UUID], user_id: uuid.UUID) -> Dict[uuid.UUID, int]:
+        if not message_ids:
+            return {}
+        res = await self.db.execute(
+            select(MessageFeedback.message_id, MessageFeedback.rating).where(
+                MessageFeedback.message_id.in_(message_ids),
+                MessageFeedback.user_id == user_id,
+            )
+        )
+        return {row[0]: int(row[1]) for row in res.all()}
+
+    async def list_knowledge_gaps(self, workspace_id: uuid.UUID, limit: int = 50) -> List[Dict[str, Any]]:
+        """Returns negative feedback reports and unanswered (insufficient_evidence) questions."""
+        gaps: List[Dict[str, Any]] = []
+        seen_msg_ids = set()
+
+        fb_res = await self.db.execute(
+            select(MessageFeedback, Message, User.email)
+            .join(Message, MessageFeedback.message_id == Message.id)
+            .join(User, MessageFeedback.user_id == User.id)
+            .where(MessageFeedback.workspace_id == workspace_id, MessageFeedback.rating == -1)
+            .order_by(MessageFeedback.created_at.desc())
+            .limit(limit)
+        )
+        for fb, msg, user_email in fb_res.all():
+            seen_msg_ids.add(msg.id)
+            gaps.append({
+                "id": fb.id,
+                "message_id": msg.id,
+                "conversation_id": fb.conversation_id,
+                "question": fb.question_text or "(Question archived)",
+                "answer_excerpt": (msg.content or "")[:240],
+                "reason": "NEGATIVE_FEEDBACK",
+                "comment": fb.comment,
+                "user_email": user_email,
+                "created_at": fb.created_at,
+            })
+
+        insuff_res = await self.db.execute(
+            select(Message, Conversation, User.email)
+            .join(Conversation, Message.conversation_id == Conversation.id)
+            .join(User, Conversation.created_by == User.id)
+            .where(
+                Conversation.workspace_id == workspace_id,
+                Message.role == "assistant",
+                Message.insufficient_evidence.is_(True),
+            )
+            .order_by(Message.created_at.desc())
+            .limit(limit)
+        )
+        for msg, conv, user_email in insuff_res.all():
+            if msg.id in seen_msg_ids:
+                continue
+            prev_q = (
+                await self.db.execute(
+                    select(Message.content)
+                    .where(
+                        Message.conversation_id == conv.id,
+                        Message.role == "user",
+                        Message.created_at <= msg.created_at,
+                    )
+                    .order_by(Message.created_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            gaps.append({
+                "id": msg.id,
+                "message_id": msg.id,
+                "conversation_id": conv.id,
+                "question": prev_q or conv.title,
+                "answer_excerpt": (msg.content or "")[:240],
+                "reason": "INSUFFICIENT_EVIDENCE",
+                "comment": None,
+                "user_email": user_email,
+                "created_at": msg.created_at,
+            })
+
+        gaps.sort(key=lambda g: g["created_at"], reverse=True)
+        return gaps[:limit]

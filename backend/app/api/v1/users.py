@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Header, Response, status
+from typing import Optional
+import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.dependencies import WorkspaceContext, get_current_user, get_current_workspace
 from app.core.exceptions import DocMindException
@@ -8,8 +10,10 @@ from app.models.entities import User
 from app.models.enums import JobType, UserStatus
 from app.repositories.job import JobRepository
 from app.repositories.user import UserRepository
+from app.repositories.workspace import WorkspaceRepository
 from app.schemas.auth import (
     ChangePasswordRequest,
+    PendingJoinRequestDTO,
     UpdateProfileRequest,
     UserProfileDTO,
     WorkspaceSummaryDTO,
@@ -21,21 +25,56 @@ router = APIRouter(tags=["Users"])
 
 @router.get("/me", response_model=UserProfileDTO)
 async def get_my_profile(
-    ctx: WorkspaceContext = Depends(get_current_workspace)
+    current_user: User = Depends(get_current_user),
+    x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-ID"),
+    db: AsyncSession = Depends(get_db),
 ):
+    ws_repo = WorkspaceRepository(db)
+    workspaces = await ws_repo.get_user_workspaces(current_user.id)
+    active_ws, active_role = (None, None)
+    if x_workspace_id:
+        try:
+            target_id = uuid.UUID(x_workspace_id)
+            for ws, role in workspaces:
+                if ws.id == target_id:
+                    active_ws, active_role = ws, role
+                    break
+        except ValueError:
+            pass
+    if not active_ws and workspaces:
+        active_ws, active_role = workspaces[0]
+
+    pending_dto = None
+    if not active_ws:
+        pending = await ws_repo.get_pending_join_requests_for_user(current_user.id)
+        if pending:
+            req_row, req_ws = pending[0]
+            pending_dto = PendingJoinRequestDTO(
+                workspace_id=req_ws.id,
+                company_name=req_ws.name,
+                status=req_row.status,
+                created_at=req_row.created_at,
+            )
+
     return UserProfileDTO(
-        id=ctx.user.id,
-        email=ctx.user.email,
-        status=ctx.user.status,
-        verified=(ctx.user.verified_at is not None),
-        is_superadmin=ctx.user.is_superadmin,
-        created_at=ctx.user.created_at,
-        active_workspace=WorkspaceSummaryDTO(
-            id=ctx.workspace.id,
-            name=ctx.workspace.name,
-            slug=ctx.workspace.slug,
-            role=ctx.role
-        )
+        id=current_user.id,
+        email=current_user.email,
+        status=current_user.status,
+        verified=(current_user.verified_at is not None),
+        is_superadmin=current_user.is_superadmin,
+        created_at=current_user.created_at,
+        active_workspace=(
+            WorkspaceSummaryDTO(
+                id=active_ws.id,
+                name=active_ws.name,
+                slug=active_ws.slug,
+                role=active_role or "OWNER",
+                workspace_type=active_ws.workspace_type,
+            )
+            if active_ws
+            else None
+        ),
+        pending_join_request=pending_dto,
     )
 
 

@@ -9,6 +9,7 @@ class UploadIntentRequest(BaseModel):
     declared_mime: str = Field(min_length=3, max_length=128)
     size_bytes: int = Field(gt=0, le=20 * 1024 * 1024)  # 20 MB cap
     checksum_sha256: str = Field(min_length=64, max_length=64)
+    space_id: Optional[uuid.UUID] = None
 
 
 class UploadIntentResponse(BaseModel):
@@ -34,6 +35,8 @@ class SafeErrorDTO(BaseModel):
 class DocumentDTO(BaseModel):
     id: uuid.UUID
     workspace_id: uuid.UUID
+    space_id: Optional[uuid.UUID] = None
+    space_name: Optional[str] = None
     filename: str
     mime_type: str
     size_bytes: int
@@ -51,6 +54,8 @@ class DocumentDTO(BaseModel):
 class DocumentUpdateDTO(BaseModel):
     filename: Optional[str] = Field(None, min_length=1, max_length=255)
     tags: Optional[List[str]] = None
+    space_id: Optional[uuid.UUID] = None
+    clear_space: bool = False
 
 
 class SignedDownloadResponse(BaseModel):

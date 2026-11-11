@@ -3,10 +3,16 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.storage.local import LocalStorage, get_storage
-from app.api.v1.dependencies import WorkspaceContext, get_current_workspace, require_write_access
+from app.api.v1.dependencies import (
+    WorkspaceContext,
+    get_current_workspace,
+    require_document_write_access,
+    require_write_access,
+)
 from app.core.exceptions import DocMindException
 from app.core.security import verify_storage_signature
 from app.db.session import get_db
+from app.repositories.workspace import WorkspaceRepository
 from app.schemas.common import MessageResponse
 from app.schemas.document import (
     DocumentDTO,
@@ -26,7 +32,7 @@ router = APIRouter(prefix="/documents", tags=["Documents"])
 @router.post("/upload-intents", response_model=UploadIntentResponse, status_code=status.HTTP_201_CREATED)
 async def create_upload_intent(
     req: UploadIntentRequest,
-    ctx: WorkspaceContext = Depends(require_write_access),
+    ctx: WorkspaceContext = Depends(require_document_write_access),
     db: AsyncSession = Depends(get_db)
 ):
     doc_service = DocumentService(db)
@@ -36,14 +42,15 @@ async def create_upload_intent(
         filename=req.filename,
         declared_mime=req.declared_mime,
         size_bytes=req.size_bytes,
-        checksum_sha256=req.checksum_sha256
+        checksum_sha256=req.checksum_sha256,
+        space_id=req.space_id,
     )
 
 
 @router.post("/{document_id}/complete", response_model=UploadCompleteResponse, status_code=status.HTTP_202_ACCEPTED)
 async def complete_upload(
     document_id: uuid.UUID,
-    ctx: WorkspaceContext = Depends(require_write_access),
+    ctx: WorkspaceContext = Depends(require_document_write_access),
     db: AsyncSession = Depends(get_db)
 ):
     doc_service = DocumentService(db)
@@ -59,16 +66,20 @@ async def complete_upload(
 async def list_documents(
     status: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
+    space_id: Optional[uuid.UUID] = Query(None),
     limit: int = Query(50, ge=1, le=100),
     ctx: WorkspaceContext = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db)
 ):
+    allowed_spaces = await WorkspaceRepository(db).get_accessible_space_ids(ctx.workspace.id, ctx.user.id, ctx.role)
     doc_service = DocumentService(db)
     return await doc_service.list_documents(
         workspace_id=ctx.workspace.id,
         status=status,
         search=q,
-        limit=limit
+        limit=limit,
+        allowed_space_ids=allowed_spaces,
+        space_id=space_id,
     )
 
 
@@ -78,15 +89,16 @@ async def get_document(
     ctx: WorkspaceContext = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db)
 ):
+    allowed_spaces = await WorkspaceRepository(db).get_accessible_space_ids(ctx.workspace.id, ctx.user.id, ctx.role)
     doc_service = DocumentService(db)
-    return await doc_service.get_document(ctx.workspace.id, document_id)
+    return await doc_service.get_document(ctx.workspace.id, document_id, allowed_space_ids=allowed_spaces)
 
 
 @router.patch("/{document_id}", response_model=DocumentDTO)
 async def update_document(
     document_id: uuid.UUID,
     req: DocumentUpdateDTO,
-    ctx: WorkspaceContext = Depends(require_write_access),
+    ctx: WorkspaceContext = Depends(require_document_write_access),
     db: AsyncSession = Depends(get_db)
 ):
     doc_service = DocumentService(db)
@@ -94,14 +106,16 @@ async def update_document(
         workspace_id=ctx.workspace.id,
         document_id=document_id,
         filename=req.filename,
-        tags=req.tags
+        tags=req.tags,
+        space_id=req.space_id,
+        clear_space=req.clear_space,
     )
 
 
 @router.post("/{document_id}/retry", response_model=UploadCompleteResponse)
 async def retry_document_processing(
     document_id: uuid.UUID,
-    ctx: WorkspaceContext = Depends(require_write_access),
+    ctx: WorkspaceContext = Depends(require_document_write_access),
     db: AsyncSession = Depends(get_db)
 ):
     doc_service = DocumentService(db)
@@ -119,8 +133,9 @@ async def get_document_download_url(
     ctx: WorkspaceContext = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db)
 ):
+    allowed_spaces = await WorkspaceRepository(db).get_accessible_space_ids(ctx.workspace.id, ctx.user.id, ctx.role)
     doc_service = DocumentService(db)
-    url = await doc_service.get_download_url(ctx.workspace.id, document_id)
+    url = await doc_service.get_download_url(ctx.workspace.id, document_id, allowed_space_ids=allowed_spaces)
     from datetime import datetime, timedelta, timezone
     expires_at = (datetime.now(timezone.utc) + timedelta(seconds=120)).isoformat()
     return SignedDownloadResponse(download_url=url, expires_at=expires_at)
@@ -129,7 +144,7 @@ async def get_document_download_url(
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
     document_id: uuid.UUID,
-    ctx: WorkspaceContext = Depends(require_write_access),
+    ctx: WorkspaceContext = Depends(require_document_write_access),
     db: AsyncSession = Depends(get_db)
 ):
     doc_service = DocumentService(db)
@@ -143,8 +158,9 @@ async def get_document_summary(
     ctx: WorkspaceContext = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db)
 ):
+    allowed_spaces = await WorkspaceRepository(db).get_accessible_space_ids(ctx.workspace.id, ctx.user.id, ctx.role)
     intel_service = IntelligenceService(db)
-    return await intel_service.get_or_generate_summary(ctx.workspace.id, document_id)
+    return await intel_service.get_or_generate_summary(ctx.workspace.id, document_id, allowed_space_ids=allowed_spaces)
 
 
 @router.post("/{document_id}/extract", response_model=ExtractionResponse)
@@ -154,12 +170,14 @@ async def extract_document_preset(
     ctx: WorkspaceContext = Depends(require_write_access),
     db: AsyncSession = Depends(get_db)
 ):
+    allowed_spaces = await WorkspaceRepository(db).get_accessible_space_ids(ctx.workspace.id, ctx.user.id, ctx.role)
     intel_service = IntelligenceService(db)
     return await intel_service.extract_preset(
         workspace_id=ctx.workspace.id,
         document_id=document_id,
         preset_id=req.preset_id,
-        user_id=ctx.user.id
+        user_id=ctx.user.id,
+        allowed_space_ids=allowed_spaces,
     )
 
 

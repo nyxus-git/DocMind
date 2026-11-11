@@ -13,7 +13,7 @@ from app.core.exceptions import CrossTenantAccessException, DocMindException
 from app.core.security import generate_secure_token, hash_token
 from app.db.session import get_db
 from app.models.entities import User
-from app.models.enums import WorkspaceRole, WorkspaceTier
+from app.models.enums import WorkspaceRole, WorkspaceTier, WorkspaceType
 from app.repositories.api_key import ApiKeyRepository
 from app.repositories.audit import AuditRepository
 from app.repositories.document import DocumentRepository
@@ -65,6 +65,7 @@ async def list_user_workspaces(
             name=ws.name,
             slug=ws.slug,
             tier=ws.tier,
+            workspace_type=ws.workspace_type,
             role=role,
             created_at=ws.created_at,
             member_count=member_counts.get(ws.id, 0),
@@ -99,7 +100,8 @@ async def create_company_workspace(
         name=req.name.strip(),
         slug=slug,
         created_by=current_user.id,
-        tier=tier
+        tier=tier,
+        workspace_type=WorkspaceType.COMPANY.value,
     )
 
     await audit_repo.record_event(
@@ -116,6 +118,7 @@ async def create_company_workspace(
         name=workspace.name,
         slug=workspace.slug,
         tier=workspace.tier,
+        workspace_type=workspace.workspace_type,
         role=WorkspaceRole.OWNER.value,
         created_at=workspace.created_at,
         member_count=1
@@ -144,6 +147,7 @@ async def get_workspace_detail(
         name=ws.name,
         slug=ws.slug,
         tier=ws.tier,
+        workspace_type=ws.workspace_type,
         role=membership.role,
         created_at=ws.created_at,
         member_count=count
@@ -198,6 +202,7 @@ async def update_workspace_tier(
         name=updated.name,
         slug=updated.slug,
         tier=updated.tier,
+        workspace_type=updated.workspace_type,
         role=membership.role,
         created_at=updated.created_at,
         member_count=count
@@ -257,12 +262,12 @@ async def invite_workspace_member(
 
     # Validate target role
     target_role = req.role.upper()
-    if target_role not in [WorkspaceRole.ADMIN.value, WorkspaceRole.MEMBER.value, WorkspaceRole.VIEWER.value]:
+    if target_role not in [WorkspaceRole.ADMIN.value, WorkspaceRole.MEMBER.value, WorkspaceRole.EMPLOYEE.value, WorkspaceRole.VIEWER.value]:
         raise DocMindException(
             status_code=400,
             code="INVALID_ROLE",
             title="Bad Request",
-            detail="Role must be one of: ADMIN, MEMBER, VIEWER."
+            detail="Role must be one of: ADMIN, MEMBER, EMPLOYEE, VIEWER."
         )
 
     ws = await ws_repo.get_by_id(workspace_id)
@@ -421,7 +426,7 @@ async def update_member_role(
         raise DocMindException(status_code=403, code="CANNOT_MODIFY_OWNER", title="Forbidden", detail="Only workspace Owners can modify Owner roles.")
 
     new_role = req.role.upper()
-    if new_role not in [WorkspaceRole.OWNER.value, WorkspaceRole.ADMIN.value, WorkspaceRole.MEMBER.value, WorkspaceRole.VIEWER.value]:
+    if new_role not in [WorkspaceRole.OWNER.value, WorkspaceRole.ADMIN.value, WorkspaceRole.MEMBER.value, WorkspaceRole.EMPLOYEE.value, WorkspaceRole.VIEWER.value]:
         raise DocMindException(status_code=400, code="INVALID_ROLE", title="Bad Request", detail="Invalid role specified.")
 
     updated = await ws_repo.update_member_role(workspace_id, target_user_id, new_role)
@@ -596,6 +601,7 @@ async def update_workspace_name(
         name=updated.name,
         slug=updated.slug,
         tier=updated.tier,
+        workspace_type=updated.workspace_type,
         role=membership.role,
         created_at=updated.created_at,
         member_count=count

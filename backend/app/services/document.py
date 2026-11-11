@@ -1,5 +1,5 @@
 import uuid
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Set
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.storage.base import ObjectStorage
 from app.adapters.storage.local import get_storage
@@ -8,7 +8,7 @@ from app.ingestion.validator import validate_file_metadata
 from app.models.entities import Document
 from app.models.enums import DocumentErrorCode, DocumentStatus, JobType
 from app.repositories.audit import AuditRepository
-from app.repositories.document import DocumentRepository
+from app.repositories.document import DocumentRepository, _UNSET_SPACE
 from app.repositories.job import JobRepository
 from app.repositories.usage import UsageRepository
 from app.repositories.workspace import WorkspaceRepository
@@ -34,19 +34,26 @@ class DocumentService:
         filename: str,
         declared_mime: str,
         size_bytes: int,
-        checksum_sha256: str
+        checksum_sha256: str,
+        space_id: Optional[uuid.UUID] = None,
     ) -> UploadIntentResponse:
         # 1. Resolve workspace tier limits & validate file metadata
         limits = await self.quota_service.get_tier_limits(workspace_id)
         validate_file_metadata(filename, declared_mime, size_bytes, max_file_mb=limits.max_file_mb)
 
-        # 2. Check dynamic workspace tier quotas & user concurrent uploads
+        # 2. Verify optional KnowledgeSpace belongs to same workspace
+        if space_id is not None:
+            space = await self.workspace_repo.get_space(workspace_id, space_id)
+            if not space:
+                raise EntityNotFoundException("KnowledgeSpace", space_id)
+
+        # 3. Check dynamic workspace tier quotas & user concurrent uploads
         await self.quota_service.check_upload_quota(workspace_id, size_bytes, user_id=user_id)
 
-        # 3. Generate opaque random UUID object key (never use user-supplied filename)
+        # 4. Generate opaque random UUID object key (never use user-supplied filename)
         object_key = f"raw/{workspace_id}/{uuid.uuid4()}.bin"
 
-        # 4. Create document row in status UPLOADING
+        # 5. Create document row in status UPLOADING
         doc = await self.doc_repo.create_upload_intent(
             workspace_id=workspace_id,
             uploaded_by=user_id,
@@ -54,7 +61,8 @@ class DocumentService:
             mime_type=declared_mime,
             size_bytes=size_bytes,
             checksum_sha256=checksum_sha256,
-            object_key=object_key
+            object_key=object_key,
+            space_id=space_id,
         )
 
         # 5. Issue short-lived presigned PUT URL
@@ -127,33 +135,71 @@ class DocumentService:
 
         return job.id
 
+    async def _space_name_map(self, workspace_id: uuid.UUID) -> Dict[uuid.UUID, str]:
+        spaces = await self.workspace_repo.list_spaces(workspace_id)
+        return {sp.id: sp.name for sp, _ in spaces}
+
     async def list_documents(
         self,
         workspace_id: uuid.UUID,
         status: Optional[str] = None,
         search: Optional[str] = None,
-        limit: int = 50
+        limit: int = 50,
+        allowed_space_ids: Optional[Set[uuid.UUID]] = None,
+        space_id: Optional[uuid.UUID] = None,
     ) -> List[DocumentDTO]:
-        docs = await self.doc_repo.list_documents(workspace_id, status=status, search=search, limit=limit)
-        return [self._to_dto(d) for d in docs]
+        docs = await self.doc_repo.list_documents(
+            workspace_id,
+            status=status,
+            search=search,
+            limit=limit,
+            allowed_space_ids=allowed_space_ids,
+            space_id=space_id,
+        )
+        space_names = await self._space_name_map(workspace_id) if any(d.space_id for d in docs) else {}
+        return [self._to_dto(d, space_names=space_names) for d in docs]
 
-    async def get_document(self, workspace_id: uuid.UUID, document_id: uuid.UUID) -> DocumentDTO:
-        doc = await self.doc_repo.get_by_id(workspace_id, document_id)
+    async def get_document(
+        self,
+        workspace_id: uuid.UUID,
+        document_id: uuid.UUID,
+        allowed_space_ids: Optional[Set[uuid.UUID]] = None,
+    ) -> DocumentDTO:
+        doc = await self.doc_repo.get_by_id(workspace_id, document_id, allowed_space_ids=allowed_space_ids)
         if not doc:
             raise EntityNotFoundException("Document", document_id)
-        return self._to_dto(doc)
+        space_names = await self._space_name_map(workspace_id) if doc.space_id else {}
+        return self._to_dto(doc, space_names=space_names)
 
     async def update_document(
         self,
         workspace_id: uuid.UUID,
         document_id: uuid.UUID,
         filename: Optional[str] = None,
-        tags: Optional[List[str]] = None
+        tags: Optional[List[str]] = None,
+        space_id: Optional[uuid.UUID] = None,
+        clear_space: bool = False,
     ) -> DocumentDTO:
-        doc = await self.doc_repo.update_metadata(workspace_id, document_id, filename=filename, tags=tags)
+        target_space: Any = _UNSET_SPACE
+        if clear_space:
+            target_space = None
+        elif space_id is not None:
+            space = await self.workspace_repo.get_space(workspace_id, space_id)
+            if not space:
+                raise EntityNotFoundException("KnowledgeSpace", space_id)
+            target_space = space_id
+
+        doc = await self.doc_repo.update_metadata(
+            workspace_id,
+            document_id,
+            filename=filename,
+            tags=tags,
+            space_id=target_space,
+        )
         if not doc:
             raise EntityNotFoundException("Document", document_id)
-        return self._to_dto(doc)
+        space_names = await self._space_name_map(workspace_id) if doc.space_id else {}
+        return self._to_dto(doc, space_names=space_names)
 
     async def delete_document(self, workspace_id: uuid.UUID, document_id: uuid.UUID) -> None:
         doc = await self.doc_repo.mark_deleting(workspace_id, document_id)
@@ -176,8 +222,13 @@ class DocumentService:
             metadata={"filename": doc.filename}
         )
 
-    async def get_download_url(self, workspace_id: uuid.UUID, document_id: uuid.UUID) -> str:
-        doc = await self.doc_repo.get_by_id(workspace_id, document_id)
+    async def get_download_url(
+        self,
+        workspace_id: uuid.UUID,
+        document_id: uuid.UUID,
+        allowed_space_ids: Optional[Set[uuid.UUID]] = None,
+    ) -> str:
+        doc = await self.doc_repo.get_by_id(workspace_id, document_id, allowed_space_ids=allowed_space_ids)
         if not doc:
             raise EntityNotFoundException("Document", document_id)
 
@@ -206,7 +257,11 @@ class DocumentService:
         )
         return job.id
 
-    def _to_dto(self, doc: Document) -> DocumentDTO:
+    def _to_dto(
+        self,
+        doc: Document,
+        space_names: Optional[Dict[uuid.UUID, str]] = None,
+    ) -> DocumentDTO:
         safe_error = None
         if doc.error_code:
             safe_error = SafeErrorDTO(
@@ -218,6 +273,8 @@ class DocumentService:
         return DocumentDTO(
             id=doc.id,
             workspace_id=doc.workspace_id,
+            space_id=doc.space_id,
+            space_name=(space_names or {}).get(doc.space_id) if doc.space_id else None,
             filename=doc.filename,
             mime_type=doc.mime_type,
             size_bytes=doc.size_bytes,
