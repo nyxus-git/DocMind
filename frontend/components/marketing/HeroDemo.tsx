@@ -66,7 +66,15 @@ export function HeroDemo() {
 
   return (
     <div className="w-full">
+      <div className="relative">
+      <div className="absolute -inset-4 -z-10 rounded-[2rem] bg-gradient-to-tr from-brand/20 via-transparent to-[#ec4899]/10 blur-2xl" aria-hidden="true" />
       <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-pop">
+        <div className="flex items-center gap-2 border-b border-line bg-surface-2/60 px-4 py-2.5" aria-hidden="true">
+          <span className="size-2.5 rounded-full bg-line-strong" />
+          <span className="size-2.5 rounded-full bg-line-strong" />
+          <span className="size-2.5 rounded-full bg-line-strong" />
+          <span className="ml-3 rounded-md bg-surface px-2.5 py-0.5 text-[11px] text-faint ring-1 ring-inset ring-line">docmind.app / ask</span>
+        </div>
         {/* Question */}
         <div className="flex items-start gap-3 border-b border-line px-5 py-4">
           <span className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-surface-2 text-[11px] font-semibold text-muted">
@@ -107,6 +115,7 @@ export function HeroDemo() {
             <p className="tabular mt-5 text-center text-[11px] text-paper-fg/45">{src.page}</p>
           </div>
         </div>
+      </div>
       </div>
       <p className="mt-3 text-xs text-faint">Sample contract. Select a number to see the page it cites.</p>
     </div>

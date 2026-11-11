@@ -70,7 +70,7 @@ export function Modal({
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
       <div
-        className="absolute inset-0 bg-fg/40 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-[#0a0b11]/55 backdrop-blur-sm"
         onClick={lockClose ? undefined : onClose}
         aria-hidden="true"
       />
@@ -122,7 +122,7 @@ export function Drawer({
 
   return (
     <div className="fixed inset-0 z-50">
-      <div className="absolute inset-0 bg-fg/30" onClick={onClose} aria-hidden="true" />
+      <div className="absolute inset-0 bg-[#0a0b11]/50 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
       <aside
         ref={ref}
         tabIndex={-1}

@@ -46,11 +46,12 @@ export function Sidebar() {
   const counts: Partial<Record<TabId, number>> = { library: documents.length, chat: conversations.length };
 
   return (
-    <aside className="hidden w-60 shrink-0 flex-col justify-between border-r border-line bg-surface px-3 py-4 lg:flex">
+    <aside className="hidden w-64 shrink-0 flex-col justify-between border-r border-line bg-surface px-3 py-4 lg:flex">
       <div>
-        <Link href="/" className="mb-6 block px-2" aria-label="DocMind website">
+        <Link href="/" className="mb-7 block px-2.5" aria-label="DocMind website">
           <Logo />
         </Link>
+        <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-faint">Workspace</p>
         <nav aria-label="Workspace" className="space-y-0.5">
           {NAV.map(item => {
             const active = tab === item.id;
@@ -61,14 +62,15 @@ export function Sidebar() {
                 type="button"
                 onClick={() => setTab(item.id)}
                 aria-current={active ? 'page' : undefined}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
-                  active ? 'bg-brand text-brand-fg' : 'text-muted hover:bg-surface-2 hover:text-fg'
+                className={`group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
+                  active ? 'bg-brand-soft text-brand-ink' : 'text-muted hover:bg-surface-2 hover:text-fg'
                 }`}
               >
+                {active && <span className="absolute -left-3 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-brand" aria-hidden="true" />}
                 <Icon name={item.icon} className="size-[18px]" />
                 <span className="flex-1">{item.label}</span>
                 {count !== undefined && count > 0 && (
-                  <span className={`tabular text-xs ${active ? 'opacity-80' : 'text-faint'}`}>{count}</span>
+                  <span className={`tabular rounded-full px-1.5 py-0.5 text-[11px] font-semibold leading-none ${active ? 'bg-brand/15 text-brand-ink' : 'bg-surface-2 text-faint'}`}>{count}</span>
                 )}
               </button>
             );
@@ -77,11 +79,11 @@ export function Sidebar() {
       </div>
 
       {usage && (
-        <div className="space-y-4 rounded-xl bg-bg p-3.5">
+        <div className="space-y-4 rounded-xl border border-line bg-bg p-3.5">
           <div className="flex items-center justify-between">
             <span className="text-[13px] font-semibold">{usage.tier_name || usage.tier || 'Plan'}</span>
             {usage.tier === 'STARTER' && (
-              <button type="button" onClick={() => setTab('settings')} className="text-[13px] font-medium text-fg underline underline-offset-2">
+              <button type="button" onClick={() => setTab('settings')} className="rounded-md bg-brand px-2 py-0.5 text-xs font-semibold text-brand-fg hover:bg-brand-hover">
                 Upgrade
               </button>
             )}
@@ -122,9 +124,9 @@ export function MobileNav() {
             type="button"
             onClick={() => setTab(item.id)}
             aria-current={active ? 'page' : undefined}
-            className={`flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium ${active ? 'text-fg' : 'text-faint'}`}
+            className={`flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium ${active ? 'text-brand-ink' : 'text-faint'}`}
           >
-            <span className={`inline-flex h-6 w-11 items-center justify-center rounded-full transition-colors ${active ? 'bg-brand text-brand-fg' : ''}`}>
+            <span className={`inline-flex h-6 w-11 items-center justify-center rounded-full transition-colors ${active ? 'bg-brand-soft text-brand-ink' : ''}`}>
               <Icon name={item.icon} className="size-[18px]" />
             </span>
             {item.label}
@@ -225,7 +227,7 @@ export function TopBar({
   const initial = (session.fullName || session.email).charAt(0).toUpperCase();
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-line bg-bg/90 px-3 backdrop-blur sm:px-5">
+    <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-line bg-surface/80 px-3 backdrop-blur-xl sm:px-5">
       <div className="flex min-w-0 items-center gap-1">
         <Link href="/" className="mr-1 lg:hidden" aria-label="DocMind website">
           <LogoMark className="size-7" />
@@ -238,11 +240,11 @@ export function TopBar({
           <button
             type="button"
             onClick={onOpenSearch}
-            className="hidden sm:inline-flex h-8 items-center gap-2 rounded-lg border border-line bg-surface px-2.5 text-xs text-muted hover:bg-surface-2 hover:text-fg transition-colors"
+            className="hidden sm:inline-flex h-9 min-w-56 items-center gap-2 rounded-lg border border-line bg-bg px-3 text-xs text-muted hover:bg-surface-2 hover:text-fg transition-colors"
             title="Search passages (Ctrl+K / Cmd+K)"
           >
             <Icon name="search" className="size-3.5" />
-            <span>Search</span>
+            <span className="flex-1 text-left">Search documents&hellip;</span>
             <kbd className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-mono text-faint">⌘K</kbd>
           </button>
         )}
@@ -271,7 +273,7 @@ export function TopBar({
             aria-haspopup="menu"
             aria-expanded={menu}
             aria-label="Account menu"
-            className="inline-flex size-9 items-center justify-center rounded-full bg-brand text-sm font-semibold text-brand-fg"
+            className="inline-flex size-9 items-center justify-center rounded-full bg-gradient-to-br from-[#6366f1] to-[#8b5cf6] text-sm font-semibold text-white shadow-xs ring-2 ring-surface transition-shadow hover:ring-brand/30"
           >
             {initial}
           </button>
@@ -314,9 +316,9 @@ export function TopBar({
                   role="menuitem"
                   href="/admin/"
                   onClick={() => setMenu(false)}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm hover:bg-surface-2 text-amber-500 hover:text-amber-400 font-medium"
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm hover:bg-surface-2 text-warn font-medium"
                 >
-                  <Icon name="shield" className="size-4 text-amber-500" /> Admin Console
+                  <Icon name="shield" className="size-4 text-warn" /> Admin Console
                 </Link>
               )}
               <Link

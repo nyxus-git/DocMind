@@ -13,7 +13,7 @@ function StatusIcon({ kind }: { kind: 'ok' | 'error' | 'mail' }) {
   const styles = {
     ok: 'bg-ok-soft text-ok',
     error: 'bg-danger-soft text-danger',
-    mail: 'bg-brand-soft text-brand',
+    mail: 'bg-brand-soft text-brand-ink',
   }[kind];
   const icon = kind === 'ok' ? 'check' : kind === 'error' ? 'x' : 'users';
   return (

@@ -36,7 +36,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           <div
             key={t.id}
             role={t.kind === 'error' ? 'alert' : 'status'}
-            className="anim-rise pointer-events-auto flex max-w-md items-start gap-2.5 rounded-xl border border-line bg-surface px-4 py-3 text-sm text-fg shadow-pop"
+            className="anim-rise pointer-events-auto flex max-w-md items-start gap-2.5 rounded-xl border border-line bg-surface px-4 py-3 text-sm font-medium text-fg shadow-pop"
           >
             <Icon
               name={t.kind === 'error' ? 'alert' : t.kind === 'success' ? 'check' : 'clock'}

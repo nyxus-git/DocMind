@@ -11,26 +11,45 @@ import { FAQ, LIMIT_ROWS, PLANS, SECURITY_POINTS, SUPPORT_EMAIL } from '../../li
 /* ------------------------------------------------------------------ */
 export function Hero() {
   return (
-    <section className="mx-auto grid max-w-6xl items-center gap-12 px-5 pb-20 pt-10 sm:px-8 lg:grid-cols-[5fr_6fr] lg:gap-14 lg:pb-28 lg:pt-16">
-      <div>
-        <h1 className="text-[clamp(2.5rem,5.4vw,4.25rem)] font-semibold leading-[1.02] tracking-[-0.035em] text-fg">
-          Answers that show their work.
-        </h1>
-        <p className="mt-6 max-w-[34rem] text-lg leading-8 text-muted">
-          Upload contracts, filings and reports, then ask questions in plain language. Every answer links to the exact
-          page and passage it came from. If your documents don&rsquo;t say, DocMind says so instead of guessing.
-        </p>
-        <div className="mt-8 flex flex-wrap items-center gap-3">
-          <LinkButton href="/signup" size="lg">
-            Start free
-          </LinkButton>
-          <LinkButton href="/login?demo=1" variant="secondary" size="lg">
-            Try the demo workspace
-          </LinkButton>
+    <section className="hero-glow relative overflow-hidden">
+      <div className="bg-dots pointer-events-none absolute inset-x-0 top-0 h-[34rem] opacity-60" aria-hidden="true" />
+      <div className="relative mx-auto grid max-w-6xl items-center gap-14 px-5 pb-20 pt-12 sm:px-8 lg:grid-cols-[5fr_6fr] lg:gap-12 lg:pb-28 lg:pt-20">
+        <div>
+          <a
+            href="#how-it-works"
+            className="group inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 py-1 pl-1 pr-3 text-[13px] font-medium text-muted shadow-xs backdrop-blur transition-colors hover:text-fg"
+          >
+            <span className="rounded-full bg-brand px-2 py-0.5 text-[11px] font-semibold text-brand-fg">New</span>
+            Cited answers across contracts, filings and reports
+            <Icon name="arrowRight" className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+          </a>
+          <h1 className="mt-6 text-[clamp(2.5rem,5vw,4rem)] font-semibold leading-[1.02] tracking-[-0.04em] text-fg">
+            Answers that <span className="text-gradient">show their work.</span>
+          </h1>
+          <p className="mt-6 max-w-[34rem] text-lg leading-8 text-muted">
+            Upload contracts, filings and reports, then ask questions in plain language. Every answer links to the exact
+            page and passage it came from. If your documents don&rsquo;t say, DocMind says so instead of guessing.
+          </p>
+          <div className="mt-8 flex flex-wrap items-center gap-3">
+            <LinkButton href="/signup" size="lg">
+              Start free
+              <Icon name="arrowRight" className="size-4" />
+            </LinkButton>
+            <LinkButton href="/login?demo=1" variant="secondary" size="lg">
+              Try the demo workspace
+            </LinkButton>
+          </div>
+          <ul className="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm text-muted">
+            {['20 documents free', '100 questions a month', 'No card needed'].map(t => (
+              <li key={t} className="flex items-center gap-1.5">
+                <Icon name="check" className="size-4 text-ok" strokeWidth={2.4} />
+                {t}
+              </li>
+            ))}
+          </ul>
         </div>
-        <p className="mt-4 text-sm text-faint">Free plan includes 20 documents and 100 questions a month. No card needed.</p>
+        <HeroDemo />
       </div>
-      <HeroDemo />
     </section>
   );
 }
@@ -47,13 +66,13 @@ export function Audience() {
     { icon: 'book', label: 'Regulatory research' },
   ];
   return (
-    <section className="border-y border-line bg-surface">
-      <div className="mx-auto flex max-w-6xl flex-col gap-4 px-5 py-6 sm:px-8 md:flex-row md:items-center md:gap-10">
+    <section className="border-y border-line bg-surface/70">
+      <div className="mx-auto flex max-w-6xl flex-col gap-4 px-5 py-7 sm:px-8 md:flex-row md:items-center md:gap-10">
         <p className="shrink-0 text-sm text-muted md:max-w-[13rem]">For work where a wrong answer is expensive</p>
         <ul className="flex flex-wrap gap-x-8 gap-y-3">
           {items.map(i => (
             <li key={i.label} className="flex items-center gap-2 text-sm font-medium text-fg">
-              <Icon name={i.icon} className="size-4 text-faint" />
+              <Icon name={i.icon} className="size-4 text-brand-ink" />
               {i.label}
             </li>
           ))}
@@ -97,7 +116,7 @@ const CONTRAST: { topic: string; chat: string; docmind: string }[] = [
 export function Contrast() {
   return (
     <section className="mx-auto max-w-6xl px-5 py-20 sm:px-8 lg:py-28">
-      <h2 className="max-w-2xl text-3xl font-semibold leading-[1.1] tracking-[-0.025em] text-fg sm:text-4xl">
+      <h2 className="max-w-2xl text-3xl font-semibold leading-[1.1] tracking-[-0.03em] text-fg sm:text-[2.6rem]">
         A chat tool gives you an answer. DocMind also gives you the page.
       </h2>
       <p className="mt-4 max-w-xl text-lg leading-8 text-muted">
@@ -170,17 +189,17 @@ export function HowItWorks() {
   return (
     <section id="how-it-works" className="border-y border-line bg-surface">
       <div className="mx-auto max-w-6xl px-5 py-20 sm:px-8 lg:py-28">
-        <h2 className="max-w-2xl text-3xl font-semibold leading-[1.1] tracking-[-0.025em] sm:text-4xl">
+        <h2 className="max-w-2xl text-3xl font-semibold leading-[1.1] tracking-[-0.03em] sm:text-[2.6rem]">
           From file to checked answer in four steps
         </h2>
-        <ol className="mt-12 grid gap-10 sm:grid-cols-2 lg:grid-cols-4 lg:gap-8">
+        <ol className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {STEPS.map((s, i) => (
-            <li key={s.title} className="relative">
+            <li key={s.title} className="card-lift relative rounded-2xl border border-line bg-bg p-6">
               <div className="flex items-center gap-3">
-                <span className="tabular inline-flex size-8 items-center justify-center rounded-full bg-brand text-sm font-semibold text-brand-fg">
+                <span className="tabular inline-flex size-9 items-center justify-center rounded-xl bg-brand text-sm font-semibold text-brand-fg shadow-md shadow-brand/30">
                   {i + 1}
                 </span>
-                {i < STEPS.length - 1 && <span className="hidden h-px flex-1 bg-line-strong lg:block" aria-hidden="true" />}
+                
               </div>
               <h3 className="mt-4 text-lg font-semibold">{s.title}</h3>
               <p className="mt-2 text-[15px] leading-7 text-muted">{s.body}</p>
@@ -377,7 +396,7 @@ function Showcase({
 export function Features() {
   return (
     <section id="features" className="mx-auto max-w-6xl px-5 py-20 sm:px-8 lg:py-28">
-      <h2 className="max-w-2xl text-3xl font-semibold leading-[1.1] tracking-[-0.025em] sm:text-4xl">
+      <h2 className="max-w-2xl text-3xl font-semibold leading-[1.1] tracking-[-0.03em] sm:text-[2.6rem]">
         Built for real documents and real teams
       </h2>
       <div className="mt-14 space-y-20 lg:space-y-28">
@@ -413,7 +432,7 @@ export function Security() {
     <section id="security" className="border-y border-line bg-surface">
       <div className="mx-auto grid max-w-6xl gap-12 px-5 py-20 sm:px-8 lg:grid-cols-[4fr_7fr] lg:gap-16 lg:py-28">
         <div>
-          <h2 className="text-3xl font-semibold leading-[1.1] tracking-[-0.025em] sm:text-4xl">
+          <h2 className="text-3xl font-semibold leading-[1.1] tracking-[-0.03em] sm:text-[2.6rem]">
             Your documents stay yours
           </h2>
           <p className="mt-4 text-[17px] leading-8 text-muted">
@@ -427,7 +446,7 @@ export function Security() {
           {SECURITY_POINTS.map(p => (
             <div key={p.title}>
               <dt className="flex items-center gap-2.5 text-base font-semibold">
-                <span className="inline-flex size-8 items-center justify-center rounded-lg bg-brand-soft text-brand">
+                <span className="inline-flex size-9 items-center justify-center rounded-xl bg-brand-soft text-brand-ink ring-1 ring-inset ring-brand/15">
                   <Icon name={p.icon} className="size-[17px]" />
                 </span>
                 {p.title}
@@ -447,7 +466,7 @@ export function Security() {
 export function Pricing() {
   return (
     <section id="pricing" className="mx-auto max-w-6xl px-5 py-20 sm:px-8 lg:py-28">
-      <h2 className="max-w-2xl text-3xl font-semibold leading-[1.1] tracking-[-0.025em] sm:text-4xl">
+      <h2 className="max-w-2xl text-3xl font-semibold leading-[1.1] tracking-[-0.03em] sm:text-[2.6rem]">
         Start free. Upgrade when your team needs more room.
       </h2>
       <p className="mt-4 max-w-xl text-lg leading-8 text-muted">
@@ -458,14 +477,14 @@ export function Pricing() {
         {PLANS.map(plan => (
           <div
             key={plan.id}
-            className={`flex flex-col rounded-2xl border bg-surface p-7 ${
-              plan.recommended ? 'border-brand shadow-page ring-1 ring-brand' : 'border-line'
+            className={`flex flex-col rounded-2xl border bg-surface p-8 ${
+              plan.recommended ? 'border-brand shadow-pop ring-1 ring-brand lg:-translate-y-2' : 'card-lift border-line shadow-xs'
             }`}
           >
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold">{plan.name}</h3>
               {plan.recommended && (
-                <span className="rounded-full bg-brand px-2.5 py-0.5 text-xs font-medium text-brand-fg">Most teams pick this</span>
+                <span className="rounded-full bg-brand-soft px-2.5 py-0.5 text-xs font-semibold text-brand-ink">Most popular</span>
               )}
             </div>
             <p className="mt-1 min-h-[3rem] text-[15px] leading-6 text-muted">{plan.blurb}</p>
@@ -530,7 +549,7 @@ export function Faq() {
   return (
     <section id="faq" className="border-t border-line bg-surface">
       <div className="mx-auto grid max-w-6xl gap-10 px-5 py-20 sm:px-8 lg:grid-cols-[4fr_7fr] lg:gap-16 lg:py-28">
-        <h2 className="text-3xl font-semibold leading-[1.1] tracking-[-0.025em] sm:text-4xl">Questions people ask first</h2>
+        <h2 className="text-3xl font-semibold leading-[1.1] tracking-[-0.03em] sm:text-[2.6rem]">Questions people ask first</h2>
         <div className="divide-y divide-line border-y border-line">
           {FAQ.map(item => (
             <details key={item.q} className="group py-1">
@@ -553,26 +572,29 @@ export function Faq() {
 export function CtaBand() {
   return (
     <section className="mx-auto max-w-6xl px-5 py-20 sm:px-8 lg:py-28">
-      <div className="rounded-3xl bg-brand px-7 py-14 text-brand-fg sm:px-14 sm:py-16">
-        <h2 className="max-w-2xl text-3xl font-semibold leading-[1.1] tracking-[-0.025em] sm:text-4xl">
-          Upload one document and ask it something.
-        </h2>
-        <p className="mt-4 max-w-xl text-lg leading-8 opacity-80">
-          You will see the answer, the page and the passage in under a minute.
-        </p>
-        <div className="mt-8 flex flex-wrap gap-3">
-          <Link
-            href="/signup"
-            className="inline-flex h-12 items-center justify-center rounded-lg bg-mark px-6 text-base font-semibold text-[#1a1400] transition-opacity hover:opacity-90"
-          >
-            Start free
-          </Link>
-          <Link
-            href="/login?demo=1"
-            className="inline-flex h-12 items-center justify-center rounded-lg border border-current/40 px-6 text-base font-medium transition-colors hover:bg-white/10"
-          >
-            Try the demo workspace
-          </Link>
+      <div className="brand-gradient relative overflow-hidden rounded-3xl px-7 py-14 text-white shadow-pop sm:px-14 sm:py-16">
+        <div className="bg-dots pointer-events-none absolute inset-0 opacity-30 [--fg:#fff]" aria-hidden="true" />
+        <div className="relative">
+          <h2 className="max-w-2xl text-3xl font-semibold leading-[1.1] tracking-[-0.03em] sm:text-[2.6rem]">
+            Upload one document and ask it something.
+          </h2>
+          <p className="mt-4 max-w-xl text-lg leading-8 opacity-80">
+            You will see the answer, the page and the passage in under a minute.
+          </p>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <Link
+              href="/signup"
+              className="inline-flex h-12 items-center justify-center rounded-lg bg-mark px-6 text-base font-semibold text-[#1a1400] transition-opacity hover:opacity-90"
+            >
+              Start free
+            </Link>
+            <Link
+              href="/login?demo=1"
+              className="inline-flex h-12 items-center justify-center rounded-lg border border-current/40 px-6 text-base font-medium transition-colors hover:bg-white/10"
+            >
+              Try the demo workspace
+            </Link>
+          </div>
         </div>
       </div>
     </section>

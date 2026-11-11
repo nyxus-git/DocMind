@@ -5,71 +5,81 @@
 
 /*
  * DocMind design tokens.
- * Idea: a cool grey desk, white paper pages, blue-black ink, and a marker
- * highlight that is reserved for cited evidence.
+ * Neutral cool-grey canvas, crisp white surfaces, an indigo brand accent,
+ * and a marker-yellow highlight reserved for cited evidence (the signature).
  */
 :root {
-  --bg: #f2f4f8;
+  --bg: #f7f8fa;
   --surface: #ffffff;
-  --surface-2: #e9edf4;
-  --line: #dde2eb;
-  --line-strong: #c3cbd9;
-  --fg: #0e1630;
-  --muted: #4b5672;
-  --faint: #667089;
+  --surface-2: #f1f3f7;
+  --line: #e6e8ee;
+  --line-strong: #d0d5df;
+  --fg: #0f1324;
+  --muted: #475066;
+  --faint: #667085;
 
-  --brand: #12265a;
-  --brand-hover: #0b1a42;
+  --brand: #4f46e5;
+  --brand-hover: #4338ca;
   --brand-fg: #ffffff;
-  --brand-soft: #e3e9f8;
+  --brand-soft: #eef0ff;
+  --brand-ink: #4338ca;
 
   --mark: #ffe14d;
   --mark-soft: rgba(255, 225, 77, 0.5);
   --mark-fg: #3b2f00;
 
-  --ok: #17794f;
-  --ok-soft: #e2f3ea;
-  --warn: #8a5300;
-  --warn-soft: #fff1d6;
-  --danger: #b3261e;
-  --danger-soft: #fce8e6;
+  --ok: #067647;
+  --ok-soft: #e7f7ee;
+  --warn: #b54708;
+  --warn-soft: #fff4dd;
+  --danger: #d92d20;
+  --danger-soft: #feeceb;
 
   --paper: #ffffff;
   --paper-fg: #141b33;
-  --shadow-page: 0 1px 2px rgba(14, 22, 48, 0.06), 0 12px 32px -8px rgba(14, 22, 48, 0.18);
-  --shadow-pop: 0 10px 40px -10px rgba(14, 22, 48, 0.35);
+  --shadow-xs: 0 1px 2px rgba(15, 19, 36, 0.05);
+  --shadow-card: 0 1px 2px rgba(15, 19, 36, 0.04), 0 4px 16px -4px rgba(15, 19, 36, 0.06);
+  --shadow-page: 0 1px 2px rgba(15, 19, 36, 0.06), 0 12px 32px -8px rgba(15, 19, 36, 0.16);
+  --shadow-pop: 0 4px 12px -2px rgba(15, 19, 36, 0.08), 0 24px 48px -12px rgba(15, 19, 36, 0.28);
+  --glow-1: rgba(99, 102, 241, 0.16);
+  --glow-2: rgba(236, 72, 153, 0.08);
 }
 
 :root[data-theme="dark"] {
-  --bg: #0b1020;
-  --surface: #121933;
-  --surface-2: #182041;
-  --line: #243056;
-  --line-strong: #34426e;
-  --fg: #e9edf8;
-  --muted: #a3aecb;
-  --faint: #8591b2;
+  --bg: #0a0b11;
+  --surface: #12141c;
+  --surface-2: #1a1d28;
+  --line: #242836;
+  --line-strong: #353a4e;
+  --fg: #f2f4f8;
+  --muted: #a6adc0;
+  --faint: #8890a6;
 
-  --brand: #dce4ff;
-  --brand-hover: #ffffff;
-  --brand-fg: #0b1a42;
-  --brand-soft: #1b2650;
+  --brand: #6366f1;
+  --brand-hover: #7c7ff5;
+  --brand-fg: #ffffff;
+  --brand-soft: #1c1f46;
+  --brand-ink: #a5a9ff;
 
   --mark: #ffd60a;
   --mark-soft: rgba(255, 214, 10, 0.3);
   --mark-fg: #fff3b0;
 
-  --ok: #4cc38a;
-  --ok-soft: #12302a;
-  --warn: #f0b44c;
-  --warn-soft: #33260c;
-  --danger: #ff8a80;
-  --danger-soft: #3a1a1a;
+  --ok: #47cd89;
+  --ok-soft: #0e2a1e;
+  --warn: #fdb022;
+  --warn-soft: #2e2108;
+  --danger: #f97066;
+  --danger-soft: #3a1714;
 
   --paper: #f4f6fa;
   --paper-fg: #141b33;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.35), 0 4px 16px -4px rgba(0, 0, 0, 0.45);
   --shadow-page: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 40px -8px rgba(0, 0, 0, 0.6);
-  --shadow-pop: 0 10px 40px -10px rgba(0, 0, 0, 0.8);
+  --shadow-pop: 0 4px 12px -2px rgba(0, 0, 0, 0.5), 0 24px 48px -12px rgba(0, 0, 0, 0.8);
+  --glow-1: rgba(99, 102, 241, 0.22);
+  --glow-2: rgba(236, 72, 153, 0.08);
 }
 
 @theme inline {
@@ -85,6 +95,7 @@
   --color-brand-hover: var(--brand-hover);
   --color-brand-fg: var(--brand-fg);
   --color-brand-soft: var(--brand-soft);
+  --color-brand-ink: var(--brand-ink);
   --color-mark: var(--mark);
   --color-mark-soft: var(--mark-soft);
   --color-mark-fg: var(--mark-fg);
@@ -97,10 +108,12 @@
   --color-paper: var(--paper);
   --color-paper-fg: var(--paper-fg);
 
-  --font-sans: var(--font-instrument), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-serif: var(--font-source-serif), Georgia, serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
 
+  --shadow-xs: var(--shadow-xs);
+  --shadow-card: var(--shadow-card);
   --shadow-page: var(--shadow-page);
   --shadow-pop: var(--shadow-pop);
 }
@@ -118,6 +131,7 @@ body {
   background: var(--bg);
   color: var(--fg);
   font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01", "calt";
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -128,9 +142,52 @@ body {
 }
 
 :focus-visible {
-  outline: 2px solid var(--fg);
+  outline: 2px solid var(--brand);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: 6px;
+}
+
+/* ---------- Surfaces & decoration ---------- */
+.hero-glow {
+  background:
+    radial-gradient(60rem 28rem at 15% -10%, var(--glow-1), transparent 60%),
+    radial-gradient(50rem 24rem at 90% 0%, var(--glow-2), transparent 60%);
+}
+.bg-dots {
+  background-image: radial-gradient(color-mix(in srgb, var(--fg) 14%, transparent) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse at center, #000 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 30%, transparent 75%);
+}
+.text-gradient {
+  background: linear-gradient(100deg, #6366f1 0%, #8b5cf6 60%, #d946ef 100%);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.brand-gradient {
+  background: linear-gradient(135deg, #5b50f0 0%, #4338ca 55%, #3730a3 100%);
+}
+.card-lift {
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.card-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-card);
+  border-color: var(--line-strong);
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 25%, color-mix(in srgb, var(--surface-2) 55%, var(--surface)) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+  border-radius: 8px;
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
 }
 
 /* The signature: evidence is highlighted like it was marked on paper. */
