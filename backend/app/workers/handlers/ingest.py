@@ -97,8 +97,8 @@ async def handle_ingest_job(
                 detail="Document yielded no text chunks for vector indexing."
             )
 
-        # 6. Generate 768-dim embeddings in batches of 16
-        batch_size = 16
+        # 6. Generate 768-dim embeddings in smaller batches to respect free-tier TPM limits
+        batch_size = 8
         for i in range(0, len(chunks_data), batch_size):
             batch = chunks_data[i:i + batch_size]
             texts = [c["content"] for c in batch]
@@ -106,7 +106,8 @@ async def handle_ingest_job(
             for j, emb in enumerate(embeddings):
                 batch[j]["embedding"] = emb
 
-        # 7. Upsert chunks transactionally into pgvector
+        # 7. Replace any stale chunks and upsert transactionally into pgvector
+        await chunk_repo.delete_by_document(doc.id)
         await chunk_repo.bulk_insert_chunks(
             workspace_id=doc.workspace_id,
             document_id=doc.id,

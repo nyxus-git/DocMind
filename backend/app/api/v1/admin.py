@@ -640,10 +640,13 @@ async def admin_retry_job(
         raise DocMindException(status_code=404, code="JOB_NOT_FOUND", title="Not Found", detail="Background job not found.")
 
     job.status = JobStatus.QUEUED.value
+    job.attempts = 0
     job.available_at = utc_now()
     job.locked_by = None
     job.locked_at = None
     job.last_error = None
+    if job.job_type == JobType.INGEST_DOCUMENT.value and isinstance(job.payload, dict) and "document_id" in job.payload:
+        await DocumentRepository(db).update_status(uuid.UUID(str(job.payload["document_id"])), DocumentStatus.QUEUED.value)
     await db.flush()
 
     ws = (await db.execute(select(Workspace.name).where(Workspace.id == job.workspace_id))).scalar_one_or_none() or "Unknown"

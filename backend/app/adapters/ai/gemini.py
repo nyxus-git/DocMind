@@ -1,6 +1,8 @@
+import asyncio
 import json
 import logging
 import os
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 import httpx
@@ -351,6 +353,27 @@ class GeminiLLM(LLMProvider):
         )
 
 
+def _parse_retry_after_seconds(resp: httpx.Response, attempt: int) -> float:
+    """Extracts wait duration from Retry-After header or Gemini 429 error body."""
+    header_val = resp.headers.get("Retry-After")
+    if header_val:
+        try:
+            return min(max(float(header_val) + 1.0, 5.0), 65.0)
+        except ValueError:
+            pass
+
+    body_text = resp.text or ""
+    match = re.search(r"retry\s+in\s+([0-9]+(?:\.[0-9]+)?)s", body_text, re.IGNORECASE)
+    if match:
+        return min(max(float(match.group(1)) + 2.0, 5.0), 65.0)
+
+    delay_match = re.search(r'"retryDelay"\s*:\s*"([0-9]+(?:\.[0-9]+)?)s"', body_text)
+    if delay_match:
+        return min(max(float(delay_match.group(1)) + 2.0, 5.0), 65.0)
+
+    return min(15.0 * (attempt + 1), 65.0)
+
+
 class GeminiEmbedding(EmbeddingProvider):
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
         self.api_key = api_key or settings.GOOGLE_API_KEY
@@ -358,46 +381,68 @@ class GeminiEmbedding(EmbeddingProvider):
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
 
     async def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        return await self._embed_batch(texts, wait_on_rate_limit=True)
+
+    async def embed_query(self, text: str) -> List[float]:
+        res = await self._embed_batch([text], wait_on_rate_limit=False)
+        return res[0]
+
+    async def _embed_batch(self, texts: List[str], wait_on_rate_limit: bool) -> List[List[float]]:
         if not texts:
             return []
         if not self.api_key:
             return [self._mock_vector(t) for t in texts]
 
-        candidate_models = []
+        candidate_models: List[str] = []
         for m in [self.model, "gemini-embedding-001"]:
             if m and m not in candidate_models:
                 candidate_models.append(m)
 
-        for model_name in candidate_models:
-            url = f"{self.base_url}/models/{model_name}:batchEmbedContents?key={self.api_key}"
-            requests = [
-                {
-                    "model": f"models/{model_name}",
-                    "content": {"parts": [{"text": t[:2000]}]},
-                    "outputDimensionality": settings.EMBEDDING_DIMENSION
-                }
-                for t in texts
-            ]
-            try:
-                async with httpx.AsyncClient(timeout=60.0) as client:
-                    resp = await client.post(url, json={"requests": requests})
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        embeddings = data.get("embeddings", [])
-                        if embeddings:
-                            return [e.get("values", self._mock_vector(texts[i])) for i, e in enumerate(embeddings)]
-            except Exception as e:
-                logger.warning(f"Embedding API error on {model_name}: {e}")
+        max_attempts = 4 if wait_on_rate_limit else 1
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            for model_name in candidate_models:
+                url = f"{self.base_url}/models/{model_name}:batchEmbedContents?key={self.api_key}"
+                requests = [
+                    {
+                        "model": f"models/{model_name}",
+                        "content": {"parts": [{"text": t[:2000]}]},
+                        "outputDimensionality": settings.EMBEDDING_DIMENSION
+                    }
+                    for t in texts
+                ]
+                for attempt in range(max_attempts):
+                    try:
+                        resp = await client.post(url, json={"requests": requests})
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            embeddings = data.get("embeddings", [])
+                            if embeddings:
+                                return [e.get("values", self._mock_vector(texts[i])) for i, e in enumerate(embeddings)]
+                            logger.warning(f"Embedding API returned empty embeddings on {model_name}")
+                            break
+
+                        logger.warning(f"Embedding API HTTP {resp.status_code} on {model_name}: {resp.text[:300]}")
+                        if resp.status_code == 429 and wait_on_rate_limit and attempt + 1 < max_attempts:
+                            wait_s = _parse_retry_after_seconds(resp, attempt)
+                            logger.info(f"Gemini embedding rate-limited (429); sleeping {wait_s:.1f}s before retry...")
+                            await asyncio.sleep(wait_s)
+                            continue
+                        if resp.status_code in (500, 502, 503, 504) and attempt + 1 < max_attempts:
+                            await asyncio.sleep(min(2.0 * (attempt + 1), 10.0))
+                            continue
+                        break
+                    except Exception as e:
+                        logger.warning(f"Embedding API error on {model_name}: {e}")
+                        if attempt + 1 < max_attempts:
+                            await asyncio.sleep(2.0)
+                            continue
+                        break
 
         if settings.APP_ENV == "production" and not os.environ.get("PYTEST_CURRENT_TEST"):
             raise ServiceDegradedException(
                 "The AI embedding service is temporarily unavailable. Please try again in a moment."
             )
         return [self._mock_vector(t) for t in texts]
-
-    async def embed_query(self, text: str) -> List[float]:
-        res = await self.embed_documents([text])
-        return res[0]
 
     def _mock_vector(self, text: str) -> List[float]:
         """Generates a stable 768-dimensional normalized pseudo-vector based on text hash for tests."""

@@ -87,10 +87,10 @@ class JobRepository:
         )
         await self.db.flush()
 
-    async def mark_failed(self, job_id: uuid.UUID, error: str, retryable: bool = False) -> None:
+    async def mark_failed(self, job_id: uuid.UUID, error: str, retryable: bool = False) -> Optional[Job]:
         job = await self.get_by_id(job_id)
         if not job:
-            return
+            return None
 
         now = datetime.now(timezone.utc)
         if retryable and job.attempts < job.max_attempts:
@@ -104,6 +104,7 @@ class JobRepository:
 
         job.updated_at = now
         await self.db.flush()
+        return job
 
     async def reset_stale_jobs(self, lease_seconds: int = 60) -> int:
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=lease_seconds)
