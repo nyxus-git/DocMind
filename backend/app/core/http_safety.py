@@ -74,3 +74,4 @@ def resolve_safe_inline_mime(filename: Optional[str], declared_mime: Optional[st
     if mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         return mime
     return "application/octet-stream"
+
