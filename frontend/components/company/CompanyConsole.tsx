@@ -9,6 +9,7 @@ import {
   CompanyJoinRequestDTO,
   CompanyOverviewDTO,
   CompanySettingsDTO,
+  DocumentDTO,
   KnowledgeGapDTO,
   KnowledgeSpaceDTO,
   PendingInviteDTO,
@@ -21,7 +22,7 @@ import { Icon } from '../ui/Icon';
 import { Logo } from '../ui/Logo';
 import { ThemeToggle } from '../ui/ThemeToggle';
 import { ToastProvider, useToast } from '../ui/Toast';
-import { Meter, Panel } from '../workspace/parts';
+import { FileTypeIcon, Meter, Panel, StatusBadge } from '../workspace/parts';
 
 type CompanyTab = 'overview' | 'employees' | 'spaces' | 'policy' | 'gaps';
 
@@ -52,7 +53,9 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
   const [members, setMembers] = useState<WorkspaceMemberDTO[]>([]);
   const [pendingInvites, setPendingInvites] = useState<PendingInviteDTO[]>([]);
   const [spaces, setSpaces] = useState<KnowledgeSpaceDTO[]>([]);
+  const [documents, setDocuments] = useState<DocumentDTO[]>([]);
   const [gaps, setGaps] = useState<KnowledgeGapDTO[]>([]);
+  const [showGuide, setShowGuide] = useState(false);
 
   // Policy edit state
   const [companyName, setCompanyName] = useState('');
@@ -100,13 +103,14 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
   const loadAll = useCallback(async () => {
     if (!session.workspaceId) return;
     try {
-      const [ov, st, jr, mems, invs, sp, gp] = await Promise.all([
+      const [ov, st, jr, mems, invs, sp, docs, gp] = await Promise.all([
         ApiClient.getCompanyOverview(),
         ApiClient.getCompanySettings(),
         ApiClient.listCompanyJoinRequests(),
         ApiClient.getWorkspaceMembers(session.workspaceId),
         ApiClient.listPendingInvites(session.workspaceId).catch(() => []),
         ApiClient.listCompanySpaces(),
+        ApiClient.listDocuments().catch(() => []),
         ApiClient.listCompanyKnowledgeGaps(50),
       ]);
       setOverview(ov);
@@ -120,6 +124,7 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
       setMembers(mems);
       setPendingInvites(invs);
       setSpaces(sp);
+      setDocuments(docs);
       setGaps(gp);
     } catch (err) {
       handleErr(err, 'Failed to load Company Console.');
@@ -265,6 +270,22 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
     }
   };
 
+  const assignDocSpace = async (doc: DocumentDTO, nextSpaceId: string) => {
+    setBusyId(doc.id);
+    try {
+      await ApiClient.updateDocument(doc.id, {
+        ...(nextSpaceId ? { space_id: nextSpaceId, clear_space: false } : { clear_space: true }),
+      });
+      const targetName = nextSpaceId ? spaces.find(s => s.id === nextSpaceId)?.name || 'selected space' : 'General (All employees)';
+      toast(`Moved "${doc.filename}" to ${targetName}.`, 'success');
+      await loadAll();
+    } catch (err) {
+      handleErr(err, 'Could not reassign document space.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const tabs: { id: CompanyTab; label: string; badge?: number }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'employees', label: 'Employees', badge: pendingJoinReqs.length || undefined },
@@ -298,11 +319,11 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
               <span className="hidden sm:inline">Employee Portal</span>
             </Link>
             <Link
-              href="/app/#library"
+              href="/app/?upload=1#library"
               className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand px-3 text-xs font-medium text-brand-fg hover:opacity-90"
             >
               <Icon name="upload" className="size-3.5" />
-              <span>Docs &amp; Upload</span>
+              <span>Upload Docs</span>
             </Link>
             {session.isSuperAdmin && (
               <Link
@@ -347,9 +368,13 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
           </div>
         ) : (
           <>
-            {tab === 'overview' && overview && (
+            {tab === 'overview' && overview && (() => {
+              const needsOnboarding = overview.total_documents === 0 || overview.member_count <= 1;
+              const guideVisible = needsOnboarding || showGuide;
+              const inProgressDocs = documents.filter(d => ['UPLOADING', 'QUEUED', 'PROCESSING'].includes(d.status)).length;
+              return (
               <div className="space-y-6">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h1 className="text-2xl font-semibold tracking-tight">{overview.company_name} Control Center</h1>
                     <p className="text-sm text-muted">
@@ -357,12 +382,101 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
                       <strong>{settings?.allowed_domains?.length ? settings.allowed_domains.join(', ') : 'None claimed yet'}</strong>
                     </p>
                   </div>
-                  {pendingJoinReqs.length > 0 && (
-                    <Button size="sm" onClick={() => setTab('employees')}>
-                      Review {pendingJoinReqs.length} pending employee request{pendingJoinReqs.length === 1 ? '' : 's'}
-                    </Button>
-                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {!needsOnboarding && (
+                      <Button variant="ghost" size="sm" onClick={() => setShowGuide(g => !g)}>
+                        <Icon name="info" className="size-3.5" />
+                        {showGuide ? 'Hide guide' : 'How it works'}
+                      </Button>
+                    )}
+                    {pendingJoinReqs.length > 0 && (
+                      <Button size="sm" onClick={() => setTab('employees')}>
+                        Review {pendingJoinReqs.length} pending employee request{pendingJoinReqs.length === 1 ? '' : 's'}
+                      </Button>
+                    )}
+                  </div>
                 </div>
+
+                {guideVisible && (
+                  <Panel className="border-brand/30 bg-brand/5 p-5 sm:p-6">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted">Company Portal Workflow</p>
+                        <h2 className="mt-1 text-base font-semibold">How documents reach your employees</h2>
+                      </div>
+                    </div>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                      <div className="flex flex-col justify-between rounded-xl border border-line bg-surface p-4">
+                        <div>
+                          <div className="flex items-center gap-2 text-xs font-semibold text-muted">
+                            <span className="inline-flex size-5 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-brand-fg">1</span>
+                            Upload Company Docs
+                          </div>
+                          <p className="mt-2 text-sm font-medium">Add handbooks, policies &amp; SOPs</p>
+                          <p className="mt-1 text-xs leading-5 text-muted">
+                            Upload files in the Workspace Library. By default they go to General (visible to all staff).
+                          </p>
+                        </div>
+                        <Link
+                          href="/app/?upload=1#library"
+                          className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-fg underline underline-offset-2 hover:no-underline"
+                        >
+                          Upload documents <Icon name="arrowRight" className="size-3" />
+                        </Link>
+                      </div>
+
+                      <div className="flex flex-col justify-between rounded-xl border border-line bg-surface p-4">
+                        <div>
+                          <div className="flex items-center gap-2 text-xs font-semibold text-muted">
+                            <span className="inline-flex size-5 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-brand-fg">2</span>
+                            Invite Employees &amp; Set Spaces
+                          </div>
+                          <p className="mt-2 text-sm font-medium">Control who accesses what</p>
+                          <p className="mt-1 text-xs leading-5 text-muted">
+                            Invite teammates or claim your corporate email domain, then organize docs into Department Spaces.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setTab('employees')}
+                          className="mt-3 inline-flex items-center gap-1 text-left text-xs font-semibold text-fg underline underline-offset-2 hover:no-underline"
+                        >
+                          Manage employees <Icon name="arrowRight" className="size-3" />
+                        </button>
+                      </div>
+
+                      <div className="flex flex-col justify-between rounded-xl border border-line bg-surface p-4">
+                        <div>
+                          <div className="flex items-center gap-2 text-xs font-semibold text-muted">
+                            <span className="inline-flex size-5 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-brand-fg">3</span>
+                            Employees Ask &amp; Flag Gaps
+                          </div>
+                          <p className="mt-2 text-sm font-medium">Instant cited Q&amp;A for staff</p>
+                          <p className="mt-1 text-xs leading-5 text-muted">
+                            Staff sign in at the Employee Portal to browse approved docs and get cited answers. Missing info shows up in Gaps.
+                          </p>
+                        </div>
+                        <Link
+                          href="/employee/"
+                          className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-fg underline underline-offset-2 hover:no-underline"
+                        >
+                          Preview Employee Portal <Icon name="arrowRight" className="size-3" />
+                        </Link>
+                      </div>
+                    </div>
+                  </Panel>
+                )}
+
+                {!guideVisible && (
+                  <div className="flex flex-col gap-2 rounded-xl border border-line bg-surface-2/70 px-4 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-2 text-muted">
+                      <Icon name="info" className="size-4 shrink-0 text-fg" />
+                      <span>
+                        Docs uploaded in <Link href="/app/#library" className="font-semibold text-fg underline underline-offset-2">Workspace Library</Link> are indexed automatically. Once <strong>Ready</strong>, employees can browse &amp; query them in <Link href="/employee/" className="font-semibold text-fg underline underline-offset-2">Employee Portal</Link>.
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   <StatCard label="Employees" value={overview.member_count} hint={`${pendingJoinReqs.length} awaiting approval`} />
@@ -374,6 +488,89 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
                     hint={`${overview.total_feedback_count} employee ratings`}
                   />
                 </div>
+
+                <Panel className="overflow-hidden">
+                  <div className="flex flex-col gap-3 border-b border-line px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h2 className="text-base font-semibold">Company Documents &amp; Portal Visibility ({documents.length})</h2>
+                      <p className="text-xs text-muted">
+                        Choose whether each document is shared with <strong>General (All employees)</strong> or restricted to a Department Space.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link
+                        href="/app/#library"
+                        className="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium hover:bg-surface-2"
+                      >
+                        Full Library
+                      </Link>
+                      <Link
+                        href="/app/?upload=1#library"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand px-3 text-xs font-medium text-brand-fg hover:opacity-90"
+                      >
+                        <Icon name="upload" className="size-3.5" /> Upload Doc
+                      </Link>
+                    </div>
+                  </div>
+
+                  {inProgressDocs > 0 && (
+                    <div className="flex items-center gap-2 border-b border-line bg-warn-soft/50 px-5 py-2.5 text-xs text-warn">
+                      <Spinner className="size-3.5" />
+                      <span>
+                        {inProgressDocs} document{inProgressDocs === 1 ? ' is' : 's are'} currently queued or processing. Once status becomes <strong>Ready</strong>, employees can query it in the Employee Portal.
+                      </span>
+                    </div>
+                  )}
+
+                  {documents.length === 0 ? (
+                    <div className="px-5 py-10 text-center">
+                      <p className="text-sm font-medium">No company documents uploaded yet</p>
+                      <p className="mt-1 text-xs text-muted">
+                        Upload your first policy, handbook, or guide so employees can search and ask questions in the Employee Portal.
+                      </p>
+                      <Link
+                        href="/app/?upload=1#library"
+                        className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-lg bg-brand px-3.5 text-xs font-medium text-brand-fg hover:opacity-90"
+                      >
+                        <Icon name="upload" className="size-3.5" /> Upload your first company doc
+                      </Link>
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-line">
+                      {documents.slice(0, 6).map(d => (
+                        <li key={d.id} className="flex flex-col gap-3 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <FileTypeIcon filename={d.filename} />
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium">{d.filename}</p>
+                              <p className="text-xs text-muted">
+                                {d.page_count ? `${d.page_count} pages • ` : ''}
+                                {formatBytes(d.size_bytes)} &bull; {timeAgo(d.created_at)}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2.5">
+                            <StatusBadge status={d.status} />
+                            <select
+                              aria-label={`Department visibility for ${d.filename}`}
+                              value={d.space_id || ''}
+                              disabled={busyId === d.id}
+                              onChange={e => void assignDocSpace(d, e.target.value)}
+                              className="h-8 rounded-lg border border-line-strong bg-surface px-2.5 text-xs font-medium"
+                            >
+                              <option value="">General (All employees)</option>
+                              {spaces.map(sp => (
+                                <option key={sp.id} value={sp.id}>
+                                  {sp.name} ({sp.visibility === 'RESTRICTED' ? 'Restricted' : 'All Company'})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </Panel>
 
                 <Panel className="p-5 sm:p-6">
                   <h2 className="text-base font-semibold">Monthly AI Question Capacity</h2>
@@ -423,7 +620,8 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
                   )}
                 </Panel>
               </div>
-            )}
+              );
+            })()}
 
             {tab === 'employees' && (
               <div className="space-y-6">
@@ -563,6 +761,21 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
 
             {tab === 'spaces' && (
               <div className="space-y-6">
+                <div className="flex items-start gap-2.5 rounded-xl border border-brand/25 bg-brand/5 px-4 py-3 text-sm">
+                  <Icon name="info" className="mt-0.5 size-4 shrink-0 text-fg" />
+                  <p className="text-xs leading-5 text-muted">
+                    <strong className="text-fg">How Department Spaces work:</strong> Docs without a space sit in <strong>General</strong> and are visible to all employees. Assign docs to a space in{' '}
+                    <button type="button" onClick={() => setTab('overview')} className="font-semibold text-fg underline underline-offset-2">
+                      Overview
+                    </button>{' '}
+                    or{' '}
+                    <Link href="/app/#library" className="font-semibold text-fg underline underline-offset-2">
+                      Workspace Library
+                    </Link>
+                    . Restricted spaces stay hidden in the Employee Portal unless an employee is checked below.
+                  </p>
+                </div>
+
                 <Panel className="p-5 sm:p-6">
                   <h2 className="text-base font-semibold">Create Department / Knowledge Space</h2>
                   <p className="mt-1 text-sm text-muted">
@@ -646,10 +859,15 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
                     </p>
                   ) : (
                     <ul className="divide-y divide-line">
-                      {spaces.map(sp => (
-                        <li key={sp.id} className="flex items-center justify-between gap-3 px-5 py-4">
-                          <div>
-                            <div className="flex items-center gap-2">
+                      {spaces.map(sp => {
+                        const spaceDocs = documents.filter(d => d.space_id === sp.id);
+                        const grantedEmails = members
+                          .filter(m => sp.member_user_ids.includes(m.user_id))
+                          .map(m => m.email);
+                        return (
+                        <li key={sp.id} className="flex items-start justify-between gap-3 px-5 py-4">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
                               <Icon name="folder" className="size-4 text-muted" />
                               <span className="text-sm font-semibold">{sp.name}</span>
                               <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${sp.visibility === 'RESTRICTED' ? 'bg-warn-soft text-warn' : 'bg-surface-2 text-muted'}`}>
@@ -657,13 +875,45 @@ function CompanyConsoleInner({ session }: { session: UserSession }) {
                               </span>
                             </div>
                             {sp.description && <p className="mt-1 text-xs text-muted">{sp.description}</p>}
-                            <p className="mt-1 text-xs text-faint">{sp.document_count} document(s)</p>
+                            <p className="mt-1.5 text-xs text-muted">
+                              <span className="font-medium text-fg">Access:</span>{' '}
+                              {sp.visibility === 'ALL_MEMBERS'
+                                ? 'All company employees'
+                                : grantedEmails.length > 0
+                                  ? `Admins + ${grantedEmails.join(', ')}`
+                                  : 'Admins only (no specific employees selected)'}
+                            </p>
+                            <div className="mt-1.5 text-xs text-faint">
+                              {spaceDocs.length === 0 ? (
+                                <span>
+                                  0 documents assigned &mdash; assign in{' '}
+                                  <button type="button" onClick={() => setTab('overview')} className="text-fg underline underline-offset-2">
+                                    Overview
+                                  </button>{' '}
+                                  or{' '}
+                                  <Link href="/app/#library" className="text-fg underline underline-offset-2">
+                                    Library
+                                  </Link>
+                                </span>
+                              ) : (
+                                <span className="flex flex-wrap items-center gap-1.5">
+                                  <span className="text-muted">{sp.document_count} doc(s):</span>
+                                  {spaceDocs.slice(0, 3).map(d => (
+                                    <span key={d.id} className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-fg">
+                                      {d.filename}
+                                    </span>
+                                  ))}
+                                  {spaceDocs.length > 3 && <span>+{spaceDocs.length - 3} more</span>}
+                                </span>
+                              )}
+                            </div>
                           </div>
                           <Button variant="ghost" size="sm" disabled={busyId === sp.id} onClick={() => void deleteSpace(sp)}>
                             <Icon name="trash" className="size-4 text-danger" />
                           </Button>
                         </li>
-                      ))}
+                        );
+                      })}
                     </ul>
                   )}
                 </Panel>

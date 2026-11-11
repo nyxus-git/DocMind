@@ -87,15 +87,18 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
   const [loading, setLoading] = useState(true);
   const [selectedSpaceId, setSelectedSpaceId] = useState<string>('');
   const [documents, setDocuments] = useState<DocumentDTO[]>([]);
+  const [totalDocsCount, setTotalDocsCount] = useState<number>(0);
   const [conversations, setConversations] = useState<ConversationDTO[]>([]);
 
   // Chat state
   const [convId, setConvId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [focusedDoc, setFocusedDoc] = useState<{ id: string; filename: string } | null>(null);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [loadingConv, setLoadingConv] = useState(false);
   const [citation, setCitation] = useState<CitationDTO | null>(null);
+  const [openingDocId, setOpeningDocId] = useState<string | null>(null);
 
   // Docs search + summary
   const [docSearch, setDocSearch] = useState('');
@@ -136,6 +139,9 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
         ApiClient.listConversations(),
       ]);
       setDocuments(docs);
+      if (!selectedSpaceId) {
+        setTotalDocsCount(docs.length);
+      }
       setConversations(convs);
     } catch (err) {
       handleErr(err, 'Failed to load company knowledge portal.');
@@ -187,6 +193,8 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
   }
 
   const readyDocs = documents.filter(d => d.status === 'READY');
+  const inProgressDocs = documents.filter(d => ['UPLOADING', 'QUEUED', 'PROCESSING'].includes(d.status));
+  const selectedSpace = portalInfo?.spaces.find(s => s.id === selectedSpaceId) ?? null;
   const starterPrompts = portalInfo?.starter_prompts?.length ? portalInfo.starter_prompts : DEFAULT_PROMPTS;
   const isCompanyAdmin = portalInfo?.role === 'OWNER' || portalInfo?.role === 'ADMIN';
   const canContributorWorkspace = portalInfo?.role === 'OWNER' || portalInfo?.role === 'ADMIN' || portalInfo?.role === 'MEMBER';
@@ -208,6 +216,7 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
   const sendQuestion = async (text?: string, docIdsOverride?: string[]) => {
     const question = (text ?? input).trim();
     if (!question || sending) return;
+    const effectiveDocIds = docIdsOverride ?? (focusedDoc ? [focusedDoc.id] : undefined);
     setInput('');
     setSending(true);
     setPortalTab('ask');
@@ -225,7 +234,12 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
         id = conv.id;
         setConvId(id);
       }
-      const res = await ApiClient.sendMessage(id, question, docIdsOverride, selectedSpaceId || undefined);
+      const res = await ApiClient.sendMessage(
+        id,
+        question,
+        effectiveDocIds,
+        effectiveDocIds ? undefined : selectedSpaceId || undefined,
+      );
       setMessages(prev => [
         ...prev,
         {
@@ -274,6 +288,26 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
     }
   };
 
+  const openDocumentFile = async (doc: DocumentDTO) => {
+    setOpeningDocId(doc.id);
+    try {
+      const { download_url } = await ApiClient.getDownloadUrl(doc.id);
+      window.open(download_url, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      handleErr(err, 'Could not open this document.');
+    } finally {
+      setOpeningDocId(null);
+    }
+  };
+
+  const askAboutSingleDoc = (doc: DocumentDTO, prompt?: string) => {
+    setConvId(null);
+    setMessages([]);
+    setFocusedDoc({ id: doc.id, filename: doc.filename });
+    setPortalTab('ask');
+    void sendQuestion(prompt || `Summarize key points from ${doc.filename}`, [doc.id]);
+  };
+
   const filteredDocs = documents.filter(
     d =>
       !docSearch ||
@@ -297,24 +331,6 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
           </div>
 
           <div className="flex items-center gap-2">
-            {(portalInfo?.spaces?.length ?? 0) > 0 && (
-              <select
-                aria-label="Filter by department space"
-                value={selectedSpaceId}
-                onChange={e => {
-                  setLoading(true);
-                  setSelectedSpaceId(e.target.value);
-                }}
-                className="hidden h-8 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium md:block"
-              >
-                <option value="">All Spaces ({readyDocs.length})</option>
-                {portalInfo?.spaces.map(sp => (
-                  <option key={sp.id} value={sp.id}>
-                    {sp.name}
-                  </option>
-                ))}
-              </select>
-            )}
             <div className="flex rounded-lg border border-line bg-surface p-0.5">
               <button
                 type="button"
@@ -349,6 +365,40 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
         </div>
       </header>
 
+      {/* Sticky space-filter pill row */}
+      {(portalInfo?.spaces?.length ?? 0) > 0 && (
+        <div className="shrink-0 border-b border-line bg-bg/95 px-4 backdrop-blur sm:px-6">
+          <div className="mx-auto flex max-w-6xl items-center gap-2 overflow-x-auto py-2">
+            <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-faint">Spaces:</span>
+            <button
+              type="button"
+              onClick={() => {
+                setLoading(true);
+                setFocusedDoc(null);
+                setSelectedSpaceId('');
+              }}
+              className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium transition-colors ${selectedSpaceId === '' ? 'bg-brand text-brand-fg' : 'border border-line bg-surface text-muted hover:bg-surface-2'}`}
+            >
+              All Accessible ({totalDocsCount || documents.length})
+            </button>
+            {portalInfo?.spaces.map(sp => (
+              <button
+                key={sp.id}
+                type="button"
+                onClick={() => {
+                  setLoading(true);
+                  setFocusedDoc(null);
+                  setSelectedSpaceId(sp.id);
+                }}
+                className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium transition-colors ${selectedSpaceId === sp.id ? 'bg-brand text-brand-fg' : 'border border-line bg-surface text-muted hover:bg-surface-2'}`}
+              >
+                {sp.name} ({sp.document_count})
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {portalTab === 'ask' ? (
         <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 gap-6 px-4 py-4 sm:px-6">
           {/* Private conversation rail */}
@@ -359,6 +409,7 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
               onClick={() => {
                 setConvId(null);
                 setMessages([]);
+                setFocusedDoc(null);
               }}
             >
               <Icon name="plus" /> New question
@@ -375,7 +426,10 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
                 <li key={c.id}>
                   <button
                     type="button"
-                    onClick={() => void openConversation(c.id)}
+                    onClick={() => {
+                      setFocusedDoc(null);
+                      void openConversation(c.id);
+                    }}
                     className={`w-full rounded-lg px-2.5 py-2 text-left transition-colors ${c.id === convId ? 'bg-surface-2' : 'hover:bg-surface-2/70'}`}
                   >
                     <span className="block truncate text-sm font-medium">{c.title || 'Company Q&A'}</span>
@@ -388,38 +442,186 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
 
           {/* Chat body */}
           <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-line bg-surface">
+            {/* Persistent Scope Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface-2/50 px-4 py-2 text-xs">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                {focusedDoc ? (
+                  <>
+                    <span className="inline-flex items-center gap-1.5 rounded-md bg-brand/10 px-2 py-0.5 font-medium text-fg">
+                      <Icon name="file" className="size-3.5 shrink-0" />
+                      <span className="max-w-[16rem] truncate">Focused doc: {focusedDoc.filename}</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setFocusedDoc(null)}
+                      className="text-muted underline underline-offset-2 hover:text-fg"
+                    >
+                      Ask all docs instead
+                    </button>
+                  </>
+                ) : selectedSpace ? (
+                  <>
+                    <span className="inline-flex items-center gap-1.5 rounded-md bg-brand/10 px-2 py-0.5 font-medium text-fg">
+                      <Icon name="folder" className="size-3.5 shrink-0" />
+                      <span>{selectedSpace.name} &mdash; {readyDocs.length} ready doc{readyDocs.length === 1 ? '' : 's'}</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLoading(true);
+                        setSelectedSpaceId('');
+                      }}
+                      className="text-muted underline underline-offset-2 hover:text-fg"
+                    >
+                      Clear filter
+                    </button>
+                  </>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-muted">
+                    <Icon name="globe" className="size-3.5 shrink-0" />
+                    <span>
+                      Searching <strong className="text-fg">{readyDocs.length}</strong> accessible doc{readyDocs.length === 1 ? '' : 's'}
+                      {inProgressDocs.length > 0 ? ` (${inProgressDocs.length} indexing)` : ''}
+                    </span>
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {messages.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConvId(null);
+                      setMessages([]);
+                      setFocusedDoc(null);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md border border-line bg-surface px-2 py-1 font-medium text-fg hover:bg-surface-2 md:hidden"
+                  >
+                    <Icon name="plus" className="size-3" /> New
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPortalTab('docs')}
+                  className="inline-flex items-center gap-1 font-medium text-muted hover:text-fg"
+                >
+                  <Icon name="book" className="size-3.5" />
+                  Browse Docs ({documents.length})
+                </button>
+              </div>
+            </div>
+
             <div className="scroll-thin flex-1 overflow-y-auto px-4 py-6 sm:px-8">
               {loading || loadingConv ? (
                 <div className="flex justify-center py-20">
                   <Spinner className="size-5 text-muted" />
                 </div>
               ) : messages.length === 0 ? (
-                <div className="mx-auto flex h-full max-w-xl flex-col justify-center">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted">
-                    {portalInfo?.company_name || session.workspaceName} Knowledge Assistant
-                  </p>
-                  <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-                    {readyDocs.length ? 'Ask anything across approved company docs' : 'No company documents ready yet'}
-                  </h1>
-                  <p className="mt-2 text-sm leading-6 text-muted">
-                    {readyDocs.length
-                      ? `Searching ${readyDocs.length} company document${readyDocs.length === 1 ? '' : 's'}${selectedSpaceId ? ' in selected department' : ''}. Answers cite exact source pages.`
-                      : 'Ask your Company Admin to upload PDFs or handbooks to get started.'}
-                  </p>
-                  {readyDocs.length > 0 && (
-                    <ul className="mt-6 space-y-2">
-                      {starterPrompts.map(q => (
-                        <li key={q}>
-                          <button
-                            type="button"
-                            onClick={() => void sendQuestion(q)}
-                            className="w-full rounded-xl border border-line px-4 py-3 text-left text-sm transition-colors hover:border-line-strong hover:bg-surface-2"
-                          >
-                            {q}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
+                <div className="mx-auto flex h-full max-w-xl flex-col justify-center py-6">
+                  {readyDocs.length === 0 ? (
+                    <>
+                      {/* No ready docs yet — guided empty state */}
+                      <div className="mb-5 flex flex-col items-center text-center">
+                        <div className="mb-4 inline-flex size-14 items-center justify-center rounded-full bg-surface-2 text-muted">
+                          {inProgressDocs.length > 0 ? <Spinner className="size-6" /> : <Icon name="file" className="size-7" />}
+                        </div>
+                        <h1 className="text-xl font-semibold tracking-tight">
+                          {inProgressDocs.length > 0
+                            ? `${inProgressDocs.length} document${inProgressDocs.length === 1 ? ' is' : 's are'} being indexed`
+                            : selectedSpace
+                              ? `No ready documents in ${selectedSpace.name}`
+                              : 'No company documents uploaded yet'}
+                        </h1>
+                        <p className="mt-2 max-w-md text-sm leading-6 text-muted">
+                          {inProgressDocs.length > 0
+                            ? 'DocMind is reading and indexing recently uploaded company files. They will become searchable here automatically in a moment.'
+                            : selectedSpace
+                              ? `No processed documents are inside the "${selectedSpace.name}" space yet. Switch back to all accessible docs or ask your Company Admin to assign documents here.`
+                              : 'Once your Company Admin uploads handbooks, policies, or guides to your company workspace, you can browse them and ask questions with exact page citations.'}
+                        </p>
+                        <div className="mt-4 flex flex-wrap justify-center gap-2">
+                          {selectedSpace && (
+                            <Button size="sm" variant="secondary" onClick={() => { setLoading(true); setSelectedSpaceId(''); }}>
+                              View all company docs
+                            </Button>
+                          )}
+                          {inProgressDocs.length > 0 && (
+                            <Button size="sm" variant="secondary" onClick={() => setPortalTab('docs')}>
+                              Check indexing status
+                            </Button>
+                          )}
+                          {isCompanyAdmin && (
+                            <Link
+                              href="/app/?upload=1#library"
+                              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand px-3 text-xs font-medium text-brand-fg hover:opacity-90"
+                            >
+                              <Icon name="upload" className="size-3.5" /> Upload company docs
+                            </Link>
+                          )}
+                        </div>
+                      </div>
+                      {/* How it works steps */}
+                      <p className="mb-3 text-center text-xs font-semibold uppercase tracking-wider text-muted">How it works</p>
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        {[
+                          { icon: 'upload' as const, title: '1. Admin uploads docs', desc: 'Company Admin uploads handbooks, policies & guides to the Workspace Library.' },
+                          { icon: 'search' as const, title: '2. DocMind indexes', desc: 'Files are processed and organized into General or Department Spaces.' },
+                          { icon: 'chat' as const, title: '3. Employees ask AI', desc: 'Ask in natural language and get answers citing exact source pages.' },
+                        ].map((step, i) => (
+                          <div key={i} className="rounded-xl border border-line bg-bg p-3.5 text-center">
+                            <div className="mx-auto inline-flex size-8 items-center justify-center rounded-lg bg-surface-2 text-fg">
+                              <Icon name={step.icon} className="size-4" />
+                            </div>
+                            <p className="mt-2.5 text-xs font-semibold">{step.title}</p>
+                            <p className="mt-1 text-[11px] leading-4 text-muted">{step.desc}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {/* Has docs — knowledge assistant prompt starter */}
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted">
+                        {portalInfo?.company_name || session.workspaceName} Knowledge Assistant
+                      </p>
+                      <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+                        Ask anything across {readyDocs.length} company document{readyDocs.length === 1 ? '' : 's'}
+                      </h1>
+                      <p className="mt-1.5 text-sm text-muted">
+                        Pick a suggested question, ask your own below, or open Company Docs to query a single file.
+                      </p>
+                      {selectedSpace && (
+                        <span className="mt-3 inline-flex items-center gap-1.5 self-start rounded-full bg-brand/10 px-3 py-1 text-xs font-medium text-fg">
+                          <Icon name="folder" className="size-3.5" />
+                          Asking in {selectedSpace.name} &mdash; {readyDocs.length} doc{readyDocs.length === 1 ? '' : 's'}
+                        </span>
+                      )}
+                      <ul className="mt-6 space-y-2">
+                        {starterPrompts.map(q => (
+                          <li key={q}>
+                            <button
+                              type="button"
+                              onClick={() => void sendQuestion(q)}
+                              className="flex w-full items-center justify-between rounded-xl border border-line px-4 py-3 text-left text-sm transition-colors hover:border-line-strong hover:bg-surface-2"
+                            >
+                              <span>{q}</span>
+                              <Icon name="arrowRight" className="ml-3 size-4 shrink-0 text-muted" />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="mt-5 flex flex-wrap items-center justify-center gap-3 text-xs text-muted">
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 font-medium text-fg underline underline-offset-2 hover:no-underline"
+                          onClick={() => setPortalTab('docs')}
+                        >
+                          <Icon name="book" className="size-3.5" /> Browse Company Docs ({documents.length})
+                        </button>
+                        <span>&bull;</span>
+                        <span>Answers cite exact source pages</span>
+                      </div>
+                    </>
                   )}
                 </div>
               ) : (
@@ -508,7 +710,15 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
                   value={input}
                   onChange={e => setInput(e.target.value)}
                   disabled={readyDocs.length === 0 || sending}
-                  placeholder={readyDocs.length ? `Ask ${portalInfo?.company_name || 'your company'} knowledge base...` : 'No ready documents available'}
+                  placeholder={
+                    readyDocs.length === 0
+                      ? 'No ready documents available'
+                      : focusedDoc
+                        ? `Ask a follow-up about ${focusedDoc.filename}...`
+                        : selectedSpace
+                          ? `Ask across ${selectedSpace.name} documents...`
+                          : `Ask ${portalInfo?.company_name || 'your company'} knowledge base...`
+                  }
                   className={`${inputClass} flex-1`}
                 />
                 <Button type="submit" disabled={!input.trim() || sending || readyDocs.length === 0}>
@@ -523,7 +733,7 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h1 className="text-xl font-semibold">Company Documents</h1>
-              <p className="text-sm text-muted">Approved knowledge resources you have access to in {portalInfo?.company_name || session.workspaceName}.</p>
+              <p className="text-sm text-muted">Approved knowledge resources shared with you in {portalInfo?.company_name || session.workspaceName}.</p>
             </div>
             <input
               type="search"
@@ -534,9 +744,40 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
             />
           </div>
 
+          <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-brand/25 bg-brand/5 px-4 py-3 text-sm">
+            <Icon name="info" className="mt-0.5 size-4 shrink-0 text-fg" />
+            <p className="text-xs leading-5 text-muted">
+              <strong className="text-fg">How to explore company docs:</strong> Click <strong>Open</strong> to view the original file, <strong>Summary</strong> for an AI brief, or <strong>Ask AI</strong> to start a focused Q&amp;A about that document. Restricted department docs appear automatically once a Company Admin grants you access.
+            </p>
+          </div>
+
           <Panel className="overflow-hidden">
             {filteredDocs.length === 0 ? (
-              <p className="px-5 py-12 text-center text-sm text-muted">No accessible company documents match your filter.</p>
+              <div className="px-5 py-12 text-center">
+                <p className="text-sm font-medium text-fg">
+                  {documents.length === 0 ? 'No company documents available yet' : 'No accessible company documents match your filter'}
+                </p>
+                <p className="mt-1 text-xs text-muted">
+                  {documents.length === 0
+                    ? 'Company Admins upload handbooks, policies, and guides from the Workspace Library.'
+                    : 'Try clearing your search box or switching Department Space pills above.'}
+                </p>
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  {selectedSpaceId && (
+                    <Button size="sm" variant="secondary" onClick={() => { setLoading(true); setSelectedSpaceId(''); }}>
+                      Show all spaces
+                    </Button>
+                  )}
+                  {isCompanyAdmin && (
+                    <Link
+                      href="/app/?upload=1#library"
+                      className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand px-3 text-xs font-medium text-brand-fg hover:opacity-90"
+                    >
+                      <Icon name="upload" className="size-3.5" /> Upload company docs
+                    </Link>
+                  )}
+                </div>
+              </div>
             ) : (
               <ul className="divide-y divide-line">
                 {filteredDocs.map(d => (
@@ -545,30 +786,35 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
                       <FileTypeIcon filename={d.filename} />
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">{d.filename}</p>
-                        <p className="text-xs text-muted">
-                          {d.space_name ? `${d.space_name} • ` : ''}
-                          {d.page_count ? `${d.page_count} pages • ` : ''}
-                          {formatBytes(d.size_bytes)} &bull; {formatDate(d.created_at)}
-                        </p>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+                          <span className="inline-flex items-center gap-1 rounded bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-fg">
+                            <Icon name={d.space_name ? 'folder' : 'globe'} className="size-3 text-muted" />
+                            {d.space_name || 'General Company'}
+                          </span>
+                          {d.page_count ? <span>&bull; {d.page_count} pages</span> : null}
+                          <span>&bull; {formatBytes(d.size_bytes)}</span>
+                          <span>&bull; {formatDate(d.created_at)}</span>
+                        </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <StatusBadge status={d.status} />
                       {d.status === 'READY' && (
                         <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={openingDocId === d.id}
+                            onClick={() => void openDocumentFile(d)}
+                          >
+                            {openingDocId === d.id ? <Spinner className="size-3.5" /> : <Icon name="external" className="size-3.5" />}
+                            Open
+                          </Button>
                           <Button variant="secondary" size="sm" onClick={() => void openSummary(d)}>
                             Summary
                           </Button>
-                          <Button
-                            size="sm"
-                            onClick={() => {
-                              setConvId(null);
-                              setMessages([]);
-                              setPortalTab('ask');
-                              void sendQuestion(`Summarize key points from ${d.filename}`, [d.id]);
-                            }}
-                          >
-                            Ask
+                          <Button size="sm" onClick={() => askAboutSingleDoc(d)}>
+                            Ask AI
                           </Button>
                         </>
                       )}
@@ -585,8 +831,16 @@ function EmployeePortalInner({ session }: { session: UserSession }) {
         citation={citation}
         onClose={() => setCitation(null)}
         onAskDocument={docId => {
-          setPortalTab('ask');
-          void sendQuestion('Summarize the key obligations and points from this document.', [docId]);
+          const target = documents.find(d => d.id === docId);
+          if (target) {
+            askAboutSingleDoc(target, 'Summarize the key obligations and points from this document.');
+          } else {
+            setConvId(null);
+            setMessages([]);
+            setFocusedDoc({ id: docId, filename: 'Selected document' });
+            setPortalTab('ask');
+            void sendQuestion('Summarize the key obligations and points from this document.', [docId]);
+          }
         }}
       />
 

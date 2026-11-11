@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { ApiClient, DocumentDTO, DocumentSummaryResponse, ExtractionResponse } from '../../../lib/api';
 import { formatBytes, formatDate } from '../../../lib/format';
 import { Button, inputClass, Spinner } from '../../ui/Button';
@@ -53,11 +54,13 @@ function IconButton({
 }
 
 export function LibraryView() {
-  const { documents, documentsLoaded, spaces, refreshDocuments, refreshUsage, openUpload, askDocuments, canUpload, canAsk, handleApiError } = useWorkspace();
+  const { session, documents, documentsLoaded, spaces, refreshDocuments, refreshUsage, openUpload, askDocuments, canUpload, canAsk, canManageMembers, handleApiError } = useWorkspace();
   const toast = useToast();
+  const isCompany = session.isCompany || session.workspaceType === 'COMPANY';
 
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('ALL');
+  const [spaceFilter, setSpaceFilter] = useState('ALL');
   const [toDelete, setToDelete] = useState<DocumentDTO | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [summaryFor, setSummaryFor] = useState<DocumentDTO | null>(null);
@@ -84,8 +87,14 @@ export function LibraryView() {
   const visible = documents.filter(
     d =>
       matchesFilter(d, filter) &&
+      (spaceFilter === 'ALL'
+        ? true
+        : spaceFilter === 'GENERAL'
+          ? !d.space_id
+          : d.space_id === spaceFilter) &&
       (!query ||
         d.filename.toLowerCase().includes(query.toLowerCase()) ||
+        (d.space_name || '').toLowerCase().includes(query.toLowerCase()) ||
         (d.tags || []).some(t => t.toLowerCase().includes(query.toLowerCase()))),
   );
 
@@ -201,6 +210,38 @@ export function LibraryView() {
         }
       />
 
+      {isCompany && (
+        <div className="mb-5 flex flex-col gap-3 rounded-xl border border-brand/25 bg-brand/5 px-4 py-3.5 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-2.5">
+            <Icon name="info" className="mt-0.5 size-4 shrink-0 text-fg" />
+            <div>
+              <p className="font-medium text-fg">
+                How documents reach the Employee Portal
+              </p>
+              <p className="mt-0.5 text-xs leading-5 text-muted">
+                Documents uploaded here default to <strong>General (all employees)</strong> once Ready. To limit access to a department, assign a <strong>Department Space</strong> during upload or via the edit (<Icon name="edit" className="inline size-3 align-text-bottom" />) button.
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <Link
+              href="/employee/"
+              className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-medium hover:bg-surface-2"
+            >
+              Employee Portal <Icon name="arrowRight" className="size-3" />
+            </Link>
+            {canManageMembers && (
+              <Link
+                href="/company/"
+                className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-medium hover:bg-surface-2"
+              >
+                Manage Spaces <Icon name="arrowRight" className="size-3" />
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
+
       {!documentsLoaded ? (
         <div className="flex justify-center py-20">
           <Spinner className="size-6 text-muted" />
@@ -223,16 +264,34 @@ export function LibraryView() {
       ) : (
         <>
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative sm:w-72">
-              <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
-              <input
-                type="search"
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                placeholder="Search by file name"
-                aria-label="Search documents"
-                className={`${inputClass} pl-9`}
-              />
+            <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="relative sm:w-64">
+                <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder="Search by file name"
+                  aria-label="Search documents"
+                  className={`${inputClass} pl-9`}
+                />
+              </div>
+              {spaces.length > 0 && (
+                <select
+                  aria-label="Filter by department space"
+                  value={spaceFilter}
+                  onChange={e => setSpaceFilter(e.target.value)}
+                  className={`${inputClass} sm:w-52`}
+                >
+                  <option value="ALL">All spaces</option>
+                  <option value="GENERAL">General (All employees)</option>
+                  {spaces.map(sp => (
+                    <option key={sp.id} value={sp.id}>
+                      {sp.name}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
             <div role="group" aria-label="Filter by status" className="flex gap-1 overflow-x-auto">
               {FILTERS.map(f => (
@@ -266,13 +325,17 @@ export function LibraryView() {
                           {d.page_count ? `${d.page_count} pages • ` : ''}
                           {formatBytes(d.size_bytes)} &bull; Added {formatDate(d.created_at)}
                         </p>
-                        {(d.space_name || (d.tags && d.tags.length > 0)) && (
+                        {(isCompany || d.space_name || (d.tags && d.tags.length > 0)) && (
                           <div className="mt-1 flex flex-wrap gap-1">
-                            {d.space_name && (
+                            {d.space_name ? (
                               <span className="inline-flex items-center gap-1 rounded-md bg-brand/10 px-1.5 py-0.5 text-[11px] font-medium text-fg">
                                 <Icon name="folder" className="size-3" /> {d.space_name}
                               </span>
-                            )}
+                            ) : isCompany ? (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-muted">
+                                <Icon name="globe" className="size-3" /> General (All employees)
+                              </span>
+                            ) : null}
                             {(d.tags || []).map(tag => (
                               <span key={tag} className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted">
                                 #{tag}

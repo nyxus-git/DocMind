@@ -17,6 +17,7 @@ import { Spinner } from '../ui/Button';
 import { ToastProvider, useToast } from '../ui/Toast';
 import { MobileNav, Sidebar, TopBar } from './Chrome';
 import { CitationDrawer } from './CitationDrawer';
+import { CompanyContextBanner } from './CompanyContextBanner';
 import { GlobalSearchModal } from './GlobalSearchModal';
 import { UploadModal } from './UploadModal';
 import { TabId, WorkspaceProvider } from './WorkspaceContext';
@@ -73,6 +74,18 @@ function Shell({ session: initialSession }: { session: UserSession }) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  useEffect(() => {
+    const allowedUpload = session.role === 'OWNER' || session.role === 'ADMIN' || session.role === 'MEMBER';
+    if (!allowedUpload || typeof window === 'undefined' || !window.location.search.includes('upload=1')) return;
+    const t = setTimeout(() => {
+      setUploadOpen(true);
+      const url = new URL(window.location.href);
+      url.searchParams.delete('upload');
+      window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    }, 0);
+    return () => clearTimeout(t);
+  }, [session.role]);
   const expiredHandled = useRef(false);
   const mainRef = useRef<HTMLElement>(null);
 
@@ -327,6 +340,7 @@ function Shell({ session: initialSession }: { session: UserSession }) {
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
           <TopBar onSwitchWorkspace={switchWorkspace} onSignOut={signOut} onOpenSearch={() => setSearchOpen(true)} />
+          <CompanyContextBanner />
           <main ref={mainRef} className="scroll-thin flex-1 overflow-y-auto px-4 pb-28 pt-6 sm:px-6 lg:px-8 lg:pb-10" key={workspaceKey}>
             <div className={`mx-auto min-w-0 ${tab === 'chat' ? 'h-full max-w-6xl' : 'max-w-5xl'}`}>
               {loadError && tab !== 'chat' && <ErrorBanner message={loadError} onRetry={() => void reloadAll()} />}

@@ -229,15 +229,37 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
 
   /* ---------- Verification pending ---------- */
   if (verifyEmailSentTo) {
+    const verificationHeading =
+      accountType === 'company'
+        ? 'Company workspace ready — verify your email'
+        : accountType === 'employee'
+          ? 'Employee account created — verify your email'
+          : 'Check your inbox';
+
+    const verificationBody =
+      accountType === 'company'
+        ? `We sent a verification link to ${verifyEmailSentTo}. Verify within 24 hours, then sign in to open your Company Console and upload company documents.`
+        : accountType === 'employee'
+          ? `We sent a verification link to ${verifyEmailSentTo}. Verify within 24 hours, then sign in to access ${domainMatch?.company_name || 'your company'}’s Employee Knowledge Portal.`
+          : `We sent a verification link to ${verifyEmailSentTo}. It expires in 24 hours. Once you have verified, sign in to open your workspace.`;
+
     return (
       <div className="anim-rise">
         <div className="mb-5 inline-flex size-11 items-center justify-center rounded-full bg-ok-soft text-ok">
           <Icon name="check" className="size-5" strokeWidth={2.2} />
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight">Check your inbox</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{verificationHeading}</h1>
         <p className="mt-2 text-[15px] leading-7 text-muted">
-          We sent a verification link to <span className="font-medium text-fg">{verifyEmailSentTo}</span>. It expires in
-          24 hours. Once you have verified, sign in to open your workspace.
+          {verificationBody.split(verifyEmailSentTo).map((part, idx, arr) =>
+            idx < arr.length - 1 ? (
+              <React.Fragment key={idx}>
+                {part}
+                <span className="font-medium text-fg">{verifyEmailSentTo}</span>
+              </React.Fragment>
+            ) : (
+              part
+            ),
+          )}
         </p>
         <div className="mt-6 space-y-2.5">
           <Button className="w-full" size="lg" onClick={() => switchMode('signin')}>
