@@ -1,18 +1,27 @@
 import uuid
 from typing import Any, Dict, List, Optional, Set
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.storage.base import ObjectStorage
-from app.adapters.storage.local import get_storage
+from app.adapters.storage.local import LocalStorage, get_storage
+from app.adapters.storage.r2 import R2Storage
 from app.core.exceptions import DocMindException, EntityNotFoundException
+from app.core.http_safety import resolve_safe_inline_mime
 from app.ingestion.validator import validate_file_metadata
-from app.models.entities import Document
+from app.models.entities import Document, DocumentChunk
 from app.models.enums import DocumentErrorCode, DocumentStatus, JobType
 from app.repositories.audit import AuditRepository
 from app.repositories.document import DocumentRepository, _UNSET_SPACE
 from app.repositories.job import JobRepository
 from app.repositories.usage import UsageRepository
 from app.repositories.workspace import WorkspaceRepository
-from app.schemas.document import DocumentDTO, SafeErrorDTO, UploadIntentResponse
+from app.schemas.document import (
+    DocumentContentChunkDTO,
+    DocumentContentResponse,
+    DocumentDTO,
+    SafeErrorDTO,
+    UploadIntentResponse,
+)
 from app.services.quota import QuotaService
 
 
@@ -114,7 +123,7 @@ class DocumentService:
                 detail=f"Cannot complete upload for document in status {doc.status}."
             )
 
-        # Verify object exists in storage via HEAD
+        # Verify object exists in storage via HEAD and matches declared size limits
         head = await self.storage.head_object(doc.object_key)
         if not head:
             raise DocMindException(
@@ -122,6 +131,14 @@ class DocumentService:
                 code=DocumentErrorCode.STORAGE_UNAVAILABLE.value,
                 title="Object Not Found",
                 detail="Uploaded object bytes were not found in storage. Ensure direct PUT completed successfully."
+            )
+        uploaded_size = head.get("size_bytes")
+        if uploaded_size is not None and (uploaded_size <= 0 or uploaded_size != doc.size_bytes):
+            raise DocMindException(
+                status_code=400,
+                code=DocumentErrorCode.CORRUPT_FILE.value,
+                title="Uploaded Size Mismatch",
+                detail="Uploaded object size does not match declared upload intent size."
             )
 
         # Transactionally transition to QUEUED and enqueue ingestion job
@@ -232,7 +249,72 @@ class DocumentService:
         if not doc:
             raise EntityNotFoundException("Document", document_id)
 
-        return await self.storage.create_download_url(doc.object_key, expires_in=120)
+        safe_mime = resolve_safe_inline_mime(doc.filename, doc.mime_type)
+        head = await self.storage.head_object(doc.object_key)
+
+        # Self-heal if running with R2 and binary still resides in LocalStorage from earlier upload
+        if not head and isinstance(self.storage, R2Storage):
+            local_fallback = LocalStorage()
+            if await local_fallback.head_object(doc.object_key):
+                raw_bytes = await local_fallback.download_bytes(doc.object_key)
+                await self.storage.upload_bytes(doc.object_key, raw_bytes, content_type=safe_mime)
+                head = {"size_bytes": len(raw_bytes)}
+
+        if not head:
+            raise DocMindException(
+                status_code=404,
+                code="STORAGE_OBJECT_MISSING",
+                title="Original File Unavailable",
+                detail=f"The original binary for '{doc.filename}' is not stored in cloud storage. Use the extracted text reader or re-upload the document.",
+            )
+
+        return await self.storage.create_download_url(
+            doc.object_key,
+            expires_in=120,
+            content_type=safe_mime,
+            filename=doc.filename,
+        )
+
+    async def get_document_content(
+        self,
+        workspace_id: uuid.UUID,
+        document_id: uuid.UUID,
+        allowed_space_ids: Optional[Set[uuid.UUID]] = None,
+    ) -> DocumentContentResponse:
+        doc = await self.doc_repo.get_by_id(workspace_id, document_id, allowed_space_ids=allowed_space_ids)
+        if not doc:
+            raise EntityNotFoundException("Document", document_id)
+
+        rows = (
+            await self.db.execute(
+                select(DocumentChunk)
+                .where(
+                    DocumentChunk.workspace_id == workspace_id,
+                    DocumentChunk.document_id == doc.id,
+                )
+                .order_by(DocumentChunk.chunk_index.asc())
+                .limit(200)
+            )
+        ).scalars().all()
+
+        storage_available = bool(await self.storage.head_object(doc.object_key))
+        return DocumentContentResponse(
+            document_id=doc.id,
+            filename=doc.filename,
+            mime_type=doc.mime_type,
+            page_count=doc.page_count,
+            storage_available=storage_available,
+            chunks=[
+                DocumentContentChunkDTO(
+                    chunk_index=c.chunk_index,
+                    page_start=c.page_start,
+                    page_end=c.page_end,
+                    section_path=c.section_path,
+                    content=c.content,
+                )
+                for c in rows
+            ],
+        )
 
     async def retry_processing(self, workspace_id: uuid.UUID, document_id: uuid.UUID) -> uuid.UUID:
         doc = await self.doc_repo.get_by_id(workspace_id, document_id)

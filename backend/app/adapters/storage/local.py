@@ -5,6 +5,7 @@ from urllib.parse import quote
 from app.adapters.storage.base import ObjectStorage
 from app.adapters.storage.r2 import R2Storage
 from app.core.config import settings
+from app.core.http_safety import resolve_safe_inline_mime, sanitize_download_filename
 from app.core.security import sign_storage_key
 
 
@@ -37,11 +38,20 @@ class LocalStorage(ObjectStorage):
     async def create_download_url(
         self,
         object_key: str,
-        expires_in: int = 120
+        expires_in: int = 120,
+        content_type: Optional[str] = None,
+        filename: Optional[str] = None,
     ) -> str:
         exp, sig = sign_storage_key(object_key, "download", expires_in=expires_in)
         encoded_key = quote(object_key, safe="")
-        return f"{settings.API_BASE_URL}/api/v1/mock-storage/download?key={encoded_key}&exp={exp}&sig={sig}"
+        url = f"{settings.API_BASE_URL}/api/v1/mock-storage/download?key={encoded_key}&exp={exp}&sig={sig}"
+        if filename:
+            safe_name = sanitize_download_filename(filename)
+            url += f"&fn={quote(safe_name, safe='')}"
+        safe_mime = resolve_safe_inline_mime(filename, content_type)
+        if safe_mime:
+            url += f"&ct={quote(safe_mime, safe='')}"
+        return url
 
     async def head_object(self, object_key: str) -> Optional[Dict[str, Any]]:
         path = self._resolve_path(object_key)

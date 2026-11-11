@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ApiClient, CitationDTO } from '../../lib/api';
+import { ApiClient, CitationDTO, DocumentContentDTO } from '../../lib/api';
 import { Button, Spinner } from '../ui/Button';
 import { Drawer } from '../ui/Modal';
 import { Icon } from '../ui/Icon';
 import { useToast } from '../ui/Toast';
+import { DocumentReaderModal, isStorageMissingError, openDocumentWithFallback } from './DocumentReaderModal';
 
 export function CitationDrawer({
   citation,
@@ -20,13 +21,16 @@ export function CitationDrawer({
   const [opening, setOpening] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewDocId, setPreviewDocId] = useState<string | null>(null);
+  const [readerContent, setReaderContent] = useState<DocumentContentDTO | null>(null);
 
   const openSource = async () => {
     if (!citation) return;
     setOpening(true);
     try {
-      const { download_url } = await ApiClient.getDownloadUrl(citation.document_id);
-      window.open(download_url, '_blank', 'noopener,noreferrer');
+      await openDocumentWithFallback(citation.document_id, content => {
+        setReaderContent(content);
+        toast('Original PDF binary missing — opened extracted text reader.', 'info');
+      });
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Could not open the source file.', 'error');
     } finally {
@@ -48,6 +52,16 @@ export function CitationDrawer({
       setPreviewUrl(`${download_url}${pageAnchor}`);
       setPreviewDocId(citation.document_id);
     } catch (err) {
+      if (isStorageMissingError(err)) {
+        try {
+          const content = await ApiClient.getDocumentContent(citation.document_id);
+          setReaderContent(content);
+          toast('Original PDF binary missing — opened extracted text reader.', 'info');
+          return;
+        } catch {
+          // fall through to toast
+        }
+      }
       toast(err instanceof Error ? err.message : 'Could not load document preview.', 'error');
     } finally {
       setOpening(false);
@@ -57,6 +71,7 @@ export function CitationDrawer({
   const showingPreview = Boolean(citation && previewUrl && previewDocId === citation.document_id);
 
   return (
+    <>
     <Drawer
       open={!!citation}
       onClose={() => {
@@ -132,5 +147,14 @@ export function CitationDrawer({
         </div>
       )}
     </Drawer>
+    <DocumentReaderModal
+      content={readerContent}
+      onClose={() => setReaderContent(null)}
+      onAskDocument={docId => {
+        onAskDocument(docId);
+        onClose();
+      }}
+    />
+  </>
   );
 }

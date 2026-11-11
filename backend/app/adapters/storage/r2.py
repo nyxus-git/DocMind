@@ -5,6 +5,7 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 from app.adapters.storage.base import ObjectStorage
 from app.core.config import settings
+from app.core.http_safety import resolve_safe_inline_mime, sanitize_download_filename
 
 
 class R2Storage(ObjectStorage):
@@ -49,17 +50,25 @@ class R2Storage(ObjectStorage):
     async def create_download_url(
         self,
         object_key: str,
-        expires_in: int = 120
+        expires_in: int = 120,
+        content_type: Optional[str] = None,
+        filename: Optional[str] = None,
     ) -> str:
-        params = {
+        params: Dict[str, Any] = {
             "Bucket": self.bucket,
-            "Key": object_key
+            "Key": object_key,
         }
+        safe_mime = resolve_safe_inline_mime(filename, content_type)
+        if safe_mime:
+            params["ResponseContentType"] = safe_mime
+        if filename:
+            safe_name = sanitize_download_filename(filename)
+            params["ResponseContentDisposition"] = f'inline; filename="{safe_name}"'
         return await asyncio.to_thread(
             self.client.generate_presigned_url,
             "get_object",
             Params=params,
-            ExpiresIn=expires_in
+            ExpiresIn=expires_in,
         )
 
     async def head_object(self, object_key: str) -> Optional[Dict[str, Any]]:

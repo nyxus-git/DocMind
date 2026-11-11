@@ -11,6 +11,7 @@ from app.api.v1.dependencies import get_current_user
 from app.core.config import settings
 from app.core.domains import sanitize_company_slug
 from app.core.exceptions import CrossTenantAccessException, DocMindException
+from app.core.http_safety import csv_safe_cell
 from app.core.security import generate_secure_token, hash_token
 from app.db.session import get_db
 from app.models.entities import User
@@ -160,9 +161,17 @@ async def update_workspace_tier(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Updates the subscription tier for a workspace (restricted to OWNER)."""
+    """Updates the subscription tier for a workspace (restricted to OWNER; gated in production)."""
     ws_repo = WorkspaceRepository(db)
     audit_repo = AuditRepository(db)
+
+    if settings.APP_ENV == "production" and not current_user.is_superadmin:
+        raise DocMindException(
+            status_code=403,
+            code="BILLING_UPGRADE_REQUIRED",
+            title="Upgrade Requires Approval",
+            detail="Self-service plan changes are disabled in production. Contact support or a Platform Administrator.",
+        )
 
     membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
     if not membership or membership.role != WorkspaceRole.OWNER.value:
@@ -428,8 +437,13 @@ async def update_member_role(
         raise DocMindException(status_code=403, code="CANNOT_MODIFY_OWNER", title="Forbidden", detail="Only workspace Owners can modify Owner roles.")
 
     new_role = req.role.upper()
-    if new_role not in [WorkspaceRole.OWNER.value, WorkspaceRole.ADMIN.value, WorkspaceRole.MEMBER.value, WorkspaceRole.EMPLOYEE.value, WorkspaceRole.VIEWER.value]:
-        raise DocMindException(status_code=400, code="INVALID_ROLE", title="Bad Request", detail="Invalid role specified.")
+    if new_role not in [WorkspaceRole.ADMIN.value, WorkspaceRole.MEMBER.value, WorkspaceRole.EMPLOYEE.value, WorkspaceRole.VIEWER.value]:
+        raise DocMindException(
+            status_code=400,
+            code="INVALID_ROLE",
+            title="Bad Request",
+            detail="Role must be ADMIN, MEMBER, EMPLOYEE, or VIEWER. Use /transfer-ownership to assign an Owner.",
+        )
 
     updated = await ws_repo.update_member_role(workspace_id, target_user_id, new_role)
     if not updated:
@@ -554,12 +568,12 @@ async def export_workspace_audit_logs(
     writer.writerow(["Timestamp (UTC)", "Actor Email", "Action", "Target Type", "Target ID", "Metadata JSON"])
     for event, actor_email in events:
         writer.writerow([
-            event.created_at.isoformat(),
-            actor_email or "system",
-            event.action,
-            event.target_type,
-            str(event.target_id) if event.target_id else "",
-            json.dumps(event.audit_metadata or {}),
+            csv_safe_cell(event.created_at.isoformat()),
+            csv_safe_cell(actor_email or "system"),
+            csv_safe_cell(event.action),
+            csv_safe_cell(event.target_type),
+            csv_safe_cell(str(event.target_id) if event.target_id else ""),
+            csv_safe_cell(json.dumps(event.audit_metadata or {})),
         ])
 
     return Response(

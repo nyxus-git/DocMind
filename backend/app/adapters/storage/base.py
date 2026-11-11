@@ -15,7 +15,9 @@ class ObjectStorage(Protocol):
     async def create_download_url(
         self,
         object_key: str,
-        expires_in: int = 120
+        expires_in: int = 120,
+        content_type: Optional[str] = None,
+        filename: Optional[str] = None,
     ) -> str:
         """Creates short-lived presigned GET URL."""
         ...

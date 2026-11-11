@@ -9,12 +9,15 @@ from app.api.v1.dependencies import (
     require_document_write_access,
     require_write_access,
 )
+from app.core.config import settings
 from app.core.exceptions import DocMindException
+from app.core.http_safety import resolve_safe_inline_mime, sanitize_download_filename
 from app.core.security import verify_storage_signature
 from app.db.session import get_db
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.common import MessageResponse
 from app.schemas.document import (
+    DocumentContentResponse,
     DocumentDTO,
     DocumentUpdateDTO,
     SignedDownloadResponse,
@@ -141,6 +144,17 @@ async def get_document_download_url(
     return SignedDownloadResponse(download_url=url, expires_at=expires_at)
 
 
+@router.get("/{document_id}/content", response_model=DocumentContentResponse)
+async def get_document_content(
+    document_id: uuid.UUID,
+    ctx: WorkspaceContext = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    allowed_spaces = await WorkspaceRepository(db).get_accessible_space_ids(ctx.workspace.id, ctx.user.id, ctx.role)
+    doc_service = DocumentService(db)
+    return await doc_service.get_document_content(ctx.workspace.id, document_id, allowed_space_ids=allowed_spaces)
+
+
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
     document_id: uuid.UUID,
@@ -197,7 +211,10 @@ async def mock_upload(
         raise DocMindException(status_code=404, code="STORAGE_MODE_R2", title="Not Found", detail="Local storage endpoint is disabled when R2 is configured.")
     if not verify_storage_signature(key, "upload", exp, sig):
         raise DocMindException(status_code=403, code="INVALID_UPLOAD_SIGNATURE", title="Forbidden", detail="Signed upload URL is invalid or expired.")
+    max_bytes = max(settings.MAX_FILE_MB, 100) * 1024 * 1024
     body = await request.body()
+    if len(body) > max_bytes:
+        raise DocMindException(status_code=413, code="FILE_TOO_LARGE", title="Payload Too Large", detail="Uploaded payload exceeds server maximum.")
     await storage.save_bytes(key, body)
     return {"status": "uploaded", "size": len(body)}
 
@@ -207,11 +224,20 @@ async def mock_download(
     key: str = Query(...),
     exp: int = Query(...),
     sig: str = Query(...),
+    fn: Optional[str] = Query(None),
+    ct: Optional[str] = Query(None),
 ):
     storage = get_storage()
     if not isinstance(storage, LocalStorage):
         raise DocMindException(status_code=404, code="STORAGE_MODE_R2", title="Not Found", detail="Local storage endpoint is disabled when R2 is configured.")
     if not verify_storage_signature(key, "download", exp, sig):
         raise DocMindException(status_code=403, code="INVALID_DOWNLOAD_SIGNATURE", title="Forbidden", detail="Signed download URL is invalid or expired.")
-    data = await storage.download_bytes(key)
-    return Response(content=data, media_type="application/octet-stream")
+    try:
+        data = await storage.download_bytes(key)
+    except FileNotFoundError:
+        raise DocMindException(status_code=404, code="STORAGE_OBJECT_MISSING", title="Not Found", detail="Stored object not found.")
+    media_type = resolve_safe_inline_mime(fn, ct)
+    headers = {}
+    if fn:
+        headers["Content-Disposition"] = f'inline; filename="{sanitize_download_filename(fn)}"'
+    return Response(content=data, media_type=media_type, headers=headers)

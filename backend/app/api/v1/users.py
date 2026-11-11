@@ -3,11 +3,12 @@ from typing import Optional
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.dependencies import WorkspaceContext, get_current_user, get_current_workspace
+from app.core.config import settings
 from app.core.exceptions import DocMindException
 from app.core.security import hash_password, verify_password
 from app.db.session import get_db
 from app.models.entities import User
-from app.models.enums import JobType, UserStatus
+from app.models.enums import JobType, UserStatus, WorkspaceRole
 from app.repositories.job import JobRepository
 from app.repositories.user import UserRepository
 from app.repositories.workspace import WorkspaceRepository
@@ -87,8 +88,35 @@ async def update_my_profile(
 ):
     user_repo = UserRepository(db)
     if req.email:
-        ctx.user.email = req.email.strip().lower()
-        await db.flush()
+        next_email = req.email.strip().lower()
+        if next_email != ctx.user.email.lower():
+            if ctx.role == WorkspaceRole.EMPLOYEE.value:
+                raise DocMindException(
+                    status_code=403,
+                    code="ADMIN_MANAGED_ACCOUNT",
+                    title="Forbidden",
+                    detail="Employee login emails are managed by your Company Administrator.",
+                )
+            if settings.PLATFORM_ADMIN_EMAIL and next_email == settings.PLATFORM_ADMIN_EMAIL.lower():
+                raise DocMindException(
+                    status_code=403,
+                    code="RESERVED_EMAIL_ADDRESS",
+                    title="Forbidden",
+                    detail="This email address is reserved.",
+                )
+            existing = await user_repo.get_by_email(next_email)
+            if existing and existing.id != ctx.user.id:
+                raise DocMindException(
+                    status_code=409,
+                    code="EMAIL_ALREADY_EXISTS",
+                    title="Email In Use",
+                    detail="Another account already uses this email address.",
+                )
+            ctx.user.email = next_email
+            if settings.REQUIRE_EMAIL_VERIFICATION:
+                ctx.user.verified_at = None
+                ctx.user.status = UserStatus.UNVERIFIED.value
+            await db.flush()
 
     return UserProfileDTO(
         id=ctx.user.id,

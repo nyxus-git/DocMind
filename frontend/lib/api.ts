@@ -193,6 +193,23 @@ export interface EmployeePortalInfoDTO {
   pending_company_slug?: string;
 }
 
+export interface DocumentContentChunkDTO {
+  chunk_index: number;
+  page_start?: number | null;
+  page_end?: number | null;
+  section_path?: string | null;
+  content: string;
+}
+
+export interface DocumentContentDTO {
+  document_id: string;
+  filename: string;
+  mime_type: string;
+  page_count: number;
+  storage_available: boolean;
+  chunks: DocumentContentChunkDTO[];
+}
+
 export interface BulkInviteResponse {
   results: Array<{ email: string; status: string; detail: string }>;
   invited_count: number;
@@ -437,34 +454,38 @@ export function normalizeApiBase(url: string): string {
   return trimmed;
 }
 
+export function isValidApiBaseOverride(url: string): boolean {
+  const norm = normalizeApiBase(url);
+  if (norm.startsWith('/')) return true;
+  try {
+    const parsed = new URL(norm);
+    if (parsed.protocol === 'https:') return true;
+    if (parsed.protocol === 'http:' && (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Dynamically resolves the API base URL in priority order:
- * 1. Runtime URL search query parameter: ?api_base_url=... or ?api_url=...
- * 2. Runtime localStorage override: 'docmind_api_base_url'
- * 3. Build-time environment variable: NEXT_PUBLIC_API_BASE_URL
- * 4. Production browser fallback: same-origin `${window.location.origin}/api/v1`
- * 5. Local development fallback: 'http://localhost:8000/api/v1'
+ * 1. Explicit user-saved override in localStorage: 'docmind_api_base_url' (strictly validated; never auto-saved from URL query params)
+ * 2. Build-time environment variable: NEXT_PUBLIC_API_BASE_URL
+ * 3. Production browser fallback: same-origin `${window.location.origin}/api/v1`
+ * 4. Local development fallback: 'http://localhost:8000/api/v1'
  */
 export function getApiBase(): string {
   if (typeof window !== 'undefined') {
-    // 1. Query parameter override (?api_base_url=... or ?api_url=...)
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const queryApi = params.get('api_base_url') || params.get('api_url');
-      if (queryApi && queryApi.trim()) {
-        const norm = normalizeApiBase(queryApi);
-        localStorage.setItem('docmind_api_base_url', norm);
-        return norm;
-      }
-    } catch {
-      // ignore
-    }
-
-    // 2. Stored user override
+    // Only honor validated explicit user override (prevents query-string API phishing hijacks)
     try {
       const stored = localStorage.getItem('docmind_api_base_url');
-      if (stored && stored.trim()) {
+      if (stored && stored.trim() && isValidApiBaseOverride(stored)) {
         return normalizeApiBase(stored);
+      }
+      if (stored) {
+        localStorage.removeItem('docmind_api_base_url');
       }
     } catch {
       // ignore
@@ -503,10 +524,12 @@ export function getApiBase(): string {
 /** Error thrown for non-2xx API responses. `status` lets the UI react to 401 (expired session), 402/429 (quota), etc. */
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  code?: string;
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -568,6 +591,9 @@ export class ApiClient {
   static setBaseUrl(url: string): void {
     if (typeof window !== 'undefined') {
       if (url && url.trim()) {
+        if (!isValidApiBaseOverride(url)) {
+          throw new Error('Custom API URL must use HTTPS (or http://localhost for local development).');
+        }
         localStorage.setItem('docmind_api_base_url', normalizeApiBase(url));
       } else {
         localStorage.removeItem('docmind_api_base_url');
@@ -697,8 +723,9 @@ export class ApiClient {
       }
 
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new ApiError(describeApiError(errorData, res.status), res.status);
+        const errorData = (await res.json().catch(() => ({}))) as { code?: unknown };
+        const code = typeof errorData.code === 'string' ? errorData.code : undefined;
+        throw new ApiError(describeApiError(errorData, res.status), res.status, code);
       }
 
       if (res.status === 204) {
@@ -883,6 +910,10 @@ export class ApiClient {
 
   static async getDownloadUrl(document_id: string): Promise<{ download_url: string }> {
     return this.request<{ download_url: string }>(`/documents/${document_id}/download-url`, { method: 'POST' });
+  }
+
+  static async getDocumentContent(document_id: string): Promise<DocumentContentDTO> {
+    return this.request<DocumentContentDTO>(`/documents/${document_id}/content`);
   }
 
   static async retryDocument(document_id: string) {

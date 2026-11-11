@@ -2,12 +2,13 @@
 
 import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ApiClient, DocumentDTO, DocumentSummaryResponse, ExtractionResponse } from '../../../lib/api';
+import { ApiClient, DocumentContentDTO, DocumentDTO, DocumentSummaryResponse, ExtractionResponse } from '../../../lib/api';
 import { formatBytes, formatDate } from '../../../lib/format';
 import { Button, inputClass, Spinner } from '../../ui/Button';
 import { Icon } from '../../ui/Icon';
 import { Modal } from '../../ui/Modal';
 import { useToast } from '../../ui/Toast';
+import { DocumentReaderModal, openDocumentWithFallback } from '../DocumentReaderModal';
 import { EmptyState, FileTypeIcon, PageHeader, Panel, StatusBadge } from '../parts';
 import { useWorkspace } from '../WorkspaceContext';
 
@@ -78,6 +79,7 @@ export function LibraryView() {
   const [editSpaceId, setEditSpaceId] = useState('');
   const [savingMeta, setSavingMeta] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [readerContent, setReaderContent] = useState<DocumentContentDTO | null>(null);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
@@ -188,8 +190,10 @@ export function LibraryView() {
   const download = async (doc: DocumentDTO) => {
     setBusyId(doc.id);
     try {
-      const { download_url } = await ApiClient.getDownloadUrl(doc.id);
-      window.open(download_url, '_blank', 'noopener,noreferrer');
+      await openDocumentWithFallback(doc.id, content => {
+        setReaderContent(content);
+        toast('Original PDF binary missing in storage — opened extracted text reader.', 'info');
+      });
     } catch (err) {
       if (!handleApiError(err)) toast(err instanceof Error ? err.message : 'Could not open the file.', 'error');
     } finally {
@@ -618,6 +622,12 @@ export function LibraryView() {
           )}
         </form>
       </Modal>
+
+      <DocumentReaderModal
+        content={readerContent}
+        onClose={() => setReaderContent(null)}
+        onAskDocument={canAsk ? docId => askDocuments([docId]) : undefined}
+      />
     </div>
   );
 }

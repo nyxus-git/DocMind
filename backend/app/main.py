@@ -18,6 +18,7 @@ from app.api.v1.users import router as users_router
 from app.api.v1.workspaces import router as workspaces_router
 from app.core.config import settings
 from app.core.exceptions import DocMindException, docmind_exception_handler
+from app.core.http_safety import DEFAULT_CORS_REGEX, cors_headers_for_request
 from app.core.logging import RequestLoggingMiddleware, setup_logging
 from app.core.rate_limit import RateLimitMiddleware
 from app.db.migrate import run_migrations
@@ -48,13 +49,7 @@ app.add_exception_handler(DocMindException, docmind_exception_handler)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    origin = request.headers.get("Origin") or "*"
-    headers = {
-        "Access-Control-Allow-Origin": origin,
-        "Access-Control-Allow-Credentials": "true",
-        "Access-Control-Allow-Methods": "*",
-        "Access-Control-Allow-Headers": "*",
-    }
+    headers = cors_headers_for_request(request)
     field_errors = []
     messages = []
     for err in exc.errors():
@@ -83,13 +78,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         f"Unhandled 500 Exception on {request.method} {request.url.path}: {exc}\n{traceback.format_exc()}"
     )
     request_id = getattr(request.state, "request_id", None)
-    origin = request.headers.get("Origin") or "*"
-    headers = {
-        "Access-Control-Allow-Origin": origin,
-        "Access-Control-Allow-Credentials": "true",
-        "Access-Control-Allow-Methods": "*",
-        "Access-Control-Allow-Headers": "*",
-    }
+    headers = cors_headers_for_request(request)
     return JSONResponse(
         status_code=500,
         content={
@@ -108,14 +97,10 @@ app.add_middleware(RateLimitMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 
 # CORS configuration
-default_cors_regex = (
-    r"https?://(localhost|127\.0\.0\.1|.*\.vercel\.app|.*\.pages\.dev|.*\.netlify\.app|.*\.railway\.app|.*\.rohanmane\.dev|.*\.docmind\.ai|.*\.docmind\.app|.*\.docmind\.dev)(:[0-9]+)?"
-)
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.effective_cors_origins,
-    allow_origin_regex=settings.CORS_ORIGIN_REGEX or default_cors_regex,
+    allow_origin_regex=settings.CORS_ORIGIN_REGEX or DEFAULT_CORS_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

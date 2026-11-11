@@ -8,6 +8,7 @@ import {
   ApiError,
   CitationDTO,
   ConversationDTO,
+  DocumentContentDTO,
   DocumentDTO,
   DocumentSummaryResponse,
   EmployeePortalInfoDTO,
@@ -23,6 +24,7 @@ import { Modal } from '../ui/Modal';
 import { ThemeToggle } from '../ui/ThemeToggle';
 import { ToastProvider, useToast } from '../ui/Toast';
 import { CitationDrawer } from '../workspace/CitationDrawer';
+import { DocumentReaderModal, openDocumentWithFallback } from '../workspace/DocumentReaderModal';
 import { RichText } from '../workspace/RichText';
 import { FileTypeIcon, Panel, StatusBadge } from '../workspace/parts';
 
@@ -135,6 +137,7 @@ export function EmployeePortalInner({
   const [summaryFor, setSummaryFor] = useState<DocumentDTO | null>(null);
   const [summary, setSummary] = useState<DocumentSummaryResponse | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [readerContent, setReaderContent] = useState<DocumentContentDTO | null>(null);
 
   // Change password modal
   const [pwdOpen, setPwdOpen] = useState(false);
@@ -344,8 +347,10 @@ export function EmployeePortalInner({
   const openDocumentFile = async (doc: DocumentDTO) => {
     setOpeningDocId(doc.id);
     try {
-      const { download_url } = await ApiClient.getDownloadUrl(doc.id);
-      window.open(download_url, '_blank', 'noopener,noreferrer');
+      await openDocumentWithFallback(doc.id, content => {
+        setReaderContent(content);
+        toast('Original PDF binary missing in storage — opened extracted text reader.', 'info');
+      });
     } catch (err) {
       handleErr(err, 'Could not open this document.');
     } finally {
@@ -1120,6 +1125,23 @@ export function EmployeePortalInner({
           </div>
         </form>
       </Modal>
+
+      <DocumentReaderModal
+        content={readerContent}
+        onClose={() => setReaderContent(null)}
+        onAskDocument={docId => {
+          const target = documents.find(d => d.id === docId);
+          if (target) {
+            askAboutSingleDoc(target);
+          } else {
+            setConvId(null);
+            setMessages([]);
+            setFocusedDoc({ id: docId, filename: readerContent?.filename || 'Document' });
+            setPortalTab('ask');
+            void sendQuestion('Summarize key points from this document.', [docId]);
+          }
+        }}
+      />
     </div>
   );
 }

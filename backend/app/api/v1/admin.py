@@ -11,6 +11,7 @@ from app.adapters.storage.local import is_r2_configured
 from app.api.v1.dependencies import require_platform_admin
 from app.core.config import settings
 from app.core.exceptions import DocMindException
+from app.core.http_safety import csv_safe_cell
 from app.core.security import hash_password
 from app.db.session import get_db
 from app.models.entities import AuditEvent, Document, DocumentChunk, Job, Message, User, Workspace, WorkspaceMember, utc_now
@@ -578,13 +579,13 @@ async def export_admin_audit_logs(
     writer.writerow(["Timestamp (UTC)", "Workspace ID", "Actor Email", "Action", "Target Type", "Target ID", "Metadata JSON"])
     for event, actor_email in events:
         writer.writerow([
-            event.created_at.isoformat(),
-            str(event.workspace_id),
-            actor_email or "system",
-            event.action,
-            event.target_type,
-            str(event.target_id) if event.target_id else "",
-            json.dumps(event.audit_metadata or {}),
+            csv_safe_cell(event.created_at.isoformat()),
+            csv_safe_cell(str(event.workspace_id)),
+            csv_safe_cell(actor_email or "system"),
+            csv_safe_cell(event.action),
+            csv_safe_cell(event.target_type),
+            csv_safe_cell(str(event.target_id) if event.target_id else ""),
+            csv_safe_cell(json.dumps(event.audit_metadata or {})),
         ])
     return Response(
         content=buf.getvalue(),

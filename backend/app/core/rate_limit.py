@@ -6,6 +6,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.core.config import settings
+from app.core.http_safety import cors_headers_for_request
 
 
 class SlidingWindowLimiter:
@@ -74,7 +75,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         allowed, retry_after = _limiter.check(key, limit, window)
         if not allowed:
-            origin = request.headers.get("Origin") or "*"
+            headers = {"Retry-After": str(retry_after), **cors_headers_for_request(request)}
             return JSONResponse(
                 status_code=429,
                 content={
@@ -84,11 +85,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     "code": "RATE_LIMIT_EXCEEDED",
                     "detail": f"Rate limit exceeded. Please wait {retry_after} seconds and try again.",
                 },
-                headers={
-                    "Retry-After": str(retry_after),
-                    "Access-Control-Allow-Origin": origin,
-                    "Access-Control-Allow-Credentials": "true",
-                },
+                headers=headers,
             )
 
         return await call_next(request)

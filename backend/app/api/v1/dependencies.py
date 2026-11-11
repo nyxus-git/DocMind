@@ -223,7 +223,9 @@ async def require_platform_admin(
     Strictly denies regular tenant owners or members.
     """
     is_super = current_user.is_superadmin or (
-        bool(settings.PLATFORM_ADMIN_EMAIL) and current_user.email.lower() == settings.PLATFORM_ADMIN_EMAIL.lower()
+        bool(settings.PLATFORM_ADMIN_EMAIL)
+        and current_user.verified_at is not None
+        and current_user.email.lower() == settings.PLATFORM_ADMIN_EMAIL.lower()
     )
     if not is_super:
         raise DocMindException(

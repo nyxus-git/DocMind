@@ -61,3 +61,20 @@ class DocumentUpdateDTO(BaseModel):
 class SignedDownloadResponse(BaseModel):
     download_url: str
     expires_at: str
+
+
+class DocumentContentChunkDTO(BaseModel):
+    chunk_index: int
+    page_start: Optional[int] = None
+    page_end: Optional[int] = None
+    section_path: Optional[str] = None
+    content: str
+
+
+class DocumentContentResponse(BaseModel):
+    document_id: uuid.UUID
+    filename: str
+    mime_type: str
+    page_count: int
+    storage_available: bool
+    chunks: List[DocumentContentChunkDTO]

@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from app.core.http_safety import cors_headers_for_request
 
 
 class ProblemDetail(BaseModel):
@@ -82,11 +83,5 @@ async def docmind_exception_handler(request: Request, exc: Any) -> JSONResponse:
         request_id=request_id,
         field_errors=exc.field_errors,
     )
-    origin = request.headers.get("Origin") or "*"
-    headers = {
-        "Access-Control-Allow-Origin": origin,
-        "Access-Control-Allow-Credentials": "true",
-        "Access-Control-Allow-Methods": "*",
-        "Access-Control-Allow-Headers": "*",
-    }
+    headers = cors_headers_for_request(request)
     return JSONResponse(status_code=exc.status_code, content=problem.model_dump(), headers=headers)
