@@ -13,13 +13,14 @@ import {
   KnowledgeGapDTO,
   KnowledgeSpaceDTO,
   PendingInviteDTO,
+  ProvisionEmployeesResponse,
   UsageSummaryDTO,
   WorkspaceMemberDTO,
 } from '../../lib/api';
 import { formatBytes, formatDate, timeAgo } from '../../lib/format';
 import { clearSession, readRawSession, UserSession } from '../../lib/session';
 import { Button, inputClass, Spinner } from '../ui/Button';
-import { Icon } from '../ui/Icon';
+import { Icon, IconName } from '../ui/Icon';
 import { Logo } from '../ui/Logo';
 import { ThemeToggle } from '../ui/ThemeToggle';
 import { ToastProvider, useToast } from '../ui/Toast';
@@ -31,16 +32,55 @@ import { LibraryView } from '../workspace/views/LibraryView';
 
 type CompanyTab = 'overview' | 'ask' | 'documents' | 'employees' | 'spaces' | 'policy' | 'gaps';
 
+function companyMonogram(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return `${words[0][0] || ''}${words[1][0] || ''}`.toUpperCase();
+  return (name.trim().slice(0, 2) || 'CO').toUpperCase();
+}
+
+function generateBatchPassword(prefix?: string): string {
+  const cleanPrefix = (prefix || 'DocM').replace(/[^A-Za-z]/g, '').slice(0, 4) || 'Corp';
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  const symbols = '!@#$%';
+  let suffix = '';
+  if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+    const arr = new Uint32Array(7);
+    window.crypto.getRandomValues(arr);
+    for (let i = 0; i < 6; i += 1) suffix += chars[arr[i] % chars.length];
+    suffix += symbols[arr[6] % symbols.length];
+  } else {
+    suffix = 'K8pN4x!';
+  }
+  return `${cleanPrefix}-${suffix}`;
+}
+
 const subscribeStorage = (cb: () => void) => {
   window.addEventListener('storage', cb);
   return () => window.removeEventListener('storage', cb);
 };
 
-function StatCard({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
+function StatCard({
+  label,
+  value,
+  hint,
+  icon,
+}: {
+  label: string;
+  value: string | number;
+  hint?: string;
+  icon?: IconName;
+}) {
   return (
-    <Panel className="p-4 sm:p-5">
-      <p className="text-xs font-medium uppercase tracking-wider text-muted">{label}</p>
-      <p className="tabular mt-2 text-2xl font-semibold tracking-tight">{value}</p>
+    <Panel className="p-4 transition-colors hover:border-line-strong sm:p-5">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted">{label}</p>
+        {icon && (
+          <span className="inline-flex size-7 items-center justify-center rounded-lg bg-surface-2 text-muted">
+            <Icon name={icon} className="size-3.5" />
+          </span>
+        )}
+      </div>
+      <p className="tabular mt-2.5 text-2xl font-semibold tracking-tight">{value}</p>
       {hint && <p className="mt-1 text-xs text-faint">{hint}</p>}
     </Panel>
   );
@@ -78,15 +118,19 @@ export function CompanyConsoleInner({
   // Policy edit state
   const [companyName, setCompanyName] = useState('');
   const [domainsInput, setDomainsInput] = useState('');
-  const [joinPolicy, setJoinPolicy] = useState<'INVITE_ONLY' | 'DOMAIN_APPROVAL' | 'DOMAIN_AUTO_JOIN'>('INVITE_ONLY');
-  const [defaultRole, setDefaultRole] = useState<'EMPLOYEE' | 'MEMBER' | 'VIEWER'>('EMPLOYEE');
   const [promptsInput, setPromptsInput] = useState('');
   const [savingPolicy, setSavingPolicy] = useState(false);
 
-  // Employee actions
-  const [bulkEmails, setBulkEmails] = useState('');
-  const [bulkRole, setBulkRole] = useState<'EMPLOYEE' | 'MEMBER' | 'ADMIN'>('EMPLOYEE');
-  const [inviting, setInviting] = useState(false);
+  // Employee provisioning & directory state
+  const [provisionEmails, setProvisionEmails] = useState('');
+  const [provisionPassword, setProvisionPassword] = useState('');
+  const [showProvisionPassword, setShowProvisionPassword] = useState(true);
+  const [provisionRole, setProvisionRole] = useState<'EMPLOYEE' | 'MEMBER' | 'ADMIN'>('EMPLOYEE');
+  const [resetExistingPassword, setResetExistingPassword] = useState(false);
+  const [provisioning, setProvisioning] = useState(false);
+  const [provisionResult, setProvisionResult] = useState<ProvisionEmployeesResponse | null>(null);
+  const [lastSentPassword, setLastSentPassword] = useState('');
+  const [directorySearch, setDirectorySearch] = useState('');
   const [requestRoleMap, setRequestRoleMap] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -155,9 +199,8 @@ export function CompanyConsoleInner({
       setUsage(usg);
       setCompanyName(st.name);
       setDomainsInput((st.allowed_domains || []).join(', '));
-      setJoinPolicy(st.join_policy);
-      setDefaultRole(st.default_join_role);
       setPromptsInput((st.starter_prompts || []).join('\n'));
+      setProvisionPassword(prev => prev || generateBatchPassword(st.name));
       setJoinRequests(jr);
       setMembers(mems);
       setPendingInvites(invs);
@@ -203,23 +246,53 @@ export function CompanyConsoleInner({
     }
   };
 
-  const sendBulkInvites = async (e: React.FormEvent) => {
+  const createProvisionBatch = async (e: React.FormEvent) => {
     e.preventDefault();
-    const list = bulkEmails
+    const list = provisionEmails
       .split(/[\s,;]+/)
-      .map(s => s.trim())
+      .map(s => s.trim().toLowerCase())
       .filter(s => s.includes('@'));
-    if (!list.length) return toast('Enter at least one valid email address.', 'error');
-    setInviting(true);
+    if (!list.length) return toast('Enter at least one valid employee email address.', 'error');
+    if (provisionPassword.length < 8) {
+      return toast('Set a password with at least 8 characters for this employee batch.', 'error');
+    }
+    setProvisioning(true);
     try {
-      const res = await ApiClient.bulkInviteEmployees(list, bulkRole);
-      toast(`Processed: ${res.added_count} added, ${res.invited_count} invited, ${res.skipped_count} skipped.`, 'success');
-      setBulkEmails('');
+      const res = await ApiClient.provisionCompanyEmployees({
+        emails: list,
+        password: provisionPassword,
+        role: provisionRole,
+        reset_existing_password: resetExistingPassword,
+      });
+      setProvisionResult(res);
+      setLastSentPassword(provisionPassword);
+      setProvisionEmails('');
+      toast(
+        `Processed ${res.results.length} email(s): ${res.created_count} created, ${res.emails_sent_count} credential email(s) sent.`,
+        'success',
+      );
       await loadAll();
     } catch (err) {
-      handleErr(err, 'Could not invite employees.');
+      handleErr(err, 'Could not provision employee accounts.');
     } finally {
-      setInviting(false);
+      setProvisioning(false);
+    }
+  };
+
+  const copyProvisionCredentials = async () => {
+    if (!provisionResult) return;
+    const activePass = lastSentPassword || provisionPassword;
+    const summaryLines = [
+      `${overview?.company_name || session.workspaceName} — DocMind Portal Login Details`,
+      `Portal URL: ${shareUrl || `/${activeSlug || 'company'}/`}`,
+      `Shared Batch Password: ${activePass}`,
+      `Emails: ${provisionResult.results.map(r => r.email).join(', ')}`,
+    ];
+    try {
+      await navigator.clipboard.writeText(summaryLines.join('\n'));
+      toast('Copied portal link, email IDs, and shared password.', 'success');
+    } catch {
+      toast('Could not copy automatically — copy details directly from the card.', 'info');
     }
   };
 
@@ -266,12 +339,12 @@ export function CompanyConsoleInner({
       const updated = await ApiClient.updateCompanySettings({
         name: companyName.trim() || undefined,
         allowed_domains: domains,
-        join_policy: joinPolicy,
-        default_join_role: defaultRole,
+        join_policy: 'INVITE_ONLY',
+        default_join_role: 'EMPLOYEE',
         starter_prompts: prompts,
       });
       setSettings(updated);
-      toast('Company domain & onboarding policy saved.', 'success');
+      toast('Company settings saved.', 'success');
       await loadAll();
     } catch (err) {
       handleErr(err, 'Failed to save settings.');
@@ -333,12 +406,13 @@ export function CompanyConsoleInner({
     }
   };
 
+  const browserOrigin = useSyncExternalStore(
+    subscribeStorage,
+    () => window.location.origin,
+    () => '',
+  );
   const shareSlug = activeSlug || settings?.slug || overview?.slug;
-  const shareUrl = useMemo(() => {
-    if (!shareSlug) return '';
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    return origin ? `${origin}/${shareSlug}/` : `/${shareSlug}/`;
-  }, [shareSlug]);
+  const shareUrl = shareSlug ? (browserOrigin ? `${browserOrigin}/${shareSlug}/` : `/${shareSlug}/`) : '';
 
   const copyShareUrl = async () => {
     if (!shareUrl) return;
@@ -352,20 +426,11 @@ export function CompanyConsoleInner({
     }
   };
 
-  const enableLinkApproval = async () => {
-    setSavingPolicy(true);
-    try {
-      const updated = await ApiClient.updateCompanySettings({ join_policy: 'DOMAIN_APPROVAL' });
-      setSettings(updated);
-      setJoinPolicy(updated.join_policy);
-      toast('Approval Queue enabled! Staff opening your company link can now request access safely.', 'success');
-      await loadAll();
-    } catch (err) {
-      handleErr(err, 'Could not update join policy.');
-    } finally {
-      setSavingPolicy(false);
-    }
-  };
+  const filteredMembers = useMemo(() => {
+    const q = directorySearch.trim().toLowerCase();
+    if (!q) return members;
+    return members.filter(m => m.email.toLowerCase().includes(q) || m.role.toLowerCase().includes(q));
+  }, [directorySearch, members]);
 
   const docWorkspaceCtx = useMemo<WorkspaceContextValue>(
     () => ({
@@ -413,36 +478,49 @@ export function CompanyConsoleInner({
     [documents, isAdmin, loadAll, loading, session, settings?.starter_prompts, signOut, spaces, usage],
   );
 
-  const tabs: { id: CompanyTab; label: string; badge?: number }[] = isAdmin
+  const tabs: { id: CompanyTab; label: string; icon: IconName; badge?: number }[] = isAdmin
     ? [
-        { id: 'overview', label: 'Overview' },
-        { id: 'ask', label: 'Ask AI' },
-        { id: 'documents', label: 'Documents', badge: documents.length || undefined },
-        { id: 'employees', label: 'Employees', badge: pendingJoinReqs.length || undefined },
-        { id: 'spaces', label: 'Departments' },
-        { id: 'policy', label: 'Domain & Policy' },
-        { id: 'gaps', label: 'Knowledge Gaps', badge: gaps.length || undefined },
+        { id: 'overview', label: 'Overview', icon: 'grid' },
+        { id: 'ask', label: 'Ask AI', icon: 'chat' },
+        { id: 'documents', label: 'Documents', icon: 'file', badge: documents.length || undefined },
+        { id: 'employees', label: 'Employees', icon: 'users', badge: pendingJoinReqs.length || undefined },
+        { id: 'spaces', label: 'Departments', icon: 'folder' },
+        { id: 'policy', label: 'Company Settings', icon: 'sliders' },
+        { id: 'gaps', label: 'Knowledge Gaps', icon: 'alert', badge: gaps.length || undefined },
       ]
     : [
-        { id: 'ask', label: 'Ask AI' },
-        { id: 'documents', label: 'Documents', badge: documents.length || undefined },
+        { id: 'ask', label: 'Ask AI', icon: 'chat' },
+        { id: 'documents', label: 'Documents', icon: 'file', badge: documents.length || undefined },
       ];
+
+  const brandName = overview?.company_name || session.workspaceName || 'Company';
+  const initials = companyMonogram(brandName);
 
   return (
     <div className="min-h-screen bg-bg text-fg">
       {/* Header */}
-      <header className="sticky top-0 z-30 border-b border-line bg-bg/90 px-4 backdrop-blur sm:px-6">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-3">
+      <header className="sticky top-0 z-30 border-b border-line bg-bg/92 px-4 backdrop-blur sm:px-6">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <Link href="/" aria-label="DocMind">
+            <Link href="/" aria-label="DocMind" className="shrink-0">
               <Logo />
             </Link>
-            <span className="hidden h-4 w-px bg-line sm:inline-block" />
-            <div className="hidden min-w-0 items-center gap-2 sm:flex">
-              <span className="truncate text-sm font-semibold">{overview?.company_name || session.workspaceName}</span>
-              <span className="rounded-md bg-brand/10 px-2 py-0.5 text-[11px] font-semibold text-fg">
-                {isAdmin ? 'Admin Console' : 'Contributor Workspace'}
+            <span className="hidden h-5 w-px bg-line sm:inline-block" />
+            <div className="hidden min-w-0 items-center gap-2.5 sm:flex">
+              <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-xs font-bold tracking-tight text-brand-fg shadow-xs">
+                {initials}
               </span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-sm font-semibold">{brandName}</span>
+                  <span className="rounded-md bg-brand/10 px-2 py-0.5 text-[11px] font-semibold text-fg">
+                    {isAdmin ? 'Admin Console' : 'Contributor'}
+                  </span>
+                </div>
+                {activeSlug && (
+                  <p className="truncate font-mono text-[11px] text-muted">/{activeSlug}/</p>
+                )}
+              </div>
             </div>
           </div>
 
@@ -450,7 +528,13 @@ export function CompanyConsoleInner({
             {shareUrl && (
               <Button variant="secondary" size="sm" onClick={() => void copyShareUrl()}>
                 <Icon name={copiedLink ? 'check' : 'copy'} className="size-3.5" />
-                <span className="hidden sm:inline">{copiedLink ? 'Copied Link' : 'Share Link'}</span>
+                <span className="hidden sm:inline">{copiedLink ? 'Copied URL' : 'Copy Portal URL'}</span>
+              </Button>
+            )}
+            {isAdmin && (
+              <Button variant="secondary" size="sm" onClick={() => setTab('employees')}>
+                <Icon name="userCheck" className="size-3.5" />
+                <span className="hidden md:inline">Add Employees</span>
               </Button>
             )}
             <Button size="sm" onClick={() => setUploadOpen(true)}>
@@ -459,7 +543,7 @@ export function CompanyConsoleInner({
             </Button>
             <Link
               href="/app/"
-              className="hidden h-8 items-center gap-1 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium hover:bg-surface-2 md:inline-flex"
+              className="hidden h-8 items-center gap-1 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium hover:bg-surface-2 lg:inline-flex"
               title="Open Compare matrix and workspace tools"
             >
               Workspace Tools
@@ -467,7 +551,7 @@ export function CompanyConsoleInner({
             {session.isSuperAdmin && (
               <Link
                 href="/admin/"
-                className="hidden h-8 items-center gap-1 rounded-lg border border-amber-500/30 px-2.5 text-xs font-medium text-amber-500 hover:bg-amber-500/10 lg:inline-flex"
+                className="hidden h-8 items-center gap-1 rounded-lg border border-amber-500/30 px-2.5 text-xs font-medium text-amber-500 hover:bg-amber-500/10 xl:inline-flex"
               >
                 <Icon name="shield" className="size-3.5" /> Super Admin
               </Link>
@@ -479,16 +563,17 @@ export function CompanyConsoleInner({
           </div>
         </div>
 
-        <nav className="mx-auto flex max-w-6xl gap-1 overflow-x-auto pb-2" aria-label="Company sections">
+        <nav className="mx-auto flex max-w-6xl gap-1 overflow-x-auto pb-2.5" aria-label="Company sections">
           {tabs.map(t => (
             <button
               key={t.id}
               type="button"
               onClick={() => setTab(t.id)}
-              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                tab === t.id ? 'bg-brand text-brand-fg' : 'text-muted hover:bg-surface-2 hover:text-fg'
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors sm:text-sm sm:font-medium ${
+                tab === t.id ? 'bg-brand text-brand-fg shadow-xs' : 'text-muted hover:bg-surface-2 hover:text-fg'
               }`}
             >
+              <Icon name={t.icon} className="size-3.5" />
               <span>{t.label}</span>
               {t.badge !== undefined && t.badge > 0 && (
                 <span className={`tabular rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${tab === t.id ? 'bg-white/20 text-white' : 'bg-warn-soft text-warn'}`}>
@@ -513,61 +598,76 @@ export function CompanyConsoleInner({
               const inProgressDocs = documents.filter(d => ['UPLOADING', 'QUEUED', 'PROCESSING'].includes(d.status)).length;
               return (
               <div className="space-y-6">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h1 className="text-2xl font-semibold tracking-tight">{overview.company_name} Control Center</h1>
-                    <p className="text-sm text-muted">
-                      Plan: <strong>{overview.tier}</strong> &bull; Verified Domains:{' '}
-                      <strong>{settings?.allowed_domains?.length ? settings.allowed_domains.join(', ') : 'None claimed yet'}</strong>
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {!needsOnboarding && (
-                      <Button variant="ghost" size="sm" onClick={() => setShowGuide(g => !g)}>
-                        <Icon name="info" className="size-3.5" />
-                        {showGuide ? 'Hide guide' : 'How it works'}
-                      </Button>
-                    )}
-                    {pendingJoinReqs.length > 0 && (
-                      <Button size="sm" onClick={() => setTab('employees')}>
-                        Review {pendingJoinReqs.length} pending employee request{pendingJoinReqs.length === 1 ? '' : 's'}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-
-                {shareUrl && (
-                  <Panel className="flex flex-col gap-3 border-brand/25 bg-surface p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted">
-                        Customized Company Portal Link
-                      </p>
-                      <p className="mt-1 truncate font-mono text-sm font-medium text-fg">{shareUrl}</p>
-                      <p className="mt-1 text-xs text-muted">
-                        Share this private URL with admins and employees. Each user signs in and automatically gets their role-based dashboard ({settings?.join_policy === 'DOMAIN_AUTO_JOIN' ? 'Auto-Join Domain' : settings?.join_policy === 'DOMAIN_APPROVAL' ? 'Admin Approval Queue' : 'Invite Only'}).
-                      </p>
+                <Panel className="relative overflow-hidden p-5 sm:p-6">
+                  <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex items-start gap-4">
+                      <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-brand text-lg font-bold tracking-tight text-brand-fg shadow-xs">
+                        {initials}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center gap-1 rounded-full border border-line bg-surface-2 px-2.5 py-0.5 text-[11px] font-semibold text-fg">
+                            <Icon name="shield" className="size-3" /> Admin-Managed Portal
+                          </span>
+                          <span className="rounded-full bg-surface-2 px-2.5 py-0.5 text-[11px] font-medium text-muted">
+                            Plan: <strong className="text-fg">{overview.tier}</strong>
+                          </span>
+                          {settings?.allowed_domains?.length ? (
+                            <span className="rounded-full bg-surface-2 px-2.5 py-0.5 text-[11px] font-medium text-muted">
+                              Domain: <strong className="text-fg">@{settings.allowed_domains.join(', @')}</strong>
+                            </span>
+                          ) : null}
+                        </div>
+                        <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">{overview.company_name} Control Center</h1>
+                        <p className="mt-1 text-sm text-muted">
+                          Upload company knowledge, issue employee login credentials by email, and review citation-backed Q&amp;A.
+                        </p>
+                      </div>
                     </div>
-                    <div className="flex shrink-0 flex-wrap items-center gap-2">
-                      {settings?.join_policy === 'INVITE_ONLY' && (
-                        <Button variant="secondary" size="sm" disabled={savingPolicy} onClick={() => void enableLinkApproval()}>
-                          {savingPolicy && <Spinner />}
-                          Allow Approval Requests
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {!needsOnboarding && (
+                        <Button variant="ghost" size="sm" onClick={() => setShowGuide(g => !g)}>
+                          <Icon name="info" className="size-3.5" />
+                          {showGuide ? 'Hide setup guide' : 'Setup guide'}
                         </Button>
                       )}
-                      <Button size="sm" onClick={() => void copyShareUrl()}>
-                        <Icon name={copiedLink ? 'check' : 'copy'} className="size-3.5" />
-                        {copiedLink ? 'Copied!' : 'Copy Portal Link'}
+                      <Button variant="secondary" size="sm" onClick={() => setTab('employees')}>
+                        <Icon name="userCheck" className="size-3.5" /> Provision Employees
+                      </Button>
+                      <Button size="sm" onClick={() => setTab('ask')}>
+                        <Icon name="sparkles" className="size-3.5" /> Open Ask AI
                       </Button>
                     </div>
-                  </Panel>
-                )}
+                  </div>
+
+                  {shareUrl && (
+                    <div className="mt-5 flex flex-col gap-3 rounded-xl border border-line bg-surface-2/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+                          Custom Company Sign-In Portal URL
+                        </p>
+                        <p className="mt-0.5 truncate font-mono text-xs font-medium text-fg sm:text-sm">{shareUrl}</p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="hidden rounded-md bg-surface px-2 py-1 text-[11px] text-muted sm:inline">
+                          Self-signup disabled
+                        </span>
+                        <Button size="sm" variant="secondary" onClick={() => void copyShareUrl()}>
+                          <Icon name={copiedLink ? 'check' : 'copy'} className="size-3.5" />
+                          {copiedLink ? 'Copied!' : 'Copy Link'}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </Panel>
 
                 {guideVisible && (
                   <Panel className="border-brand/30 bg-brand/5 p-5 sm:p-6">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-wider text-muted">Company Portal Workflow</p>
-                        <h2 className="mt-1 text-base font-semibold">How documents reach your employees</h2>
+                        <h2 className="mt-1 text-base font-semibold">Launch your {overview.company_name} Knowledge Base in 3 steps</h2>
                       </div>
                     </div>
                     <div className="mt-4 grid gap-3 sm:grid-cols-3">
@@ -579,7 +679,7 @@ export function CompanyConsoleInner({
                           </div>
                           <p className="mt-2 text-sm font-medium">Add handbooks, policies &amp; SOPs</p>
                           <p className="mt-1 text-xs leading-5 text-muted">
-                            Upload files right in your Documents tab. By default they go to General (visible to all staff).
+                            Upload files right in Documents. By default they go to General (visible to all company staff).
                           </p>
                         </div>
                         <button
@@ -595,11 +695,11 @@ export function CompanyConsoleInner({
                         <div>
                           <div className="flex items-center gap-2 text-xs font-semibold text-muted">
                             <span className="inline-flex size-5 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-brand-fg">2</span>
-                            Invite Employees &amp; Share Link
+                            Add Employees &amp; Email Password
                           </div>
-                          <p className="mt-2 text-sm font-medium">Control who accesses what</p>
+                          <p className="mt-2 text-sm font-medium">Admin-managed employee credentials</p>
                           <p className="mt-1 text-xs leading-5 text-muted">
-                            Invite teammates or share your company URL, then organize docs into Department Spaces.
+                            Enter employee emails &amp; a shared dynamic password. Every employee receives their portal link &amp; credentials by mail.
                           </p>
                         </div>
                         <button
@@ -607,7 +707,7 @@ export function CompanyConsoleInner({
                           onClick={() => setTab('employees')}
                           className="mt-3 inline-flex items-center gap-1 text-left text-xs font-semibold text-fg underline underline-offset-2 hover:no-underline"
                         >
-                          Manage employees <Icon name="arrowRight" className="size-3" />
+                          Add employee accounts <Icon name="arrowRight" className="size-3" />
                         </button>
                       </div>
 
@@ -619,7 +719,7 @@ export function CompanyConsoleInner({
                           </div>
                           <p className="mt-2 text-sm font-medium">Instant cited Q&amp;A for staff</p>
                           <p className="mt-1 text-xs leading-5 text-muted">
-                            Staff get an Employee-only Ask AI dashboard here. Admins can also query &amp; test answers directly.
+                            Staff sign in at /{overview.slug}/ with their emailed credentials and immediately query approved docs.
                           </p>
                         </div>
                         <button
@@ -627,7 +727,7 @@ export function CompanyConsoleInner({
                           onClick={() => setTab('ask')}
                           className="mt-3 inline-flex items-center gap-1 text-left text-xs font-semibold text-fg underline underline-offset-2 hover:no-underline"
                         >
-                          Open Ask AI <Icon name="arrowRight" className="size-3" />
+                          Preview Ask AI <Icon name="arrowRight" className="size-3" />
                         </button>
                       </div>
                     </div>
@@ -639,17 +739,18 @@ export function CompanyConsoleInner({
                     <div className="flex items-center gap-2 text-muted">
                       <Icon name="info" className="size-4 shrink-0 text-fg" />
                       <span>
-                        Docs uploaded in <button type="button" onClick={() => setTab('documents')} className="font-semibold text-fg underline underline-offset-2">Documents</button> are indexed automatically. Once <strong>Ready</strong>, staff can query them in <button type="button" onClick={() => setTab('ask')} className="font-semibold text-fg underline underline-offset-2">Ask AI</button>.
+                        Docs uploaded in <button type="button" onClick={() => setTab('documents')} className="font-semibold text-fg underline underline-offset-2">Documents</button> are indexed automatically. Once <strong>Ready</strong>, provisioned staff can query them in <button type="button" onClick={() => setTab('ask')} className="font-semibold text-fg underline underline-offset-2">Ask AI</button>.
                       </span>
                     </div>
                   </div>
                 )}
 
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  <StatCard label="Employees" value={overview.member_count} hint={`${pendingJoinReqs.length} awaiting approval`} />
-                  <StatCard label="Company Docs" value={`${overview.ready_documents} / ${overview.total_documents}`} hint={formatBytes(overview.storage_bytes)} />
-                  <StatCard label="Departments" value={overview.spaces_count} hint="Knowledge spaces" />
+                  <StatCard icon="users" label="Provisioned Staff" value={overview.member_count} hint="Admin-managed members" />
+                  <StatCard icon="file" label="Company Docs" value={`${overview.ready_documents} / ${overview.total_documents}`} hint={formatBytes(overview.storage_bytes)} />
+                  <StatCard icon="folder" label="Departments" value={overview.spaces_count} hint="Knowledge spaces" />
                   <StatCard
+                    icon="sparkles"
                     label="Answer Quality"
                     value={overview.helpful_rate_pct !== null && overview.helpful_rate_pct !== undefined ? `${overview.helpful_rate_pct}%` : '—'}
                     hint={`${overview.total_feedback_count} employee ratings`}
@@ -849,77 +950,239 @@ export function CompanyConsoleInner({
                   </Panel>
                 )}
 
-                <Panel className="p-5 sm:p-6">
-                  <h2 className="text-base font-semibold">Invite Employees</h2>
-                  <p className="mt-1 text-sm text-muted">Paste one or more employee emails (comma or newline separated).</p>
-                  <form onSubmit={sendBulkInvites} className="mt-4 space-y-3">
-                    <textarea
-                      rows={3}
-                      value={bulkEmails}
-                      onChange={e => setBulkEmails(e.target.value)}
-                      placeholder="rahul@company.com, priya@company.com"
-                      className="w-full rounded-xl border border-line-strong bg-bg px-3.5 py-2.5 text-sm placeholder:text-faint focus:border-fg focus:outline-none"
-                    />
-                    <div className="flex flex-wrap items-center gap-2">
-                      <select
-                        value={bulkRole}
-                        onChange={e => setBulkRole(e.target.value as 'EMPLOYEE' | 'MEMBER' | 'ADMIN')}
-                        aria-label="Invited employee role"
-                        className="h-9 rounded-lg border border-line-strong bg-surface px-3 text-sm"
-                      >
-                        <option value="EMPLOYEE">Employee Portal (Ask AI &amp; Read Docs)</option>
-                        <option value="MEMBER">Contributor (Upload + Ask)</option>
-                        <option value="ADMIN">Company Admin</option>
-                      </select>
-                      <Button type="submit" disabled={inviting || !bulkEmails.trim()}>
-                        {inviting && <Spinner />} Send Invitations
+                <Panel className="overflow-hidden p-5 sm:p-6">
+                  <div className="flex flex-col gap-2 border-b border-line pb-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted">
+                        <Icon name="mail" className="size-3.5 text-fg" />
+                        <span>Admin-Managed Account Provisioning</span>
+                      </div>
+                      <h2 className="mt-1 text-lg font-semibold tracking-tight">Add Employee Accounts &amp; Email Credentials</h2>
+                      <p className="mt-1 text-sm text-muted">
+                        Create employee accounts directly with a dynamic batch password. Every added employee receives an email with your portal URL, their email ID, and this password.
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-line bg-surface-2 px-3 py-1 text-xs font-medium text-muted">
+                      Self-signup disabled on portal
+                    </span>
+                  </div>
+
+                  <form onSubmit={createProvisionBatch} className="mt-5 space-y-4">
+                    <div className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
+                      <div>
+                        <div className="mb-1.5 flex items-center justify-between">
+                          <label htmlFor="prov-emails" className="text-xs font-semibold uppercase tracking-wide text-muted">
+                            Employee Email Addresses
+                          </label>
+                          <span className="text-[11px] text-muted">
+                            {provisionEmails
+                              .split(/[\s,;]+/)
+                              .map(s => s.trim())
+                              .filter(s => s.includes('@')).length}{' '}
+                            email(s) detected
+                          </span>
+                        </div>
+                        <textarea
+                          id="prov-emails"
+                          rows={5}
+                          value={provisionEmails}
+                          onChange={e => setProvisionEmails(e.target.value)}
+                          placeholder={'rahul@infosys.com\nanita@infosys.com\npriya@infosys.com'}
+                          className="w-full rounded-xl border border-line-strong bg-bg px-3.5 py-2.5 font-mono text-xs sm:text-sm placeholder:text-faint focus:border-fg focus:outline-none"
+                        />
+                        <p className="mt-1.5 text-xs text-muted">
+                          Separate multiple emails using commas, spaces, or new lines (up to 50 per batch).
+                        </p>
+                      </div>
+
+                      <div className="space-y-3.5 rounded-xl border border-line bg-surface-2/40 p-4">
+                        <div>
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <label htmlFor="prov-pass" className="text-xs font-semibold uppercase tracking-wide text-muted">
+                              Shared Employee Password
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => setProvisionPassword(generateBatchPassword(overview?.company_name || session.workspaceName))}
+                              className="inline-flex items-center gap-1 rounded-md border border-line bg-surface px-2 py-0.5 text-[11px] font-semibold text-fg hover:bg-surface-2"
+                            >
+                              <Icon name="retry" className="size-3" /> Regenerate
+                            </button>
+                          </div>
+                          <div className="relative">
+                            <input
+                              id="prov-pass"
+                              type={showProvisionPassword ? 'text' : 'password'}
+                              required
+                              minLength={8}
+                              value={provisionPassword}
+                              onChange={e => setProvisionPassword(e.target.value)}
+                              placeholder="Min 8 characters"
+                              className={`${inputClass} pr-10 font-mono text-xs sm:text-sm`}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowProvisionPassword(s => !s)}
+                              aria-label={showProvisionPassword ? 'Hide password' : 'Show password'}
+                              className="absolute inset-y-0 right-1.5 my-auto inline-flex size-8 items-center justify-center rounded-lg text-muted hover:text-fg"
+                            >
+                              <Icon name={showProvisionPassword ? 'eyeOff' : 'eye'} className="size-4" />
+                            </button>
+                          </div>
+                          <p className="mt-1 text-[11px] text-muted">
+                            This password is assigned to all new employees in this batch and emailed to them. Employees can change it later inside their portal.
+                          </p>
+                        </div>
+
+                        <div>
+                          <label htmlFor="prov-role" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">
+                            Assigned Portal Role
+                          </label>
+                          <select
+                            id="prov-role"
+                            value={provisionRole}
+                            onChange={e => setProvisionRole(e.target.value as 'EMPLOYEE' | 'MEMBER' | 'ADMIN')}
+                            className={inputClass}
+                          >
+                            <option value="EMPLOYEE">Employee (Ask AI &amp; Read Company Docs)</option>
+                            <option value="MEMBER">Contributor (Ask AI + Upload Docs)</option>
+                            <option value="ADMIN">Company Admin (Full Control Center)</option>
+                          </select>
+                        </div>
+
+                        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-line bg-surface p-2.5 text-xs">
+                          <input
+                            type="checkbox"
+                            checked={resetExistingPassword}
+                            onChange={e => setResetExistingPassword(e.target.checked)}
+                            className="mt-0.5 size-3.5 rounded border-line-strong"
+                          />
+                          <span className="text-muted">
+                            Also update password &amp; re-email existing single-company members if included above
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                      <p className="text-xs text-muted">
+                        Each employee signs in at <span className="font-mono text-fg">/{activeSlug || 'company'}/</span> using their company email &amp; password.
+                      </p>
+                      <Button type="submit" disabled={provisioning || !provisionEmails.trim() || provisionPassword.length < 8}>
+                        {provisioning ? <Spinner /> : <Icon name="mail" className="size-4" />}
+                        <span>Create Accounts &amp; Send Email</span>
                       </Button>
                     </div>
                   </form>
+
+                  {provisionResult && (
+                    <div className="mt-6 rounded-xl border border-ok/35 bg-ok-soft/40 p-4">
+                      <div className="flex flex-col gap-3 border-b border-line pb-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <h3 className="text-sm font-semibold text-fg">Provisioning Batch Receipt</h3>
+                          <p className="text-xs text-muted">
+                            {provisionResult.created_count} created &bull; {provisionResult.emails_sent_count} credential email(s) sent &bull; {provisionResult.skipped_count} skipped
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-lg border border-line bg-surface px-2.5 py-1 font-mono text-xs text-fg">
+                            Batch Password: <strong>{lastSentPassword}</strong>
+                          </span>
+                          <Button type="button" size="sm" variant="secondary" onClick={() => void copyProvisionCredentials()}>
+                            <Icon name="copy" className="size-3.5" /> Copy Login Details
+                          </Button>
+                        </div>
+                      </div>
+                      <ul className="mt-3 divide-y divide-line">
+                        {provisionResult.results.map(item => (
+                          <li key={item.email} className="flex flex-col gap-1.5 py-2 text-xs sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <span className="font-mono font-semibold text-fg">{item.email}</span>
+                              <span className="ml-2 text-muted">{item.detail}</span>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1.5">
+                              <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] font-medium capitalize text-fg">
+                                {item.status.replace('_', ' ')}
+                              </span>
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                  item.email_sent ? 'bg-ok-soft text-ok' : 'bg-warn-soft text-warn'
+                                }`}
+                              >
+                                {item.email_sent ? 'Email Sent' : 'Share Manually'}
+                              </span>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </Panel>
 
                 <Panel className="overflow-hidden">
-                  <div className="border-b border-line px-5 py-4">
-                    <h2 className="text-base font-semibold">Employee Directory ({members.length})</h2>
+                  <div className="flex flex-col gap-3 border-b border-line px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h2 className="text-base font-semibold">Employee Directory ({members.length})</h2>
+                      <p className="text-xs text-muted">Active provisioned accounts with access to {overview?.company_name || session.workspaceName}.</p>
+                    </div>
+                    <div className="relative w-full sm:w-64">
+                      <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-faint" />
+                      <input
+                        type="search"
+                        value={directorySearch}
+                        onChange={e => setDirectorySearch(e.target.value)}
+                        placeholder="Search by email or role..."
+                        className="h-9 w-full rounded-lg border border-line-strong bg-bg pl-8 pr-3 text-xs focus:border-fg focus:outline-none"
+                      />
+                    </div>
                   </div>
                   <ul className="divide-y divide-line">
-                    {members.map(m => (
-                      <li key={m.user_id} className="flex flex-col gap-3 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <p className="text-sm font-medium">{m.email}</p>
-                          <p className="text-xs text-muted">Joined {formatDate(m.joined_at)}</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {m.role === 'OWNER' ? (
-                            <span className="rounded-md bg-brand/10 px-2.5 py-1 text-xs font-semibold">Owner</span>
-                          ) : (
-                            <>
-                              <select
-                                aria-label={`Role for ${m.email}`}
-                                value={m.role}
-                                disabled={busyId === m.user_id}
-                                onChange={e => void changeMemberRole(m.user_id, e.target.value)}
-                                className="h-8 rounded-lg border border-line-strong bg-surface px-2.5 text-xs font-medium"
-                              >
-                                <option value="ADMIN">Admin</option>
-                                <option value="MEMBER">Contributor</option>
-                                <option value="EMPLOYEE">Employee</option>
-                                <option value="VIEWER">Viewer</option>
-                              </select>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                disabled={busyId === m.user_id}
-                                onClick={() => void removeMember(m.user_id, m.email)}
-                                aria-label={`Remove ${m.email}`}
-                              >
-                                <Icon name="trash" className="size-4 text-danger" />
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      </li>
-                    ))}
+                    {filteredMembers.length === 0 ? (
+                      <li className="px-5 py-8 text-center text-sm text-muted">No matching members found.</li>
+                    ) : (
+                      filteredMembers.map(m => (
+                        <li key={m.user_id} className="flex flex-col gap-3 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs font-bold uppercase text-fg">
+                              {m.email.slice(0, 2)}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium">{m.email}</p>
+                              <p className="text-xs text-muted">Added {formatDate(m.joined_at)}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {m.role === 'OWNER' ? (
+                              <span className="rounded-md bg-brand/10 px-2.5 py-1 text-xs font-semibold">Owner</span>
+                            ) : (
+                              <>
+                                <select
+                                  aria-label={`Role for ${m.email}`}
+                                  value={m.role}
+                                  disabled={busyId === m.user_id}
+                                  onChange={e => void changeMemberRole(m.user_id, e.target.value)}
+                                  className="h-8 rounded-lg border border-line-strong bg-surface px-2.5 text-xs font-medium"
+                                >
+                                  <option value="ADMIN">Admin</option>
+                                  <option value="MEMBER">Contributor</option>
+                                  <option value="EMPLOYEE">Employee</option>
+                                  <option value="VIEWER">Viewer</option>
+                                </select>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled={busyId === m.user_id}
+                                  onClick={() => void removeMember(m.user_id, m.email)}
+                                  aria-label={`Remove ${m.email}`}
+                                >
+                                  <Icon name="trash" className="size-4 text-danger" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </li>
+                      ))
+                    )}
                   </ul>
                 </Panel>
 
@@ -1107,10 +1370,19 @@ export function CompanyConsoleInner({
 
             {tab === 'policy' && (
               <Panel className="p-5 sm:p-6">
-                <h2 className="text-base font-semibold">Corporate Domain &amp; Employee Onboarding Policy</h2>
-                <p className="mt-1 text-sm text-muted">
-                  Control how employees signing in with your corporate email domain join this company workspace.
-                </p>
+                <div className="flex flex-col gap-2 border-b border-line pb-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-base font-semibold">Company Portal Identity &amp; Prompt Settings</h2>
+                    <p className="mt-1 text-sm text-muted">
+                      Customize your displayed organization name, corporate email domain hints, and starter AI questions.
+                    </p>
+                  </div>
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1 text-xs font-medium text-muted">
+                    <Icon name="lock" className="size-3.5 text-fg" />
+                    Admin-Managed Sign In Only
+                  </span>
+                </div>
+
                 <form onSubmit={savePolicy} className="mt-5 space-y-5">
                   <div>
                     <label htmlFor="pol-name" className="mb-1.5 block text-sm font-medium">Company name</label>
@@ -1118,7 +1390,7 @@ export function CompanyConsoleInner({
                   </div>
 
                   <div>
-                    <label htmlFor="pol-domains" className="mb-1.5 block text-sm font-medium">Claimed corporate email domain(s)</label>
+                    <label htmlFor="pol-domains" className="mb-1.5 block text-sm font-medium">Associated corporate email domain(s)</label>
                     <input
                       id="pol-domains"
                       type="text"
@@ -1127,52 +1399,7 @@ export function CompanyConsoleInner({
                       onChange={e => setDomainsInput(e.target.value)}
                       className={inputClass}
                     />
-                    <p className="mt-1 text-xs text-faint">Public webmail domains like gmail.com or yahoo.com are blocked automatically.</p>
-                  </div>
-
-                  <div>
-                    <p className="mb-2 text-sm font-medium">Employee sign-up join policy</p>
-                    <div className="grid gap-2.5 sm:grid-cols-3">
-                      {(
-                        [
-                          { id: 'INVITE_ONLY', title: 'Invite Only', desc: 'Only explicitly invited emails can join.' },
-                          { id: 'DOMAIN_APPROVAL', title: 'Admin Approval', desc: 'Employees with @domain wait in approval queue.' },
-                          { id: 'DOMAIN_AUTO_JOIN', title: 'Auto-Join Domain', desc: 'Verified @domain employees join instantly.' },
-                        ] as const
-                      ).map(p => (
-                        <label
-                          key={p.id}
-                          className={`cursor-pointer rounded-xl border p-3.5 text-sm ${
-                            joinPolicy === p.id ? 'border-fg bg-surface-2 ring-1 ring-fg' : 'border-line bg-bg hover:bg-surface-2'
-                          }`}
-                        >
-                          <input
-                            type="radio"
-                            name="join-policy"
-                            value={p.id}
-                            checked={joinPolicy === p.id}
-                            onChange={() => setJoinPolicy(p.id)}
-                            className="sr-only"
-                          />
-                          <span className="block font-semibold">{p.title}</span>
-                          <span className="mt-1 block text-xs text-muted">{p.desc}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label htmlFor="pol-role" className="mb-1.5 block text-sm font-medium">Default role for domain joiners</label>
-                    <select
-                      id="pol-role"
-                      value={defaultRole}
-                      onChange={e => setDefaultRole(e.target.value as 'EMPLOYEE' | 'MEMBER' | 'VIEWER')}
-                      className={inputClass}
-                    >
-                      <option value="EMPLOYEE">Employee (Ask AI &amp; Read permitted docs — recommended)</option>
-                      <option value="MEMBER">Contributor (Ask AI + Upload docs)</option>
-                      <option value="VIEWER">Viewer (Read-only)</option>
-                    </select>
+                    <p className="mt-1 text-xs text-faint">Public webmail domains like gmail.com or yahoo.com are ignored. Domain lookup only redirects staff to /{activeSlug || 'company'}/.</p>
                   </div>
 
                   <div>
@@ -1190,7 +1417,7 @@ export function CompanyConsoleInner({
                   </div>
 
                   <Button type="submit" disabled={savingPolicy}>
-                    {savingPolicy && <Spinner />} Save Policy
+                    {savingPolicy && <Spinner />} Save Company Settings
                   </Button>
                 </form>
               </Panel>

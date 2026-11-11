@@ -200,6 +200,22 @@ export interface BulkInviteResponse {
   skipped_count: number;
 }
 
+export interface ProvisionEmployeeResultItem {
+  email: string;
+  status: string;
+  email_sent: boolean;
+  detail: string;
+}
+
+export interface ProvisionEmployeesResponse {
+  results: ProvisionEmployeeResultItem[];
+  created_count: number;
+  added_count: number;
+  updated_count?: number;
+  skipped_count: number;
+  emails_sent_count: number;
+}
+
 export interface UserProfileDTO {
   id: string;
   email: string;
@@ -1181,6 +1197,18 @@ export class ApiClient {
     return this.request<BulkInviteResponse>('/company/invites/bulk', {
       method: 'POST',
       body: JSON.stringify({ emails, role }),
+    });
+  }
+
+  static async provisionCompanyEmployees(payload: {
+    emails: string[];
+    password: string;
+    role?: string;
+    reset_existing_password?: boolean;
+  }): Promise<ProvisionEmployeesResponse> {
+    return this.request<ProvisionEmployeesResponse>('/company/employees/provision', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
   }
 

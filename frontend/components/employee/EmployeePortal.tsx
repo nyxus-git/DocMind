@@ -43,6 +43,12 @@ const subscribeStorage = (cb: () => void) => {
   return () => window.removeEventListener('storage', cb);
 };
 
+function companyMonogram(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return `${words[0][0] || ''}${words[1][0] || ''}`.toUpperCase();
+  return (name.trim().slice(0, 2) || 'CO').toUpperCase();
+}
+
 export function PendingApprovalScreen({
   companyName,
   email,
@@ -129,6 +135,14 @@ export function EmployeePortalInner({
   const [summaryFor, setSummaryFor] = useState<DocumentDTO | null>(null);
   const [summary, setSummary] = useState<DocumentSummaryResponse | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+
+  // Change password modal
+  const [pwdOpen, setPwdOpen] = useState(false);
+  const [currentPwd, setCurrentPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [confirmPwd, setConfirmPwd] = useState('');
+  const [savingPwd, setSavingPwd] = useState(false);
+  const [pwdError, setPwdError] = useState<string | null>(null);
 
   const endRef = useRef<HTMLDivElement>(null);
   const idCounter = useRef(0);
@@ -356,38 +370,77 @@ export function EmployeePortalInner({
 
   const activeSlug = portalSlug || portalInfo?.slug || (session.workspaceSlug !== 'personal' ? session.workspaceSlug : undefined);
   const roleLabel = portalInfo?.role === 'VIEWER' ? 'Read-Only Portal' : 'Employee Portal';
+  const companyBrand = portalInfo?.company_name || session.workspaceName || 'Company';
+  const companyInitials = companyMonogram(companyBrand);
+
+  const submitPasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwdError(null);
+    if (newPwd.length < 8) {
+      setPwdError('New password must be at least 8 characters.');
+      return;
+    }
+    if (newPwd !== confirmPwd) {
+      setPwdError('New password and confirmation do not match.');
+      return;
+    }
+    setSavingPwd(true);
+    try {
+      await ApiClient.changePassword(currentPwd, newPwd);
+      setPwdOpen(false);
+      setCurrentPwd('');
+      setNewPwd('');
+      setConfirmPwd('');
+      toast('Password updated! Sign in with your new password.', 'success');
+      await signOut();
+    } catch (err) {
+      setPwdError(err instanceof Error ? err.message : 'Could not update password. Verify your current password.');
+    } finally {
+      setSavingPwd(false);
+    }
+  };
 
   return (
     <div className={embedded ? 'flex h-[calc(100vh-13rem)] min-h-[34rem] flex-col overflow-hidden rounded-2xl border border-line bg-bg text-fg' : 'flex h-screen flex-col overflow-hidden bg-bg text-fg'}>
       {!embedded ? (
         <header className="shrink-0 border-b border-line bg-bg/95 px-4 backdrop-blur sm:px-6">
-          <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-3">
+          <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <Logo />
-              <span className="hidden h-4 w-px bg-line sm:inline-block" />
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="truncate text-sm font-semibold">{portalInfo?.company_name || session.workspaceName}</span>
-                <span className="hidden rounded-md bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-muted sm:inline-block">
-                  {roleLabel}
+              <span className="hidden h-5 w-px bg-line sm:inline-block" />
+              <div className="flex min-w-0 items-center gap-2.5">
+                <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-xs font-bold tracking-tight text-brand-fg shadow-xs">
+                  {companyInitials}
                 </span>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-semibold text-fg">{companyBrand}</span>
+                    <span className="hidden rounded-md bg-brand/10 px-2 py-0.5 text-[11px] font-semibold text-fg sm:inline-block">
+                      {roleLabel}
+                    </span>
+                  </div>
+                  <p className="hidden truncate text-[11px] text-muted sm:block">{session.email}</p>
+                </div>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="flex rounded-lg border border-line bg-surface p-0.5">
+              <div className="flex rounded-xl border border-line bg-surface p-0.5">
                 <button
                   type="button"
                   onClick={() => setPortalTab('ask')}
-                  className={`rounded-md px-2.5 py-1 text-xs font-medium ${portalTab === 'ask' ? 'bg-brand text-brand-fg' : 'text-muted hover:text-fg'}`}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${portalTab === 'ask' ? 'bg-brand text-brand-fg shadow-xs' : 'text-muted hover:text-fg'}`}
                 >
+                  <Icon name="chat" className="size-3.5" />
                   Ask AI
                 </button>
                 <button
                   type="button"
                   onClick={() => setPortalTab('docs')}
-                  className={`rounded-md px-2.5 py-1 text-xs font-medium ${portalTab === 'docs' ? 'bg-brand text-brand-fg' : 'text-muted hover:text-fg'}`}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${portalTab === 'docs' ? 'bg-brand text-brand-fg shadow-xs' : 'text-muted hover:text-fg'}`}
                 >
-                  Company Docs ({documents.length})
+                  <Icon name="book" className="size-3.5" />
+                  Docs ({documents.length})
                 </button>
               </div>
               {isCompanyAdmin && (
@@ -400,6 +453,18 @@ export function EmployeePortalInner({
                   Workspace
                 </Link>
               )}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setPwdError(null);
+                  setPwdOpen(true);
+                }}
+                title="Change your password"
+              >
+                <Icon name="key" className="size-3.5" />
+                <span className="hidden md:inline">Password</span>
+              </Button>
               <ThemeToggle />
               <Button variant="ghost" size="sm" onClick={() => void signOut()} aria-label="Sign out">
                 <Icon name="logout" className="size-4" />
@@ -410,7 +475,8 @@ export function EmployeePortalInner({
       ) : (
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line bg-surface px-4 py-2.5">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-fg">Company Knowledge Assistant</span>
+            <Icon name="sparkles" className="size-4 text-fg" />
+            <span className="text-xs font-semibold text-fg">{companyBrand} Knowledge Assistant</span>
             <span className="hidden text-xs text-muted sm:inline">&bull; Private Q&amp;A across company documents</span>
           </div>
           <div className="flex rounded-lg border border-line bg-bg p-0.5">
@@ -505,6 +571,40 @@ export function EmployeePortalInner({
                 </li>
               ))}
             </ul>
+
+            {readyDocs.length > 0 && (
+              <div className="mt-3 border-t border-line pt-3">
+                <div className="mb-1.5 flex items-center justify-between px-1">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+                    Quick Docs ({readyDocs.length})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPortalTab('docs')}
+                    className="text-[11px] font-medium text-fg underline underline-offset-2 hover:no-underline"
+                  >
+                    See all
+                  </button>
+                </div>
+                <ul className="space-y-1">
+                  {readyDocs.slice(0, 5).map(d => (
+                    <li key={d.id}>
+                      <button
+                        type="button"
+                        onClick={() => askAboutSingleDoc(d)}
+                        className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors ${
+                          focusedDoc?.id === d.id ? 'bg-brand/10 font-semibold text-fg' : 'text-muted hover:bg-surface-2 hover:text-fg'
+                        }`}
+                        title={`Ask AI about ${d.filename}`}
+                      >
+                        <Icon name="file" className="size-3.5 shrink-0" />
+                        <span className="truncate">{d.filename}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </aside>
 
           {/* Chat body */}
@@ -654,14 +754,22 @@ export function EmployeePortalInner({
                   ) : (
                     <>
                       {/* Has docs — knowledge assistant prompt starter */}
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted">
-                        {portalInfo?.company_name || session.workspaceName} Knowledge Assistant
-                      </p>
-                      <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+                      <div className="mb-3 flex items-center gap-2.5">
+                        <span className="inline-flex size-9 items-center justify-center rounded-xl bg-brand text-xs font-bold tracking-tight text-brand-fg shadow-xs">
+                          {companyInitials}
+                        </span>
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wider text-muted">
+                            {companyBrand} Knowledge Assistant
+                          </p>
+                          <p className="text-[11px] text-faint">Isolated company workspace &bull; Grounded page citations</p>
+                        </div>
+                      </div>
+                      <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
                         Ask anything across {readyDocs.length} company document{readyDocs.length === 1 ? '' : 's'}
                       </h1>
                       <p className="mt-1.5 text-sm text-muted">
-                        Pick a suggested question, ask your own below, or open Company Docs to query a single file.
+                        Pick a suggested prompt, type a question below, or click any file in Quick Docs or Browse Docs to focus on a single guide.
                       </p>
                       {selectedSpace && (
                         <span className="mt-3 inline-flex items-center gap-1.5 self-start rounded-full bg-brand/10 px-3 py-1 text-xs font-medium text-fg">
@@ -675,7 +783,7 @@ export function EmployeePortalInner({
                             <button
                               type="button"
                               onClick={() => void sendQuestion(q)}
-                              className="flex w-full items-center justify-between rounded-xl border border-line px-4 py-3 text-left text-sm transition-colors hover:border-line-strong hover:bg-surface-2"
+                              className="flex w-full items-center justify-between rounded-xl border border-line bg-bg/60 px-4 py-3 text-left text-sm transition-colors hover:border-line-strong hover:bg-surface-2"
                             >
                               <span>{q}</span>
                               <Icon name="arrowRight" className="ml-3 size-4 shrink-0 text-muted" />
@@ -858,49 +966,50 @@ export function EmployeePortalInner({
                 </div>
               </div>
             ) : (
-              <ul className="divide-y divide-line">
+              <div className="grid gap-3 p-4 sm:grid-cols-2">
                 {filteredDocs.map(d => (
-                  <li key={d.id} className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex min-w-0 items-center gap-3">
+                  <div key={d.id} className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-bg p-4 transition-colors hover:border-line-strong">
+                    <div className="flex items-start gap-3">
                       <FileTypeIcon filename={d.filename} />
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">{d.filename}</p>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="truncate text-sm font-semibold text-fg" title={d.filename}>{d.filename}</p>
+                          <StatusBadge status={d.status} />
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">
                           <span className="inline-flex items-center gap-1 rounded bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-fg">
                             <Icon name={d.space_name ? 'folder' : 'globe'} className="size-3 text-muted" />
                             {d.space_name || 'General Company'}
                           </span>
                           {d.page_count ? <span>&bull; {d.page_count} pages</span> : null}
                           <span>&bull; {formatBytes(d.size_bytes)}</span>
-                          <span>&bull; {formatDate(d.created_at)}</span>
                         </div>
+                        <p className="mt-1 text-[11px] text-faint">Added {formatDate(d.created_at)}</p>
                       </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StatusBadge status={d.status} />
-                      {d.status === 'READY' && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={openingDocId === d.id}
-                            onClick={() => void openDocumentFile(d)}
-                          >
-                            {openingDocId === d.id ? <Spinner className="size-3.5" /> : <Icon name="external" className="size-3.5" />}
-                            Open
-                          </Button>
-                          <Button variant="secondary" size="sm" onClick={() => void openSummary(d)}>
-                            Summary
-                          </Button>
-                          <Button size="sm" onClick={() => askAboutSingleDoc(d)}>
-                            Ask AI
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  </li>
+
+                    {d.status === 'READY' && (
+                      <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line pt-3">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={openingDocId === d.id}
+                          onClick={() => void openDocumentFile(d)}
+                        >
+                          {openingDocId === d.id ? <Spinner className="size-3.5" /> : <Icon name="external" className="size-3.5" />}
+                          Open
+                        </Button>
+                        <Button variant="secondary" size="sm" onClick={() => void openSummary(d)}>
+                          Summary
+                        </Button>
+                        <Button size="sm" onClick={() => askAboutSingleDoc(d)}>
+                          Ask AI
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 ))}
-              </ul>
+              </div>
             )}
           </Panel>
         </main>
@@ -945,6 +1054,71 @@ export function EmployeePortalInner({
             )}
           </div>
         )}
+      </Modal>
+
+      <Modal open={pwdOpen} onClose={() => setPwdOpen(false)} title="Change Your Portal Password">
+        <form onSubmit={submitPasswordChange} className="space-y-4">
+          <p className="text-xs leading-relaxed text-muted">
+            Replace the admin-issued batch password (or your existing password) with your own private password. You will sign back in after updating.
+          </p>
+          {pwdError && (
+            <div role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-xs text-danger">
+              {pwdError}
+            </div>
+          )}
+          <div>
+            <label htmlFor="emp-curr-pwd" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted">
+              Current Password
+            </label>
+            <input
+              id="emp-curr-pwd"
+              type="password"
+              required
+              autoComplete="current-password"
+              value={currentPwd}
+              onChange={e => setCurrentPwd(e.target.value)}
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label htmlFor="emp-new-pwd" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted">
+              New Password (min 8 chars)
+            </label>
+            <input
+              id="emp-new-pwd"
+              type="password"
+              required
+              minLength={8}
+              autoComplete="new-password"
+              value={newPwd}
+              onChange={e => setNewPwd(e.target.value)}
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label htmlFor="emp-conf-pwd" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted">
+              Confirm New Password
+            </label>
+            <input
+              id="emp-conf-pwd"
+              type="password"
+              required
+              minLength={8}
+              autoComplete="new-password"
+              value={confirmPwd}
+              onChange={e => setConfirmPwd(e.target.value)}
+              className={inputClass}
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="ghost" onClick={() => setPwdOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={savingPwd}>
+              {savingPwd && <Spinner />} Save New Password
+            </Button>
+          </div>
+        </form>
       </Modal>
     </div>
   );

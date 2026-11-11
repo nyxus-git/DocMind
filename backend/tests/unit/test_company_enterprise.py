@@ -1,4 +1,5 @@
 import asyncio
+from unittest.mock import patch
 import uuid
 import httpx
 import pytest
@@ -47,6 +48,45 @@ async def _run_test_company_and_employee_enterprise_flow():
                 raise
 
     app.dependency_overrides[get_db] = override_get_db
+    sent_credentials = []
+
+    class CapturingEmailProvider:
+        async def send_email(self, to_email: str, subject: str, html_content: str, text_content=None) -> bool:
+            return True
+
+        async def send_verification_email(self, to_email: str, verification_link: str) -> bool:
+            return True
+
+        async def send_password_reset_email(self, to_email: str, reset_link: str) -> bool:
+            return True
+
+        async def send_member_invite_email(self, to_email: str, inviter_email: str, workspace_name: str, invite_link: str) -> bool:
+            return True
+
+        async def send_employee_credentials_email(
+            self,
+            to_email: str,
+            company_name: str,
+            portal_link: str,
+            password: str,
+            admin_email: str,
+            role_label: str = "Employee",
+        ) -> bool:
+            sent_credentials.append(
+                {
+                    "to": to_email,
+                    "company": company_name,
+                    "portal_link": portal_link,
+                    "password": password,
+                    "admin_email": admin_email,
+                    "role": role_label,
+                }
+            )
+            return True
+
+    fake_email = CapturingEmailProvider()
+    p_email = patch("app.api.v1.company.get_email_provider", return_value=fake_email)
+    p_email.start()
 
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
@@ -94,43 +134,94 @@ async def _run_test_company_and_employee_enterprise_flow():
             assert ws_list_sorted.json()[0]["name"] == "Infosys"
             assert ws_list_sorted.json()[1]["id"] == str(personal_ws.id)
 
-            # 3. Domain lookup detects Infosys for employee email
+            # 3. Domain lookup still identifies Infosys metadata, while self-signup on portal/employee mode is strictly blocked
             lookup = await client.get("/api/v1/auth/company-lookup", params={"email": "rahul@infosys.com"})
             assert lookup.status_code == 200
             assert lookup.json()["matched"] is True
             assert lookup.json()["company_name"] == "Infosys"
-            assert lookup.json()["join_policy"] == "DOMAIN_APPROVAL"
+            assert lookup.json()["join_policy"] == "INVITE_ONLY"
 
-            # 4. Employee signs up with @infosys.com -> Pending Approval (NO Personal Workspace)
-            reg_emp = await client.post(
+            blocked_emp_signup = await client.post(
                 "/api/v1/auth/register",
                 json={
                     "email": "rahul@infosys.com",
                     "password": "EmpPassword123!",
                     "account_type": "employee",
-                    "department_note": "Engineering",
+                    "target_company_slug": "infosys",
                 },
             )
-            assert reg_emp.status_code == 201
-            assert reg_emp.json()["active_workspace"] is None
+            assert blocked_emp_signup.status_code == 403
+            assert blocked_emp_signup.json()["code"] == "ADMIN_MANAGED_ACCESS"
 
+            blocked_generic_emp = await client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": "rahul@infosys.com",
+                    "password": "EmpPassword123!",
+                    "account_type": "employee",
+                },
+            )
+            assert blocked_generic_emp.status_code == 403
+            assert blocked_generic_emp.json()["code"] == "ADMIN_MANAGED_ACCESS"
+
+            # Unrelated personal user cannot request portal access -> blocked by Admin-Managed Access
+            outsider_reg = await client.post(
+                "/api/v1/auth/register",
+                json={"email": "visitor@gmail.com", "password": "StrongPassword123!", "account_type": "personal"},
+            )
+            assert outsider_reg.status_code == 201
+            outsider_login = await client.post(
+                "/api/v1/auth/login",
+                json={"email": "visitor@gmail.com", "password": "StrongPassword123!"},
+            )
+            assert outsider_login.status_code == 200
+            outsider_tok = outsider_login.json()["access_token"]
+            req_access = await client.post(
+                "/api/v1/auth/company-portal/infosys/request-access",
+                headers={"Authorization": f"Bearer {outsider_tok}"},
+                json={"department_note": "Trying self request"},
+            )
+            assert req_access.status_code == 403
+            assert req_access.json()["code"] == "ADMIN_MANAGED_ACCESS"
+
+            # 4. Company Admin provisions batch of employees with shared dynamic password -> credentials emailed & active immediately
+            prov = await client.post(
+                "/api/v1/company/employees/provision",
+                headers=admin_headers,
+                json={
+                    "emails": ["rahul@infosys.com", "anita@infosys.com"],
+                    "password": "InfosysWelcome#2026",
+                    "role": "EMPLOYEE",
+                },
+            )
+            assert prov.status_code == 200
+            prov_data = prov.json()
+            assert prov_data["created_count"] == 2
+            assert prov_data["emails_sent_count"] == 2
+            assert len(sent_credentials) == 2
+            assert all(c["password"] == "InfosysWelcome#2026" for c in sent_credentials)
+            assert all("/infosys/" in c["portal_link"] for c in sent_credentials)
+
+            # Both employees sign in right away using emailed company ID + admin-created shared password
             login_emp = await client.post(
                 "/api/v1/auth/login",
-                json={"email": "rahul@infosys.com", "password": "EmpPassword123!"},
+                json={"email": "rahul@infosys.com", "password": "InfosysWelcome#2026"},
             )
             assert login_emp.status_code == 200
             emp_tok = login_emp.json()["access_token"]
 
-            me_pending = await client.get("/api/v1/me", headers={"Authorization": f"Bearer {emp_tok}"})
-            assert me_pending.status_code == 200
-            assert me_pending.json()["pending_join_request"]["company_name"] == "Infosys"
+            login_emp2 = await client.post(
+                "/api/v1/auth/login",
+                json={"email": "anita@infosys.com", "password": "InfosysWelcome#2026"},
+            )
+            assert login_emp2.status_code == 200
 
-            portal_pending = await client.get("/api/v1/company/portal-info", headers={"Authorization": f"Bearer {emp_tok}"})
-            assert portal_pending.status_code == 200
-            assert portal_pending.json()["role"] == "PENDING"
-            assert portal_pending.json()["pending_company_name"] == "Infosys"
+            emp_portal_me = await client.get("/api/v1/company/portal-info", headers={"Authorization": f"Bearer {emp_tok}"})
+            assert emp_portal_me.status_code == 200
+            assert emp_portal_me.json()["role"] == WorkspaceRole.EMPLOYEE.value
+            assert emp_portal_me.json()["company_name"] == "Infosys"
 
-            # 5. Company Admin configures starter prompts, restricted HR Space, and approves rahul as EMPLOYEE
+            # 5. Company Admin configures starter prompts and restricted HR Space
             upd_settings = await client.patch(
                 "/api/v1/company/settings",
                 headers=admin_headers,
@@ -138,19 +229,6 @@ async def _run_test_company_and_employee_enterprise_flow():
             )
             assert upd_settings.status_code == 200
             assert upd_settings.json()["starter_prompts"] == ["What is our leave policy?"]
-
-            reqs = await client.get("/api/v1/company/join-requests", headers=admin_headers)
-            assert reqs.status_code == 200
-            assert len(reqs.json()) == 1
-            req_id = reqs.json()[0]["id"]
-
-            decision = await client.post(
-                f"/api/v1/company/join-requests/{req_id}/decision",
-                headers=admin_headers,
-                json={"decision": "APPROVE", "role": WorkspaceRole.EMPLOYEE.value},
-            )
-            assert decision.status_code == 200
-            assert decision.json()["status"] == "APPROVED"
 
             hr_space_res = await client.post(
                 "/api/v1/company/spaces",
@@ -272,25 +350,35 @@ async def _run_test_company_and_employee_enterprise_flow():
             assert len(overview.json()["recent_gaps"]) >= 1
             assert overview.json()["recent_gaps"][0]["question"] == "What is our leave policy?"
 
-            # 8. Switch policy to DOMAIN_AUTO_JOIN -> second employee joins automatically without approval step
-            auto_upd = await client.patch(
-                "/api/v1/company/settings",
-                headers=admin_headers,
-                json={"join_policy": "DOMAIN_AUTO_JOIN", "default_join_role": "EMPLOYEE"},
+            # 8. Employee can update their own password after signing in, and log in with the new password
+            pwd_upd = await client.post(
+                "/api/v1/change-password",
+                headers={"Authorization": f"Bearer {emp_tok}"},
+                json={"current_password": "InfosysWelcome#2026", "new_password": "RahulPersonal#2026"},
             )
-            assert auto_upd.status_code == 200
+            assert pwd_upd.status_code == 200
 
-            reg_emp2 = await client.post(
-                "/api/v1/auth/register",
+            login_emp_new = await client.post(
+                "/api/v1/auth/login",
+                json={"email": "rahul@infosys.com", "password": "RahulPersonal#2026"},
+            )
+            assert login_emp_new.status_code == 200
+            emp_tok = login_emp_new.json()["access_token"]
+            emp_headers = {"Authorization": f"Bearer {emp_tok}", "X-Workspace-ID": str(ws_id)}
+
+            # Re-provisioning an already-active Infosys member skips password overwrite unless reset_existing_password=True
+            re_prov = await client.post(
+                "/api/v1/company/employees/provision",
+                headers=admin_headers,
                 json={
-                    "email": "anita@infosys.com",
-                    "password": "EmpPassword123!",
-                    "account_type": "employee",
+                    "emails": ["rahul@infosys.com"],
+                    "password": "AnotherShared#2026",
+                    "role": "EMPLOYEE",
                 },
             )
-            assert reg_emp2.status_code == 201
-            assert reg_emp2.json()["active_workspace"]["name"] == "Infosys"
-            assert reg_emp2.json()["active_workspace"]["role"] == "EMPLOYEE"
+            assert re_prov.status_code == 200
+            assert re_prov.json()["skipped_count"] == 1
+            assert re_prov.json()["results"][0]["status"] == "already_member"
 
             # 9. Public company portal resolution exposes company branding only (never personal slugs)
             portal_pub = await client.get("/api/v1/auth/company-portal/infosys")
@@ -366,7 +454,40 @@ async def _run_test_company_and_employee_enterprise_flow():
             )
             assert cross_chat.status_code == 400
 
-            # Invite-only portal registration via target_company_slug is blocked unless invited or DOMAIN_APPROVAL enabled
+            # Acme admin provisioning an existing Infosys user does NOT overwrite Rahul's password
+            acme_login = await client.post(
+                "/api/v1/auth/login",
+                json={"email": "boss@acme.io", "password": "StrongPassword123!"},
+            )
+            assert acme_login.status_code == 200
+            acme_headers = {"Authorization": f"Bearer {acme_login.json()['access_token']}", "X-Workspace-ID": str(acme_ws_id)}
+            cross_prov = await client.post(
+                "/api/v1/company/employees/provision",
+                headers=acme_headers,
+                json={
+                    "emails": ["rahul@infosys.com"],
+                    "password": "HijackAttempt#2026",
+                    "role": "EMPLOYEE",
+                    "reset_existing_password": True,
+                },
+            )
+            assert cross_prov.status_code == 200
+            assert cross_prov.json()["added_count"] == 1
+            # Rahul's original password still works and HijackAttempt fails
+            assert (
+                await client.post(
+                    "/api/v1/auth/login",
+                    json={"email": "rahul@infosys.com", "password": "HijackAttempt#2026"},
+                )
+            ).status_code == 401
+            assert (
+                await client.post(
+                    "/api/v1/auth/login",
+                    json={"email": "rahul@infosys.com", "password": "RahulPersonal#2026"},
+                )
+            ).status_code == 200
+
+            # Portal registration via target_company_slug is blocked unless explicitly invited by Admin
             blocked_req = await client.post(
                 "/api/v1/auth/register",
                 json={
@@ -379,6 +500,7 @@ async def _run_test_company_and_employee_enterprise_flow():
             assert blocked_req.status_code == 403
 
     finally:
+        p_email.stop()
         app.dependency_overrides.clear()
         await engine.dispose()
 

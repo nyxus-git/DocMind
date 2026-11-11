@@ -70,6 +70,17 @@ type PortalViewState =
       primaryWs: WorkspaceDetailDTO | null;
     };
 
+function companyMonogram(name: string): string {
+  const words = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length >= 2) {
+    return `${words[0][0] || ''}${words[1][0] || ''}`.toUpperCase();
+  }
+  return (name.trim().slice(0, 2) || 'CO').toUpperCase();
+}
+
 function CompanyPortalAuthCard({
   portal,
   prefillEmail,
@@ -79,53 +90,31 @@ function CompanyPortalAuthCard({
   prefillEmail: string;
   onAuthenticated: () => void;
 }) {
-  const [mode, setMode] = useState<'signin' | 'join'>('signin');
-  const [fullName, setFullName] = useState('');
+  const [view, setView] = useState<'signin' | 'forgot'>('signin');
   const [email, setEmail] = useState(prefillEmail);
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [deptNote, setDeptNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [verifyEmailTo, setVerifyEmailTo] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const joinHint =
-    portal.allowed_domains.length > 0
-      ? `Corporate domain: @${portal.allowed_domains.join(', @')}`
-      : portal.join_policy === 'DOMAIN_APPROVAL'
-        ? 'Admin approval enabled for access requests'
-        : 'Invite-only workspace for authorized members';
+  const initials = companyMonogram(portal.company_name);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setNotice(null);
 
-    if (mode === 'join') {
-      if (password.length < 8) {
-        setError('Use at least 8 characters for your password.');
-        return;
-      }
+    if (view === 'forgot') {
       setSubmitting(true);
       try {
-        await ApiClient.register(email, password, {
-          account_type: 'employee',
-          target_company_slug: portal.slug,
-          department_note: deptNote.trim() || undefined,
-        });
-        try {
-          await ApiClient.login(email, password);
-          await establishSession(email, fullName.trim() || undefined, portal.slug);
-          onAuthenticated();
-        } catch {
-          setSubmitting(false);
-          setVerifyEmailTo(email);
-        }
-      } catch (err) {
+        await ApiClient.forgotPassword(email.trim());
+      } catch {
+        // Uniform response to avoid account enumeration
+      } finally {
         setSubmitting(false);
-        setError(friendlyError(err, `Could not create your ${portal.company_name} account.`));
       }
+      setNotice('If your company email has an account, a password reset link is on its way (valid 60 minutes).');
       return;
     }
 
@@ -136,206 +125,250 @@ function CompanyPortalAuthCard({
       onAuthenticated();
     } catch (err) {
       setSubmitting(false);
-      setError(friendlyError(err, 'Could not sign in. Check your email and password.'));
+      setError(friendlyError(err, 'Could not sign in. Check your company email and password.'));
     }
   };
 
-  if (verifyEmailTo) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-bg px-4 text-fg">
-        <Panel className="w-full max-w-md p-6 sm:p-8">
-          <div className="mb-4 inline-flex size-11 items-center justify-center rounded-full bg-ok-soft text-ok">
-            <Icon name="check" className="size-5" strokeWidth={2.2} />
-          </div>
-          <h1 className="text-xl font-semibold tracking-tight">Verify your email to enter {portal.company_name}</h1>
-          <p className="mt-2 text-sm leading-6 text-muted">
-            We sent a verification link to <strong className="text-fg">{verifyEmailTo}</strong>. Click the link in your inbox, then sign in here to access your {portal.company_name} portal.
-          </p>
-          <div className="mt-6 space-y-2.5">
-            <Button
-              className="w-full"
-              onClick={() => {
-                setVerifyEmailTo(null);
-                setMode('signin');
-              }}
-            >
-              Back to {portal.company_name} Sign In
-            </Button>
-            <Button
-              variant="secondary"
-              className="w-full"
-              onClick={async () => {
-                try {
-                  await ApiClient.resendVerification(verifyEmailTo);
-                  setNotice('Verification email re-sent.');
-                } catch {
-                  // fail silently
-                }
-              }}
-            >
-              Resend verification email
-            </Button>
-            {notice && <p className="text-center text-xs text-ok">{notice}</p>}
-          </div>
-        </Panel>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex min-h-screen flex-col bg-bg text-fg">
-      <header className="border-b border-line px-4 sm:px-6">
-        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/" aria-label="DocMind home">
+    <div className="relative flex min-h-screen flex-col overflow-x-hidden bg-bg text-fg">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-gradient-to-b from-surface-2/80 via-surface-2/20 to-transparent"
+      />
+
+      <header className="relative border-b border-line bg-bg/90 px-4 backdrop-blur sm:px-6">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <Link href="/" aria-label="DocMind home" className="shrink-0">
               <Logo />
             </Link>
-            <span className="h-4 w-px bg-line" />
-            <span className="text-sm font-semibold">{portal.company_name}</span>
+            <span className="h-5 w-px bg-line" />
+            <div className="flex min-w-0 items-center gap-2.5">
+              <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-xs font-bold tracking-tight text-brand-fg shadow-xs">
+                {initials}
+              </span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold leading-tight text-fg">{portal.company_name}</p>
+                <p className="truncate text-[11px] text-muted">/{portal.slug}/ • Enterprise Portal</p>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Link href="/signup/" className="hidden text-xs font-medium text-muted hover:text-fg sm:inline">
-              Create your own company
+
+          <div className="flex items-center gap-2.5">
+            <Link
+              href="/signup/"
+              className="hidden rounded-lg border border-line bg-surface px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-line-strong hover:text-fg sm:inline-flex"
+            >
+              Start a Company Workspace
             </Link>
             <ThemeToggle />
           </div>
         </div>
       </header>
 
-      <main className="flex flex-1 items-center justify-center px-4 py-10">
-        <Panel className="w-full max-w-md p-6 sm:p-8">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted">
-            <Icon name="building" className="size-3.5" />
-            <span>{portal.company_name} Knowledge Portal</span>
-          </div>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight">
-            {mode === 'signin' ? `Sign in to ${portal.company_name}` : `Join ${portal.company_name}`}
-          </h1>
-          <p className="mt-1.5 text-sm text-muted">
-            {mode === 'signin'
-              ? 'Sign in as an Admin or Employee. Your dashboard opens automatically based on your role.'
-              : 'Create your employee account to ask questions across approved company documents.'}
-          </p>
+      <main className="relative flex flex-1 items-center justify-center px-4 py-10 sm:px-6 lg:py-14">
+        <div className="grid w-full max-w-5xl items-center gap-8 lg:grid-cols-[1.08fr_0.92fr] lg:gap-12">
+          {/* Branded Organization Overview */}
+          <section className="space-y-6">
+            <div className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1 text-xs font-medium text-muted shadow-xs">
+              <Icon name="shield" className="size-3.5 text-fg" />
+              <span>Admin-Managed Organization Portal</span>
+            </div>
 
-          <div className="mt-4 flex items-center gap-2 rounded-lg border border-line bg-surface-2/60 px-3 py-2 text-xs text-muted">
-            <Icon name="lock" className="size-3.5 shrink-0 text-fg" />
-            <span>{joinHint}</span>
-          </div>
+            <div className="flex items-start gap-4">
+              <div className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-brand text-xl font-bold tracking-tight text-brand-fg shadow-sm">
+                {initials}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-widest text-muted">Authorized Company Workspace</p>
+                <h1 className="mt-1 text-3xl font-semibold tracking-tight text-fg sm:text-4xl">
+                  {portal.company_name}
+                </h1>
+                <p className="mt-2 max-w-lg text-[15px] leading-relaxed text-muted">
+                  Private document intelligence and grounded AI Q&amp;A for <strong className="text-fg">{portal.company_name}</strong> staff and administrators.
+                </p>
+              </div>
+            </div>
 
-          <div className="mt-5 grid grid-cols-2 rounded-xl border border-line bg-surface-2 p-1 text-xs font-medium">
-            <button
-              type="button"
-              onClick={() => {
-                setMode('signin');
-                setError(null);
-              }}
-              className={`rounded-lg py-2 transition-colors ${mode === 'signin' ? 'bg-surface text-fg shadow-xs' : 'text-muted hover:text-fg'}`}
-            >
-              Sign In
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setMode('join');
-                setError(null);
-              }}
-              className={`rounded-lg py-2 transition-colors ${mode === 'join' ? 'bg-surface text-fg shadow-xs' : 'text-muted hover:text-fg'}`}
-            >
-              Employee Sign Up
-            </button>
-          </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 font-mono text-fg">
+                <Icon name="globe" className="size-3.5 text-muted" />
+                /{portal.slug}/
+              </span>
+              {portal.allowed_domains.length > 0 && (
+                <span className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-muted">
+                  <Icon name="building" className="size-3.5 text-fg" />
+                  Domain: <strong className="text-fg">@{portal.allowed_domains.join(', @')}</strong>
+                </span>
+              )}
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-muted">
+                <Icon name="lock" className="size-3.5 text-fg" />
+                Private Multi-Tenant Boundary
+              </span>
+            </div>
 
-          <form onSubmit={onSubmit} className="mt-5 space-y-4">
+            <div className="grid gap-3 rounded-2xl border border-line bg-surface p-5">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted">
+                How {portal.company_name} Access Works
+              </p>
+              <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
+                <div className="rounded-xl bg-surface-2/60 p-3.5">
+                  <Icon name="mail" className="size-4 text-fg" />
+                  <p className="mt-2 text-xs font-semibold text-fg">Admin-Issued Login</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted">
+                    Use the work email &amp; password emailed to you by your Admin.
+                  </p>
+                </div>
+                <div className="rounded-xl bg-surface-2/60 p-3.5">
+                  <Icon name="sparkles" className="size-4 text-fg" />
+                  <p className="mt-2 text-xs font-semibold text-fg">Role Auto-Routing</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted">
+                    Admins open Console; employees open Document Q&amp;A automatically.
+                  </p>
+                </div>
+                <div className="rounded-xl bg-surface-2/60 p-3.5">
+                  <Icon name="shield" className="size-4 text-fg" />
+                  <p className="mt-2 text-xs font-semibold text-fg">Zero Cross-Leakage</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted">
+                    AI only retrieves from {portal.company_name}&apos;s indexed files.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Focused Sign-In Card */}
+          <Panel className="p-6 shadow-sm sm:p-8">
+            <div className="flex items-center justify-between gap-3 border-b border-line pb-4">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+                  {view === 'signin' ? `${portal.company_name} Member Sign In` : 'Reset Password'}
+                </p>
+                <h2 className="mt-0.5 truncate text-xl font-semibold tracking-tight text-fg">
+                  {view === 'signin' ? `Welcome to ${portal.company_name}` : 'Send a reset link'}
+                </h2>
+              </div>
+              <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-surface-2 text-sm font-bold text-fg">
+                {initials}
+              </span>
+            </div>
+
             {error && (
-              <div role="alert" className="flex items-start gap-2 rounded-lg bg-danger-soft px-3.5 py-2.5 text-sm text-danger">
+              <div role="alert" className="mt-4 flex items-start gap-2 rounded-xl bg-danger-soft px-3.5 py-2.5 text-sm text-danger">
                 <Icon name="alert" className="mt-0.5 size-4 shrink-0" />
                 <span>{error}</span>
               </div>
             )}
 
-            {mode === 'join' && portal.join_policy === 'INVITE_ONLY' && (
-              <div className="rounded-lg border border-line bg-surface-2/70 px-3.5 py-2.5 text-xs text-muted">
-                This portal is <strong className="text-fg">Invite Only</strong>. Complete this form if an Admin already sent an invite to your email address.
+            {notice && (
+              <div role="status" className="mt-4 flex items-start gap-2 rounded-xl bg-ok-soft px-3.5 py-2.5 text-sm text-ok">
+                <Icon name="check" className="mt-0.5 size-4 shrink-0" />
+                <span>{notice}</span>
               </div>
             )}
 
-            {mode === 'join' && (
+            <form onSubmit={onSubmit} className="mt-5 space-y-4">
               <div>
-                <label htmlFor="portal-name" className="mb-1.5 block text-sm font-medium">Full name</label>
-                <input
-                  id="portal-name"
-                  type="text"
-                  required
-                  value={fullName}
-                  onChange={e => setFullName(e.target.value)}
-                  className={inputClass}
-                />
+                <label htmlFor="portal-email" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">
+                  Company Email ID
+                </label>
+                <div className="relative">
+                  <Icon name="mail" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
+                  <input
+                    id="portal-email"
+                    type="email"
+                    required
+                    autoComplete="email"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder={portal.allowed_domains[0] ? `name@${portal.allowed_domains[0]}` : 'employee@company.com'}
+                    className={`${inputClass} pl-9`}
+                  />
+                </div>
               </div>
-            )}
 
-            <div>
-              <label htmlFor="portal-email" className="mb-1.5 block text-sm font-medium">Work email</label>
-              <input
-                id="portal-email"
-                type="email"
-                required
-                autoComplete="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder={portal.allowed_domains[0] ? `you@${portal.allowed_domains[0]}` : 'you@company.com'}
-                className={inputClass}
-              />
-            </div>
+              {view === 'signin' && (
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <label htmlFor="portal-pass" className="text-xs font-semibold uppercase tracking-wide text-muted">
+                      Password
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setView('forgot');
+                        setError(null);
+                        setNotice(null);
+                      }}
+                      className="text-xs font-medium text-muted underline underline-offset-2 hover:text-fg"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Icon name="lock" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
+                    <input
+                      id="portal-pass"
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      placeholder="Enter your password"
+                      className={`${inputClass} pl-9 pr-11`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(s => !s)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      className="absolute inset-y-0 right-1.5 my-auto inline-flex size-8 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg"
+                    >
+                      <Icon name={showPassword ? 'eyeOff' : 'eye'} className="size-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
 
-            {mode === 'join' && (
-              <div>
-                <label htmlFor="portal-dept" className="mb-1.5 block text-sm font-medium">Department / Team (optional)</label>
-                <input
-                  id="portal-dept"
-                  type="text"
-                  value={deptNote}
-                  onChange={e => setDeptNote(e.target.value)}
-                  placeholder="e.g. Engineering, HR, Sales"
-                  className={inputClass}
-                />
-              </div>
-            )}
-
-            <div>
-              <div className="mb-1.5 flex items-center justify-between">
-                <label htmlFor="portal-pass" className="text-sm font-medium">Password</label>
-                {mode === 'signin' && (
-                  <Link href="/login/" className="text-xs text-muted underline underline-offset-2 hover:text-fg">
-                    Forgot password?
-                  </Link>
+              <Button type="submit" size="lg" className="w-full" disabled={submitting}>
+                {submitting && <Spinner />}
+                {view === 'signin' ? (
+                  <>
+                    <span>Sign in to {portal.company_name}</span>
+                    <Icon name="arrowRight" className="size-4" />
+                  </>
+                ) : (
+                  <span>Send Reset Link</span>
                 )}
-              </div>
-              <div className="relative">
-                <input
-                  id="portal-pass"
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  minLength={mode === 'join' ? 8 : undefined}
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  className={`${inputClass} pr-16`}
-                />
+              </Button>
+
+              {view === 'forgot' && (
                 <button
                   type="button"
-                  onClick={() => setShowPassword(s => !s)}
-                  className="absolute inset-y-0 right-2 my-auto h-7 rounded px-2 text-xs font-medium text-muted hover:text-fg"
+                  onClick={() => {
+                    setView('signin');
+                    setError(null);
+                    setNotice(null);
+                  }}
+                  className="w-full text-center text-xs font-medium text-muted underline underline-offset-2 hover:text-fg"
                 >
-                  {showPassword ? 'Hide' : 'Show'}
+                  Back to {portal.company_name} Sign In
                 </button>
+              )}
+            </form>
+
+            <div className="mt-6 rounded-xl border border-line bg-surface-2/60 p-3.5 text-xs text-muted">
+              <div className="flex items-start gap-2.5">
+                <Icon name="userCheck" className="mt-0.5 size-4 shrink-0 text-fg" />
+                <div className="leading-relaxed">
+                  <p className="font-semibold text-fg">Don&apos;t have login credentials?</p>
+                  <p className="mt-0.5">
+                    Account creation is disabled on company portals. Ask your <strong className="text-fg">{portal.company_name}</strong> Administrator to add your work email and send your login password.
+                  </p>
+                </div>
               </div>
             </div>
-
-            <Button type="submit" size="lg" className="w-full" disabled={submitting}>
-              {submitting && <Spinner />}
-              {mode === 'signin' ? `Sign in to ${portal.company_name}` : `Continue to ${portal.company_name}`}
-            </Button>
-          </form>
-        </Panel>
+          </Panel>
+        </div>
       </main>
     </div>
   );
@@ -345,8 +378,6 @@ function CompanyPortalInner() {
   const pathname = usePathname();
   const toast = useToast();
   const [state, setState] = useState<PortalViewState>({ kind: 'loading' });
-  const [deptNote, setDeptNote] = useState('');
-  const [requesting, setRequesting] = useState(false);
 
   const bootstrap = useCallback(async () => {
     const { slug, emailParam } = readPortalSlugFromLocation(pathname);
@@ -612,47 +643,14 @@ function CompanyPortalInner() {
           </div>
           <h1 className="text-xl font-semibold tracking-tight">Restricted to {state.portal.company_name} Members</h1>
           <p className="mt-2 text-sm leading-6 text-muted">
-            You are signed in as <strong className="text-fg">{state.profile.email}</strong>, which does not have permission to view{' '}
-            <strong className="text-fg">{state.portal.company_name}</strong> documents.
+            You are signed in as <strong className="text-fg">{state.profile.email}</strong>, which has not been provisioned for{' '}
+            <strong className="text-fg">{state.portal.company_name}</strong>.
+          </p>
+          <p className="mt-2 rounded-xl border border-line bg-surface-2/60 p-3 text-xs leading-relaxed text-muted">
+            Self-signup and access requests are disabled on company portals. Ask a <strong className="text-fg">{state.portal.company_name}</strong> Admin to add your email and send your portal credentials.
           </p>
 
-          {state.portal.join_policy !== 'INVITE_ONLY' && (
-            <form
-              onSubmit={async e => {
-                e.preventDefault();
-                setRequesting(true);
-                try {
-                  const res = await ApiClient.requestCompanyPortalAccess(state.portal.slug, deptNote.trim() || undefined);
-                  toast(
-                    res.status === 'JOINED'
-                      ? `Joined ${res.company_name}!`
-                      : `Access request sent to ${res.company_name} Admins.`,
-                    'success',
-                  );
-                  await bootstrap();
-                } catch (err) {
-                  toast(err instanceof Error ? err.message : 'Could not request access.', 'error');
-                } finally {
-                  setRequesting(false);
-                }
-              }}
-              className="mt-4 space-y-2.5 border-t border-line pt-4"
-            >
-              <input
-                type="text"
-                value={deptNote}
-                onChange={e => setDeptNote(e.target.value)}
-                placeholder="Department / Team note (optional)"
-                className={inputClass}
-              />
-              <Button type="submit" className="w-full" disabled={requesting}>
-                {requesting && <Spinner />}
-                Request Employee Access to {state.portal.company_name}
-              </Button>
-            </form>
-          )}
-
-          <div className="mt-4 space-y-2 border-t border-line pt-4">
+          <div className="mt-5 space-y-2">
             {state.primaryWs && (
               <Link
                 href={altHref}

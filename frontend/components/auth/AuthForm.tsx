@@ -44,13 +44,12 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
   const demoRequested = params.get('demo') === '1';
 
   const [mode, setMode] = useState<Mode>(initialMode);
-  const [accountType, setAccountType] = useState<'personal' | 'company' | 'employee'>('personal');
+  const [accountType, setAccountType] = useState<'personal' | 'company'>('personal');
   const [fullName, setFullName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [slug, setSlug] = useState('');
   const [slugTouched, setSlugTouched] = useState(false);
   const [claimDomain, setClaimDomain] = useState(true);
-  const [departmentNote, setDepartmentNote] = useState('');
   const [email, setEmail] = useState('');
   const [domainMatch, setDomainMatch] = useState<CompanyDomainLookupDTO | null>(null);
   const [password, setPassword] = useState('');
@@ -196,9 +195,6 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
                 claim_domain: claimDomain,
               }
             : {}),
-          ...(accountType === 'employee' && departmentNote.trim()
-            ? { department_note: departmentNote.trim() }
-            : {}),
         });
         try {
           await ApiClient.login(email, password);
@@ -231,18 +227,12 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
   /* ---------- Verification pending ---------- */
   if (verifyEmailSentTo) {
     const verificationHeading =
-      accountType === 'company'
-        ? 'Company workspace ready — verify your email'
-        : accountType === 'employee'
-          ? 'Employee account created — verify your email'
-          : 'Check your inbox';
+      accountType === 'company' ? 'Company workspace ready — verify your email' : 'Check your inbox';
 
     const verificationBody =
       accountType === 'company'
-        ? `We sent a verification link to ${verifyEmailSentTo}. Verify within 24 hours, then sign in to open your Company Console and upload company documents.`
-        : accountType === 'employee'
-          ? `We sent a verification link to ${verifyEmailSentTo}. Verify within 24 hours, then sign in to access ${domainMatch?.company_name || 'your company'}’s Employee Knowledge Portal.`
-          : `We sent a verification link to ${verifyEmailSentTo}. It expires in 24 hours. Once you have verified, sign in to open your workspace.`;
+        ? `We sent a verification link to ${verifyEmailSentTo}. Verify within 24 hours, then sign in to open your Company Console, upload company documents, and create employee accounts.`
+        : `We sent a verification link to ${verifyEmailSentTo}. It expires in 24 hours. Once you have verified, sign in to open your workspace.`;
 
     return (
       <div className="anim-rise">
@@ -376,17 +366,16 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
           <>
             <fieldset>
               <legend className="mb-1.5 text-sm font-medium">How will you use DocMind?</legend>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {(
                   [
-                    { id: 'personal', label: 'Personal', icon: 'user', desc: 'Private docs' },
-                    { id: 'company', label: 'New company', icon: 'building', desc: 'Admin setup' },
-                    { id: 'employee', label: 'Employee', icon: 'userCheck', desc: 'Join company' },
+                    { id: 'personal', label: 'Personal', icon: 'user', desc: 'Private workspace & docs' },
+                    { id: 'company', label: 'New company', icon: 'building', desc: 'Create portal & manage staff' },
                   ] as const
                 ).map(opt => (
                   <label
                     key={opt.id}
-                    className={`cursor-pointer rounded-xl border p-3 transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-fg ${
+                    className={`cursor-pointer rounded-xl border p-3.5 transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-fg ${
                       accountType === opt.id ? 'border-fg bg-surface ring-1 ring-fg' : 'border-line-strong bg-surface hover:bg-surface-2'
                     }`}
                   >
@@ -404,6 +393,10 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
                   </label>
                 ))}
               </div>
+              <p className="mt-2 flex items-center gap-1.5 text-[12px] text-muted">
+                <Icon name="lock" className="size-3.5 shrink-0" />
+                <span>Joining an existing company? Employee credentials &amp; your company portal URL are emailed directly by your Admin.</span>
+              </p>
             </fieldset>
 
             <Field label="Full name" htmlFor="fullName">
@@ -463,31 +456,18 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
                     className="mt-0.5 size-4 rounded border-line-strong"
                   />
                   <span>
-                    <span className="block font-medium text-fg">Allow employees with your company email domain</span>
+                    <span className="block font-medium text-fg">Associate corporate email domain with your portal</span>
                     <span className="block text-[12px] text-muted">
-                      Colleagues signing up with your corporate email (e.g. @company.com) will request access to this company instead of getting a separate Personal Workspace.
+                      Helps coworkers locate /{slug || 'your-company'}/ from their email domain. Employee accounts are still created &amp; approved solely by Company Admins.
                     </span>
                   </span>
                 </label>
               </>
             )}
-
-            {accountType === 'employee' && (
-              <Field label="Department / Team (optional)" htmlFor="deptNote" hint="Helps your Company Admin approve access quickly.">
-                <input
-                  id="deptNote"
-                  type="text"
-                  placeholder="e.g. Engineering, HR, Finance"
-                  value={departmentNote}
-                  onChange={e => setDepartmentNote(e.target.value)}
-                  className={inputClass}
-                />
-              </Field>
-            )}
           </>
         )}
 
-        <Field label={accountType !== 'personal' && mode === 'signup' ? 'Company work email' : 'Email'} htmlFor="email">
+        <Field label={accountType !== 'personal' && mode === 'signup' ? 'Company admin work email' : 'Email'} htmlFor="email">
           <input
             id="email"
             type="email"
@@ -495,7 +475,7 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
             autoComplete="email"
             value={email}
             onChange={e => setEmail(e.target.value)}
-            placeholder={mode === 'signup' && accountType !== 'personal' ? 'you@company.com' : 'you@example.com'}
+            placeholder={mode === 'signup' && accountType !== 'personal' ? 'admin@company.com' : 'you@example.com'}
             className={inputClass}
           />
           {domainMatch?.matched && domainMatch.company_name && (
@@ -503,17 +483,12 @@ export function AuthForm({ initialMode }: { initialMode: Mode }) {
               <div className="flex min-w-0 items-center gap-2">
                 <Icon name="building" className="size-4 shrink-0 text-ok" />
                 <span>
-                  Company workspace detected: <strong>{domainMatch.company_name}</strong>
-                  {domainMatch.join_policy === 'DOMAIN_AUTO_JOIN'
-                    ? ' — instant employee access'
-                    : domainMatch.join_policy === 'DOMAIN_APPROVAL'
-                      ? ' — admin approval enabled'
-                      : ' — invite required'}
+                  Company portal detected: <strong>{domainMatch.company_name}</strong> — Admin-managed sign-in
                 </span>
               </div>
               {domainMatch.slug && (
                 <Link
-                  href={`/${domainMatch.slug}/`}
+                  href={`/${domainMatch.slug}/?email=${encodeURIComponent(email.trim())}`}
                   className="shrink-0 font-semibold underline underline-offset-2 hover:no-underline"
                 >
                   Open /{domainMatch.slug}/

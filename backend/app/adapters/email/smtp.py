@@ -1,4 +1,5 @@
 import asyncio
+import html as html_lib
 import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -162,6 +163,55 @@ class SMTPEmailProvider(EmailProvider):
             action_label="Join Workspace"
         )
         text = f"You have been invited by {inviter_email} to join {workspace_name} on DocMind.\nAccept your invitation at:\n{invite_link}"
+        return await self.send_email(to_email, subject, html, text)
+
+    async def send_employee_credentials_email(
+        self,
+        to_email: str,
+        company_name: str,
+        portal_link: str,
+        password: str,
+        admin_email: str,
+        role_label: str = "Employee",
+    ) -> bool:
+        esc_company = html_lib.escape(company_name, quote=True)
+        esc_email = html_lib.escape(to_email, quote=True)
+        esc_password = html_lib.escape(password, quote=True)
+        esc_admin = html_lib.escape(admin_email, quote=True)
+        esc_role = html_lib.escape(role_label, quote=True)
+        esc_portal_link = html_lib.escape(portal_link, quote=True)
+
+        subject = f"Your {company_name} DocMind Portal Credentials"
+        preheader = f"Sign in to {company_name} on DocMind using your company credentials"
+        body = f"""
+        <h2 style="color: #ffffff; font-size: 18px; margin-top: 0; margin-bottom: 12px;">Your {esc_company} Account Is Ready</h2>
+        <p><b>{esc_admin}</b> has created your <b>{esc_company}</b> portal account on DocMind with the role <b>{esc_role}</b>.</p>
+        <p>Use the company portal link and credentials below to sign in and query approved company documents:</p>
+        <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #020617; border: 1px solid #1e293b; border-radius: 10px; margin: 18px 0;">
+            <tr>
+                <td style="padding: 16px 18px; font-size: 13px; color: #cbd5e1; line-height: 1.7;">
+                    <div style="margin-bottom: 8px;"><span style="color: #94a3b8;">Company Portal:</span><br><a href="{esc_portal_link}" style="color: #06b6d4; word-break: break-all;">{esc_portal_link}</a></div>
+                    <div style="margin-bottom: 8px;"><span style="color: #94a3b8;">Login Email (ID):</span><br><span style="color: #f8fafc; font-family: monospace; font-size: 14px;">{esc_email}</span></div>
+                    <div><span style="color: #94a3b8;">Password:</span><br><span style="color: #22d3ee; font-family: monospace; font-size: 15px; font-weight: 700;">{esc_password}</span></div>
+                </td>
+            </tr>
+        </table>
+        <p style="font-size: 12px; color: #94a3b8;">For account security, you can change your password after signing in from your portal profile menu.</p>
+        """
+        html = _render_email_template(
+            title=subject,
+            preheader=preheader,
+            body_html=body,
+            action_url=esc_portal_link,
+            action_label=f"Open {esc_company} Portal",
+        )
+        text = (
+            f"Your {company_name} DocMind portal account has been created by {admin_email} ({role_label}).\n\n"
+            f"Company Portal URL: {portal_link}\n"
+            f"Login Email (ID): {to_email}\n"
+            f"Password: {password}\n\n"
+            f"You can update your password anytime after signing in."
+        )
         return await self.send_email(to_email, subject, html, text)
 
 

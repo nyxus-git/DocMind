@@ -9,7 +9,7 @@ from app.api.v1.dependencies import WorkspaceContext, get_current_user, require_
 from app.core.config import settings
 from app.core.domains import normalize_corporate_domains
 from app.core.exceptions import DocMindException, EntityNotFoundException
-from app.core.security import generate_secure_token, hash_token
+from app.core.security import generate_secure_token, hash_password, hash_token
 from app.db.session import get_db
 from app.models.entities import (
     Document,
@@ -24,6 +24,7 @@ from app.models.enums import (
     JoinPolicy,
     JoinRequestStatus,
     SpaceVisibility,
+    UserStatus,
     WorkspaceRole,
 )
 from app.repositories.audit import AuditRepository
@@ -44,6 +45,9 @@ from app.schemas.company import (
     EmployeePortalInfoDTO,
     KnowledgeGapDTO,
     KnowledgeSpaceDTO,
+    ProvisionEmployeeResultItem,
+    ProvisionEmployeesRequest,
+    ProvisionEmployeesResponse,
     UpdateCompanySettingsRequest,
     UpdateSpaceRequest,
 )
@@ -500,6 +504,230 @@ async def bulk_invite_employees(
         invited_count=invited_count,
         added_count=added_count,
         skipped_count=skipped_count,
+    )
+
+
+@router.post("/employees/provision", response_model=ProvisionEmployeesResponse)
+async def provision_company_employees(
+    req: ProvisionEmployeesRequest,
+    ctx: WorkspaceContext = Depends(require_company_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Creates verified employee accounts with an admin-defined password and emails credentials."""
+    target_role = req.role.upper().strip()
+    if target_role not in (
+        WorkspaceRole.ADMIN.value,
+        WorkspaceRole.MEMBER.value,
+        WorkspaceRole.EMPLOYEE.value,
+        WorkspaceRole.VIEWER.value,
+    ):
+        raise DocMindException(status_code=400, code="INVALID_ROLE", title="Bad Request", detail="Invalid role specified.")
+
+    if not req.password or not req.password.strip():
+        raise DocMindException(
+            status_code=400,
+            code="INVALID_PASSWORD",
+            title="Bad Request",
+            detail="A non-empty password of at least 8 characters is required.",
+        )
+
+    unique_emails = list(dict.fromkeys(e.strip().lower() for e in req.emails if e and e.strip()))[:50]
+    if not unique_emails:
+        raise DocMindException(
+            status_code=400,
+            code="EMPTY_EMAIL_LIST",
+            title="Bad Request",
+            detail="Enter at least one valid employee email address.",
+        )
+
+    ws_repo = WorkspaceRepository(db)
+    user_repo = UserRepository(db)
+    audit_repo = AuditRepository(db)
+    quota_svc = QuotaService(DocumentRepository(db), UsageRepository(db), ws_repo)
+    email_provider = get_email_provider()
+
+    password_hash = hash_password(req.password)
+    portal_link = f"{settings.PUBLIC_APP_URL}/{ctx.workspace.slug}/"
+    role_labels = {
+        WorkspaceRole.EMPLOYEE.value: "Employee",
+        WorkspaceRole.ADMIN.value: "Company Admin",
+        WorkspaceRole.MEMBER.value: "Member",
+        WorkspaceRole.VIEWER.value: "Viewer",
+    }
+    role_label = role_labels.get(target_role, target_role.title())
+
+    smtp_live = getattr(email_provider, "enabled", True)
+
+    async def _send_credentials(to_email: str, role_txt: str) -> bool:
+        try:
+            ok = await email_provider.send_employee_credentials_email(
+                to_email=to_email,
+                company_name=ctx.workspace.name,
+                portal_link=portal_link,
+                password=req.password,
+                admin_email=ctx.user.email,
+                role_label=role_txt,
+            )
+            return bool(ok and smtp_live)
+        except Exception:
+            return False
+
+    async def _send_portal_notice(to_email: str) -> bool:
+        try:
+            ok = await email_provider.send_member_invite_email(
+                to_email=to_email,
+                inviter_email=ctx.user.email,
+                workspace_name=ctx.workspace.name,
+                invite_link=portal_link,
+            )
+            return bool(ok and smtp_live)
+        except Exception:
+            return False
+
+    results: List[ProvisionEmployeeResultItem] = []
+    created_count = 0
+    added_count = 0
+    updated_count = 0
+    skipped_count = 0
+    emails_sent_count = 0
+
+    for addr in unique_emails:
+        target_user = await user_repo.get_by_email(addr)
+
+        if target_user and target_user.status == UserStatus.DELETED.value:
+            skipped_count += 1
+            results.append(
+                ProvisionEmployeeResultItem(
+                    email=addr,
+                    status="skipped",
+                    email_sent=False,
+                    detail="This email belongs to a deactivated account and cannot be provisioned automatically.",
+                )
+            )
+            continue
+
+        if target_user is None:
+            await quota_svc.check_member_invite_quota(ctx.workspace.id)
+            target_user = await user_repo.create_user(addr, password_hash)
+            await user_repo.mark_verified(target_user.id)
+            await ws_repo.add_member(ctx.workspace.id, target_user.id, target_role)
+            created_count += 1
+
+            sent = await _send_credentials(addr, role_label)
+            if sent:
+                emails_sent_count += 1
+
+            results.append(
+                ProvisionEmployeeResultItem(
+                    email=addr,
+                    status="created",
+                    email_sent=sent,
+                    detail=f"Account created ({role_label}) and credentials {'emailed' if sent else 'generated'}.",
+                )
+            )
+            continue
+
+        existing_mem = await ws_repo.get_user_membership(ctx.workspace.id, target_user.id)
+        user_workspaces = await ws_repo.get_user_workspaces(target_user.id)
+        has_other_workspaces = any(ws.id != ctx.workspace.id for ws, _ in user_workspaces)
+
+        if existing_mem:
+            can_update_password = (
+                req.reset_existing_password
+                and not has_other_workspaces
+                and existing_mem.role != WorkspaceRole.OWNER.value
+                and not target_user.is_superadmin
+            )
+            if can_update_password:
+                await user_repo.update_password(target_user.id, password_hash)
+                if not target_user.verified_at or target_user.status != UserStatus.ACTIVE.value:
+                    await user_repo.mark_verified(target_user.id)
+                updated_count += 1
+                sent = await _send_credentials(addr, role_labels.get(existing_mem.role, existing_mem.role.title()))
+                if sent:
+                    emails_sent_count += 1
+                results.append(
+                    ProvisionEmployeeResultItem(
+                        email=addr,
+                        status="password_updated",
+                        email_sent=sent,
+                        detail=f"Password updated and portal credentials {'emailed' if sent else 'generated'}.",
+                    )
+                )
+            else:
+                skipped_count += 1
+                reason = (
+                    "User belongs to other workspaces; password was kept unchanged for security."
+                    if (req.reset_existing_password and has_other_workspaces)
+                    else "Already a member (existing password retained)."
+                )
+                results.append(
+                    ProvisionEmployeeResultItem(
+                        email=addr,
+                        status="already_member",
+                        email_sent=False,
+                        detail=reason,
+                    )
+                )
+            continue
+
+        # Existing user is not yet a member of this company workspace
+        await quota_svc.check_member_invite_quota(ctx.workspace.id)
+        await ws_repo.add_member(ctx.workspace.id, target_user.id, target_role)
+
+        # Only set password when the account has no other active workspaces (e.g. dormant unverified user)
+        if not user_workspaces and not target_user.is_superadmin:
+            await user_repo.update_password(target_user.id, password_hash)
+            await user_repo.mark_verified(target_user.id)
+            sent = await _send_credentials(addr, role_label)
+            if sent:
+                emails_sent_count += 1
+            created_count += 1
+            results.append(
+                ProvisionEmployeeResultItem(
+                    email=addr,
+                    status="created",
+                    email_sent=sent,
+                    detail=f"Account activated ({role_label}) and credentials {'emailed' if sent else 'generated'}.",
+                )
+            )
+        else:
+            added_count += 1
+            sent = await _send_portal_notice(addr)
+            if sent:
+                emails_sent_count += 1
+            results.append(
+                ProvisionEmployeeResultItem(
+                    email=addr,
+                    status="added",
+                    email_sent=sent,
+                    detail=f"Added to {ctx.workspace.name} as {role_label} (signs in with existing DocMind password).",
+                )
+            )
+
+    await audit_repo.record_event(
+        workspace_id=ctx.workspace.id,
+        actor_user_id=ctx.user.id,
+        action="EMPLOYEES_PROVISIONED",
+        target_type="workspace",
+        target_id=ctx.workspace.id,
+        metadata={
+            "created": created_count,
+            "added": added_count,
+            "updated": updated_count,
+            "skipped": skipped_count,
+            "emails_sent": emails_sent_count,
+            "role": target_role,
+        },
+    )
+
+    return ProvisionEmployeesResponse(
+        results=results,
+        created_count=created_count,
+        added_count=added_count,
+        updated_count=updated_count,
+        skipped_count=skipped_count,
+        emails_sent_count=emails_sent_count,
     )
 
 

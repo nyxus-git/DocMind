@@ -34,3 +34,14 @@ class EmailProvider(Protocol):
     ) -> bool:
         ...
 
+    async def send_employee_credentials_email(
+        self,
+        to_email: str,
+        company_name: str,
+        portal_link: str,
+        password: str,
+        admin_email: str,
+        role_label: str = "Employee",
+    ) -> bool:
+        ...
+

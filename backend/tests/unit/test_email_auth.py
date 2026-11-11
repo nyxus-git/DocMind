@@ -25,6 +25,7 @@ class MockEmailProvider:
         self.verification_links: List[dict] = []
         self.reset_links: List[dict] = []
         self.invites: List[dict] = []
+        self.credentials_emails: List[dict] = []
 
     async def send_email(self, to_email: str, subject: str, html_content: str, text_content: Optional[str] = None) -> bool:
         self.sent_emails.append({"to": to_email, "subject": subject, "html": html_content})
@@ -44,6 +45,25 @@ class MockEmailProvider:
             "inviter": inviter_email,
             "workspace": workspace_name,
             "link": invite_link
+        })
+        return True
+
+    async def send_employee_credentials_email(
+        self,
+        to_email: str,
+        company_name: str,
+        portal_link: str,
+        password: str,
+        admin_email: str,
+        role_label: str = "Employee",
+    ) -> bool:
+        self.credentials_emails.append({
+            "to": to_email,
+            "company": company_name,
+            "portal_link": portal_link,
+            "password": password,
+            "admin_email": admin_email,
+            "role": role_label,
         })
         return True
 

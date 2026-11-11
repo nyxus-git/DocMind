@@ -136,29 +136,11 @@ class AuthService:
                 role=mem.role if mem else WorkspaceRole.EMPLOYEE.value,
             )
 
-        self._validate_target_company_eligibility(ws, user.email)
-
-        if ws.join_policy == JoinPolicy.DOMAIN_AUTO_JOIN.value and (not settings.REQUIRE_EMAIL_VERIFICATION or user.verified_at):
-            role = ws.default_join_role or WorkspaceRole.EMPLOYEE.value
-            await self.workspace_repo.add_member(ws.id, user.id, role)
-            return PortalAccessRequestResult(
-                status="JOINED",
-                company_name=ws.name,
-                slug=ws.slug,
-                role=role,
-            )
-
-        await self.workspace_repo.create_or_get_join_request(
-            workspace_id=ws.id,
-            user_id=user.id,
-            email=user.email,
-            department_note=department_note,
-        )
-        return PortalAccessRequestResult(
-            status="PENDING",
-            company_name=ws.name,
-            slug=ws.slug,
-            role="PENDING",
+        raise DocMindException(
+            status_code=403,
+            code="ADMIN_MANAGED_ACCESS",
+            title="Admin-Managed Access",
+            detail=f"Access to {ws.name} is strictly managed by Company Administrators. Ask your Company Admin to add your account and email your login credentials.",
         )
 
     async def _apply_domain_join_if_eligible(
@@ -239,15 +221,19 @@ class AuthService:
         has_invite = await self.workspace_repo.has_pending_invitation(email, workspace_id=target_ws.id if target_ws else None)
 
         if target_ws and not has_invite:
-            self._validate_target_company_eligibility(target_ws, email)
-        elif mode == "employee" and not has_invite:
-            if not is_corporate_domain(domain):
-                raise DocMindException(
-                    status_code=400,
-                    code="CORPORATE_EMAIL_REQUIRED",
-                    title="Company Email Required",
-                    detail="Please use your company email address or register through your company’s invite link.",
-                )
+            raise DocMindException(
+                status_code=403,
+                code="ADMIN_MANAGED_ACCESS",
+                title="Admin-Managed Access",
+                detail=f"Self-signup is disabled for {target_ws.name}. Ask your Company Admin to add your email and send your login credentials.",
+            )
+        if mode == "employee" and not has_invite:
+            raise DocMindException(
+                status_code=403,
+                code="ADMIN_MANAGED_ACCESS",
+                title="Admin-Managed Employee Accounts",
+                detail="Employee accounts are created directly by Company Administrators. Check your work email for your company portal link and password.",
+            )
 
         password_hash = hash_password(password)
         user = await self.user_repo.create_user(email, password_hash)
@@ -269,7 +255,6 @@ class AuthService:
                 conflicts = await self.workspace_repo.find_domain_conflicts([domain or ""])
                 if not conflicts and domain:
                     allowed_domains = [domain]
-                    join_policy = JoinPolicy.DOMAIN_APPROVAL.value
 
             active_workspace = await self.workspace_repo.create_workspace(
                 name=company_name.strip(),
@@ -294,50 +279,16 @@ class AuthService:
             else:
                 active_workspace = await self.workspace_repo.get_by_id(joined_ids[0])
 
-        # 3. Direct portal join request/auto-join or domain auto-join
+        # 3. Direct portal self-signup / domain auto-join is disabled in favor of Admin-managed provisioning
         pending_req = None
-        if not active_workspace and target_ws:
-            if target_ws.join_policy == JoinPolicy.DOMAIN_AUTO_JOIN.value:
-                if not settings.REQUIRE_EMAIL_VERIFICATION or user.verified_at:
-                    role = target_ws.default_join_role or WorkspaceRole.EMPLOYEE.value
-                    await self.workspace_repo.add_member(target_ws.id, user.id, role)
-                    active_workspace = target_ws
-            elif target_ws.join_policy == JoinPolicy.DOMAIN_APPROVAL.value:
-                req_row = await self.workspace_repo.create_or_get_join_request(
-                    workspace_id=target_ws.id,
-                    user_id=user.id,
-                    email=user.email,
-                    department_note=department_note,
-                )
-                pending_req = PendingJoinRequestDTO(
-                    workspace_id=target_ws.id,
-                    company_name=target_ws.name,
-                    company_slug=target_ws.slug,
-                    status=req_row.status,
-                    created_at=req_row.created_at,
-                )
-
-        if not active_workspace and not pending_req and not target_ws:
-            domain_ws, pending_req = await self._apply_domain_join_if_eligible(user, department_note=department_note)
-            if domain_ws:
-                active_workspace = domain_ws
 
         if mode == "employee" and not target_ws and not active_workspace and not pending_req:
-            matched_ws = await self.workspace_repo.find_company_by_domain(domain or "")
-            if matched_ws and matched_ws.join_policy == JoinPolicy.INVITE_ONLY.value:
-                raise DocMindException(
-                    status_code=403,
-                    code="INVITE_REQUIRED",
-                    title="Invitation Required",
-                    detail=f"{matched_ws.name} requires an invitation from a Company Admin before joining.",
-                )
-            if not matched_ws:
-                raise DocMindException(
-                    status_code=404,
-                    code="COMPANY_DOMAIN_NOT_FOUND",
-                    title="Company Not Found",
-                    detail=f"No company workspace has registered '@{domain}' yet. Ask your IT admin to register your company or share your company portal link.",
-                )
+            raise DocMindException(
+                status_code=403,
+                code="ADMIN_MANAGED_ACCESS",
+                title="Admin-Managed Employee Accounts",
+                detail="Employee accounts are created directly by Company Administrators.",
+            )
 
         # 4. Individual signup with no company association -> create Personal Workspace
         if not active_workspace and not pending_req and not target_ws and mode != "employee":

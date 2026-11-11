@@ -89,6 +89,29 @@ class BulkInviteResponse(BaseModel):
     skipped_count: int
 
 
+class ProvisionEmployeesRequest(BaseModel):
+    emails: List[EmailStr]
+    password: str = Field(min_length=8, max_length=128)
+    role: str = Field(default="EMPLOYEE")
+    reset_existing_password: bool = Field(default=False)
+
+
+class ProvisionEmployeeResultItem(BaseModel):
+    email: str
+    status: str  # created, added, password_updated, already_member, skipped
+    email_sent: bool = False
+    detail: str
+
+
+class ProvisionEmployeesResponse(BaseModel):
+    results: List[ProvisionEmployeeResultItem]
+    created_count: int
+    added_count: int
+    updated_count: int = 0
+    skipped_count: int
+    emails_sent_count: int
+
+
 class KnowledgeGapDTO(BaseModel):
     id: uuid.UUID
     message_id: uuid.UUID
