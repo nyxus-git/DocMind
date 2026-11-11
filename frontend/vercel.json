@@ -3,15 +3,15 @@
   "rewrites": [
     {
       "source": "/:slug((?!(?:api|app|admin|auth|company|employee|login|signup|org|_next|_not-found|404)(?:/|$))[^/.]+)",
-      "destination": "/org/index.html"
+      "destination": "/org/"
     },
     {
       "source": "/:slug((?!(?:api|app|admin|auth|company|employee|login|signup|org|_next|_not-found|404)(?:/|$))[^/.]+)/",
-      "destination": "/org/index.html"
+      "destination": "/org/"
     },
     {
       "source": "/:slug((?!(?:api|app|admin|auth|company|employee|login|signup|org|_next|_not-found|404)(?:/|$))[^/.]+)/:rest*",
-      "destination": "/org/index.html"
+      "destination": "/org/"
     }
   ]
 }

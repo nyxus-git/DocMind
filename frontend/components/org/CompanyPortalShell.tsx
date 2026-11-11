@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import {
   ApiClient,
   ApiError,
@@ -32,7 +33,7 @@ const RESERVED_SEGMENTS = new Set([
   'api',
 ]);
 
-function readPortalSlugFromLocation(): { slug: string | null; emailParam: string } {
+function readPortalSlugFromLocation(fallbackPathname?: string | null): { slug: string | null; emailParam: string } {
   if (typeof window === 'undefined') return { slug: null, emailParam: '' };
   const params = new URLSearchParams(window.location.search);
   const querySlug = (params.get('c') || params.get('org') || '').trim().toLowerCase();
@@ -40,7 +41,8 @@ function readPortalSlugFromLocation(): { slug: string | null; emailParam: string
   if (querySlug && !RESERVED_SEGMENTS.has(querySlug)) {
     return { slug: querySlug, emailParam };
   }
-  const segs = window.location.pathname.split('/').filter(Boolean);
+  const pathname = window.location.pathname || fallbackPathname || '';
+  const segs = pathname.split('/').filter(Boolean);
   const first = (segs[0] || '').trim().toLowerCase();
   if (first && !RESERVED_SEGMENTS.has(first)) {
     return { slug: first, emailParam };
@@ -51,6 +53,7 @@ function readPortalSlugFromLocation(): { slug: string | null; emailParam: string
 type PortalViewState =
   | { kind: 'loading' }
   | { kind: 'not_found'; slug: string }
+  | { kind: 'error'; slug: string; message: string }
   | { kind: 'unauthenticated'; portal: CompanyPortalPublicDTO; prefillEmail: string }
   | { kind: 'console'; portal: CompanyPortalPublicDTO; session: UserSession }
   | { kind: 'employee'; portal: CompanyPortalPublicDTO; session: UserSession }
@@ -339,13 +342,14 @@ function CompanyPortalAuthCard({
 }
 
 function CompanyPortalInner() {
+  const pathname = usePathname();
   const toast = useToast();
   const [state, setState] = useState<PortalViewState>({ kind: 'loading' });
   const [deptNote, setDeptNote] = useState('');
   const [requesting, setRequesting] = useState(false);
 
   const bootstrap = useCallback(async () => {
-    const { slug, emailParam } = readPortalSlugFromLocation();
+    const { slug, emailParam } = readPortalSlugFromLocation(pathname);
     if (!slug) {
       const existing = loadSession();
       if (existing && ApiClient.getToken()) {
@@ -356,16 +360,31 @@ function CompanyPortalInner() {
       return;
     }
 
-    let portal: CompanyPortalPublicDTO;
+    let portal: CompanyPortalPublicDTO | null = null;
+    let portalFetchErr: unknown = null;
     try {
       portal = await ApiClient.getCompanyPortalBySlug(slug);
-    } catch {
-      setState({ kind: 'not_found', slug });
-      return;
+    } catch (err) {
+      portalFetchErr = err;
     }
 
     const token = ApiClient.getToken();
     if (!token) {
+      if (!portal) {
+        if (portalFetchErr instanceof ApiError && portalFetchErr.status === 404) {
+          setState({ kind: 'not_found', slug });
+        } else {
+          setState({
+            kind: 'error',
+            slug,
+            message: portalFetchErr instanceof Error ? portalFetchErr.message : 'Unable to reach DocMind API server.',
+          });
+        }
+        return;
+      }
+      if (typeof document !== 'undefined') {
+        document.title = `${portal.company_name} Knowledge Portal · DocMind`;
+      }
       setState({ kind: 'unauthenticated', portal, prefillEmail: emailParam });
       return;
     }
@@ -375,7 +394,36 @@ function CompanyPortalInner() {
         ApiClient.listWorkspaces(),
         ApiClient.getMyProfile(),
       ]);
-      const targetWs = workspaces.find(w => w.slug.toLowerCase() === portal.slug.toLowerCase());
+      const targetWs = workspaces.find(w => w.slug.toLowerCase() === slug.toLowerCase());
+      const resolvedPortal: CompanyPortalPublicDTO | null =
+        portal ??
+        (targetWs
+          ? {
+              exists: true,
+              company_name: targetWs.name,
+              slug: targetWs.slug,
+              join_policy: 'INVITE_ONLY',
+              allowed_domains: [],
+            }
+          : null);
+
+      if (!resolvedPortal) {
+        if (portalFetchErr instanceof ApiError && portalFetchErr.status === 404) {
+          setState({ kind: 'not_found', slug });
+        } else {
+          setState({
+            kind: 'error',
+            slug,
+            message: portalFetchErr instanceof Error ? portalFetchErr.message : 'Unable to reach DocMind API server.',
+          });
+        }
+        return;
+      }
+
+      if (typeof document !== 'undefined') {
+        document.title = `${resolvedPortal.company_name} Knowledge Portal · DocMind`;
+      }
+
       if (targetWs) {
         ApiClient.setActiveWorkspaceId(targetWs.id);
         const prev = loadSession();
@@ -397,19 +445,19 @@ function CompanyPortalInner() {
 
         const role = targetWs.role.toUpperCase();
         if (role === 'OWNER' || role === 'ADMIN' || role === 'MEMBER') {
-          setState({ kind: 'console', portal, session: nextSession });
+          setState({ kind: 'console', portal: resolvedPortal, session: nextSession });
         } else {
-          setState({ kind: 'employee', portal, session: nextSession });
+          setState({ kind: 'employee', portal: resolvedPortal, session: nextSession });
         }
         return;
       }
 
       const primaryWs = workspaces[0] ?? null;
       const pendingSlug = profile.pending_join_request?.company_slug?.toLowerCase();
-      if (pendingSlug === portal.slug.toLowerCase()) {
+      if (pendingSlug === resolvedPortal.slug.toLowerCase()) {
         setState({
           kind: 'pending',
-          portal,
+          portal: resolvedPortal,
           email: profile.email,
           primaryWs,
         });
@@ -418,7 +466,7 @@ function CompanyPortalInner() {
 
       setState({
         kind: 'no_access',
-        portal,
+        portal: resolvedPortal,
         profile,
         primaryWs,
       });
@@ -426,13 +474,25 @@ function CompanyPortalInner() {
       if (err instanceof ApiError && err.status === 401) {
         clearSession();
         await ApiClient.logout().catch(() => {});
-        setState({ kind: 'unauthenticated', portal, prefillEmail: emailParam });
+        if (portal) {
+          setState({ kind: 'unauthenticated', portal, prefillEmail: emailParam });
+        } else {
+          setState({ kind: 'not_found', slug });
+        }
         return;
       }
-      toast(err instanceof Error ? err.message : 'Could not load portal.', 'error');
-      setState({ kind: 'unauthenticated', portal, prefillEmail: emailParam });
+      if (portal) {
+        toast(err instanceof Error ? err.message : 'Could not load portal.', 'error');
+        setState({ kind: 'unauthenticated', portal, prefillEmail: emailParam });
+      } else {
+        setState({
+          kind: 'error',
+          slug,
+          message: err instanceof Error ? err.message : 'Unable to reach DocMind API server.',
+        });
+      }
     }
-  }, [toast]);
+  }, [pathname, toast]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -451,6 +511,31 @@ function CompanyPortalInner() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-bg">
         <Spinner className="size-6 text-fg" />
+      </div>
+    );
+  }
+
+  if (state.kind === 'error') {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-bg px-4 text-fg">
+        <Panel className="w-full max-w-md p-6 text-center sm:p-8">
+          <div className="mx-auto mb-4 inline-flex size-12 items-center justify-center rounded-full bg-warn-soft text-warn">
+            <Icon name="alert" className="size-6" />
+          </div>
+          <h1 className="text-xl font-semibold">Cannot connect to server</h1>
+          <p className="mt-2 text-sm text-muted">{state.message}</p>
+          <div className="mt-6 flex flex-col gap-2">
+            <Button onClick={() => void bootstrap()}>
+              <Icon name="retry" /> Try again
+            </Button>
+            <Link
+              href="/login/"
+              className="inline-flex h-10 items-center justify-center rounded-xl border border-line bg-surface px-4 text-sm font-medium hover:bg-surface-2"
+            >
+              Back to Sign in
+            </Link>
+          </div>
+        </Panel>
       </div>
     );
   }
