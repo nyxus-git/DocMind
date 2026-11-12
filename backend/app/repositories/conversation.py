@@ -4,7 +4,15 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from app.models.entities import Conversation, Document, Message, MessageCitation, MessageFeedback, User
+from app.models.entities import (
+    Conversation,
+    Document,
+    KnowledgeGapResolution,
+    Message,
+    MessageCitation,
+    MessageFeedback,
+    User,
+)
 from app.models.enums import DocumentStatus
 
 
@@ -179,10 +187,16 @@ class ConversationRepository:
         )
         return {row[0]: int(row[1]) for row in res.all()}
 
-    async def list_knowledge_gaps(self, workspace_id: uuid.UUID, limit: int = 50) -> List[Dict[str, Any]]:
+    async def list_knowledge_gaps(
+        self,
+        workspace_id: uuid.UUID,
+        limit: int = 50,
+        include_resolved: bool = True,
+    ) -> List[Dict[str, Any]]:
         """Returns negative feedback reports and unanswered (insufficient_evidence) questions."""
         gaps: List[Dict[str, Any]] = []
         seen_msg_ids = set()
+        fetch_limit = max(limit * 2, limit)
 
         fb_res = await self.db.execute(
             select(MessageFeedback, Message, User.email)
@@ -190,7 +204,7 @@ class ConversationRepository:
             .join(User, MessageFeedback.user_id == User.id)
             .where(MessageFeedback.workspace_id == workspace_id, MessageFeedback.rating == -1)
             .order_by(MessageFeedback.created_at.desc())
-            .limit(limit)
+            .limit(fetch_limit)
         )
         for fb, msg, user_email in fb_res.all():
             seen_msg_ids.add(msg.id)
@@ -216,11 +230,12 @@ class ConversationRepository:
                 Message.insufficient_evidence.is_(True),
             )
             .order_by(Message.created_at.desc())
-            .limit(limit)
+            .limit(fetch_limit)
         )
         for msg, conv, user_email in insuff_res.all():
             if msg.id in seen_msg_ids:
                 continue
+            seen_msg_ids.add(msg.id)
             prev_q = (
                 await self.db.execute(
                     select(Message.content)
@@ -245,5 +260,103 @@ class ConversationRepository:
                 "created_at": msg.created_at,
             })
 
-        gaps.sort(key=lambda g: g["created_at"], reverse=True)
-        return gaps[:limit]
+        if seen_msg_ids:
+            res_rows = (
+                await self.db.execute(
+                    select(KnowledgeGapResolution, User.email)
+                    .outerjoin(User, KnowledgeGapResolution.resolved_by == User.id)
+                    .where(
+                        KnowledgeGapResolution.workspace_id == workspace_id,
+                        KnowledgeGapResolution.message_id.in_(list(seen_msg_ids)),
+                    )
+                )
+            ).all()
+            res_map = {row[0].message_id: (row[0], row[1]) for row in res_rows}
+        else:
+            res_map = {}
+
+        enriched: List[Dict[str, Any]] = []
+        for g in gaps:
+            rec_tuple = res_map.get(g["message_id"])
+            if rec_tuple:
+                rec, resolver_email = rec_tuple
+                g["resolved"] = True
+                g["resolved_at"] = rec.resolved_at
+                g["resolved_by_email"] = resolver_email
+                g["resolution_note"] = rec.resolution_note
+            else:
+                g["resolved"] = False
+                g["resolved_at"] = None
+                g["resolved_by_email"] = None
+                g["resolution_note"] = None
+            if include_resolved or not g["resolved"]:
+                enriched.append(g)
+
+        enriched.sort(key=lambda g: g["created_at"], reverse=True)
+        return enriched[:limit]
+
+    async def set_knowledge_gap_resolution(
+        self,
+        workspace_id: uuid.UUID,
+        message_id: uuid.UUID,
+        actor_user_id: uuid.UUID,
+        actor_email: str,
+        resolved: bool = True,
+        resolution_note: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        msg_exists = (
+            await self.db.execute(
+                select(Message.id)
+                .join(Conversation, Message.conversation_id == Conversation.id)
+                .where(Message.id == message_id, Conversation.workspace_id == workspace_id)
+            )
+        ).scalar_one_or_none()
+        if not msg_exists:
+            return None
+
+        existing = (
+            await self.db.execute(
+                select(KnowledgeGapResolution).where(
+                    KnowledgeGapResolution.workspace_id == workspace_id,
+                    KnowledgeGapResolution.message_id == message_id,
+                )
+            )
+        ).scalar_one_or_none()
+
+        clean_note = resolution_note.strip() if resolution_note and resolution_note.strip() else None
+
+        if not resolved:
+            if existing:
+                await self.db.delete(existing)
+                await self.db.flush()
+            return {
+                "message_id": message_id,
+                "resolved": False,
+                "resolved_at": None,
+                "resolved_by_email": None,
+                "resolution_note": None,
+            }
+
+        now = datetime.now(timezone.utc)
+        if existing:
+            existing.resolved_by = actor_user_id
+            existing.resolution_note = clean_note
+            existing.resolved_at = now
+        else:
+            existing = KnowledgeGapResolution(
+                workspace_id=workspace_id,
+                message_id=message_id,
+                resolved_by=actor_user_id,
+                resolution_note=clean_note,
+                resolved_at=now,
+            )
+            self.db.add(existing)
+        await self.db.flush()
+
+        return {
+            "message_id": message_id,
+            "resolved": True,
+            "resolved_at": existing.resolved_at,
+            "resolved_by_email": actor_email,
+            "resolution_note": existing.resolution_note,
+        }

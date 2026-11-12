@@ -44,10 +44,12 @@ from app.schemas.company import (
     DecideJoinRequestRequest,
     EmployeePortalInfoDTO,
     KnowledgeGapDTO,
+    KnowledgeGapResolutionDTO,
     KnowledgeSpaceDTO,
     ProvisionEmployeeResultItem,
     ProvisionEmployeesRequest,
     ProvisionEmployeesResponse,
+    ResolveKnowledgeGapRequest,
     UpdateCompanySettingsRequest,
     UpdateSpaceRequest,
 )
@@ -217,7 +219,7 @@ async def get_company_overview(
     spaces_count = int(
         await db.scalar(select(func.count(KnowledgeSpace.id)).where(KnowledgeSpace.workspace_id == ws.id)) or 0
     )
-    gaps_raw = await conv_repo.list_knowledge_gaps(ws.id, limit=8)
+    gaps_raw = await conv_repo.list_knowledge_gaps(ws.id, limit=8, include_resolved=False)
 
     return CompanyOverviewDTO(
         workspace_id=ws.id,
@@ -842,9 +844,42 @@ async def delete_company_space(
 @router.get("/knowledge-gaps", response_model=List[KnowledgeGapDTO])
 async def list_company_knowledge_gaps(
     limit: int = Query(50, ge=1, le=100),
+    include_resolved: bool = Query(True),
     ctx: WorkspaceContext = Depends(require_company_admin),
     db: AsyncSession = Depends(get_db),
 ):
     conv_repo = ConversationRepository(db)
-    gaps = await conv_repo.list_knowledge_gaps(ctx.workspace.id, limit=limit)
+    gaps = await conv_repo.list_knowledge_gaps(ctx.workspace.id, limit=limit, include_resolved=include_resolved)
     return [KnowledgeGapDTO(**g) for g in gaps]
+
+
+@router.post("/knowledge-gaps/{message_id}/resolve", response_model=KnowledgeGapResolutionDTO)
+async def resolve_company_knowledge_gap(
+    message_id: uuid.UUID,
+    req: ResolveKnowledgeGapRequest,
+    ctx: WorkspaceContext = Depends(require_company_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    conv_repo = ConversationRepository(db)
+    audit_repo = AuditRepository(db)
+
+    updated = await conv_repo.set_knowledge_gap_resolution(
+        workspace_id=ctx.workspace.id,
+        message_id=message_id,
+        actor_user_id=ctx.user.id,
+        actor_email=ctx.user.email,
+        resolved=req.resolved,
+        resolution_note=req.resolution_note,
+    )
+    if not updated:
+        raise EntityNotFoundException("KnowledgeGapMessage", message_id)
+
+    await audit_repo.record_event(
+        workspace_id=ctx.workspace.id,
+        actor_user_id=ctx.user.id,
+        action="KNOWLEDGE_GAP_RESOLVED" if req.resolved else "KNOWLEDGE_GAP_REOPENED",
+        target_type="message",
+        target_id=message_id,
+        metadata={"note": updated["resolution_note"] or ""},
+    )
+    return KnowledgeGapResolutionDTO(**updated)

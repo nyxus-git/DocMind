@@ -161,6 +161,18 @@ export interface KnowledgeGapDTO {
   comment?: string;
   user_email: string;
   created_at: string;
+  resolved?: boolean;
+  resolved_at?: string;
+  resolved_by_email?: string;
+  resolution_note?: string;
+}
+
+export interface KnowledgeGapResolutionDTO {
+  message_id: string;
+  resolved: boolean;
+  resolved_at?: string;
+  resolved_by_email?: string;
+  resolution_note?: string;
 }
 
 export interface CompanyOverviewDTO {
@@ -1280,7 +1292,18 @@ export class ApiClient {
     return this.request<void>(`/company/spaces/${spaceId}`, { method: 'DELETE' });
   }
 
-  static async listCompanyKnowledgeGaps(limit: number = 50): Promise<KnowledgeGapDTO[]> {
-    return this.request<KnowledgeGapDTO[]>(`/company/knowledge-gaps?limit=${limit}`);
+  static async listCompanyKnowledgeGaps(limit: number = 50, includeResolved: boolean = true): Promise<KnowledgeGapDTO[]> {
+    return this.request<KnowledgeGapDTO[]>(`/company/knowledge-gaps?limit=${limit}&include_resolved=${includeResolved ? 'true' : 'false'}`);
+  }
+
+  static async resolveKnowledgeGap(
+    messageId: string,
+    resolved: boolean = true,
+    resolutionNote?: string,
+  ): Promise<KnowledgeGapResolutionDTO> {
+    return this.request<KnowledgeGapResolutionDTO>(`/company/knowledge-gaps/${messageId}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ resolved, resolution_note: resolutionNote || undefined }),
+    });
   }
 }

@@ -25,12 +25,13 @@ import { Logo } from '../ui/Logo';
 import { ThemeToggle } from '../ui/ThemeToggle';
 import { ToastProvider, useToast } from '../ui/Toast';
 import { EmployeePortalInner } from '../employee/EmployeePortal';
-import { FileTypeIcon, Meter, Panel, StatusBadge } from '../workspace/parts';
+import { QuotaMetersPanel, WorkspaceApiKeysPanel, WorkspaceAuditLogsPanel } from '../workspace/GovernancePanels';
+import { FileTypeIcon, Panel, StatusBadge } from '../workspace/parts';
 import { UploadModal } from '../workspace/UploadModal';
 import { WorkspaceContextValue, WorkspaceProvider } from '../workspace/WorkspaceContext';
 import { LibraryView } from '../workspace/views/LibraryView';
 
-type CompanyTab = 'overview' | 'ask' | 'documents' | 'employees' | 'spaces' | 'policy' | 'gaps';
+type CompanyTab = 'overview' | 'ask' | 'documents' | 'employees' | 'spaces' | 'policy' | 'gaps' | 'governance';
 
 function companyMonogram(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
@@ -141,6 +142,12 @@ export function CompanyConsoleInner({
   const [spaceUserIds, setSpaceUserIds] = useState<string[]>([]);
   const [creatingSpace, setCreatingSpace] = useState(false);
 
+  // Governance & Knowledge Gap resolution state
+  const [govTab, setGovTab] = useState<'quotas' | 'apikeys' | 'audit'>('quotas');
+  const [gapFilter, setGapFilter] = useState<'open' | 'resolved' | 'all'>('open');
+  const [gapNoteMap, setGapNoteMap] = useState<Record<string, string>>({});
+  const [resolvingGapId, setResolvingGapId] = useState<string | null>(null);
+
   const signOut = useCallback(async () => {
     await ApiClient.logout();
     clearSession();
@@ -192,7 +199,7 @@ export function CompanyConsoleInner({
         ApiClient.listPendingInvites(session.workspaceId).catch(() => []),
         ApiClient.listCompanySpaces(),
         ApiClient.listDocuments().catch(() => []),
-        ApiClient.listCompanyKnowledgeGaps(50),
+        ApiClient.listCompanyKnowledgeGaps(50, true),
       ]);
       setOverview(ov);
       setSettings(st);
@@ -432,6 +439,27 @@ export function CompanyConsoleInner({
     return members.filter(m => m.email.toLowerCase().includes(q) || m.role.toLowerCase().includes(q));
   }, [directorySearch, members]);
 
+  const openGapsCount = useMemo(() => gaps.filter(g => !g.resolved).length, [gaps]);
+  const filteredGaps = useMemo(() => {
+    if (gapFilter === 'open') return gaps.filter(g => !g.resolved);
+    if (gapFilter === 'resolved') return gaps.filter(g => !!g.resolved);
+    return gaps;
+  }, [gapFilter, gaps]);
+
+  const resolveGap = async (gap: KnowledgeGapDTO, resolved: boolean) => {
+    setResolvingGapId(gap.message_id);
+    try {
+      const note = (gapNoteMap[gap.message_id] || '').trim();
+      await ApiClient.resolveKnowledgeGap(gap.message_id, resolved, resolved ? note || undefined : undefined);
+      toast(resolved ? 'Knowledge gap marked as resolved.' : 'Knowledge gap reopened.', 'success');
+      await loadAll();
+    } catch (err) {
+      handleErr(err, 'Could not update knowledge gap status.');
+    } finally {
+      setResolvingGapId(null);
+    }
+  };
+
   const docWorkspaceCtx = useMemo<WorkspaceContextValue>(
     () => ({
       session,
@@ -485,8 +513,9 @@ export function CompanyConsoleInner({
         { id: 'documents', label: 'Documents', icon: 'file', badge: documents.length || undefined },
         { id: 'employees', label: 'Employees', icon: 'users', badge: pendingJoinReqs.length || undefined },
         { id: 'spaces', label: 'Departments', icon: 'folder' },
+        { id: 'gaps', label: 'Knowledge Gaps', icon: 'alert', badge: openGapsCount || undefined },
+        { id: 'governance', label: 'Audit & API', icon: 'shield' },
         { id: 'policy', label: 'Company Settings', icon: 'sliders' },
-        { id: 'gaps', label: 'Knowledge Gaps', icon: 'alert', badge: gaps.length || undefined },
       ]
     : [
         { id: 'ask', label: 'Ask AI', icon: 'chat' },
@@ -831,27 +860,27 @@ export function CompanyConsoleInner({
                   )}
                 </Panel>
 
-                <Panel className="p-5 sm:p-6">
-                  <h2 className="text-base font-semibold">Monthly AI Question Capacity</h2>
-                  <div className="mt-4">
-                    <Meter
-                      label="Questions asked across company this month"
-                      used={overview.monthly_questions}
-                      limit={overview.monthly_questions_limit}
-                      valueText={`${overview.monthly_questions.toLocaleString()} of ${overview.monthly_questions_limit.toLocaleString()}`}
-                    />
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
+                      Plan Quotas &amp; Usage
+                    </h2>
+                    <Button variant="ghost" size="sm" onClick={() => setTab('governance')}>
+                      <Icon name="shield" className="size-3.5" /> API Keys &amp; Audit Logs <Icon name="arrowRight" className="size-3" />
+                    </Button>
                   </div>
-                </Panel>
+                  <QuotaMetersPanel usage={usage} memberCount={overview.member_count} />
+                </div>
 
                 <Panel className="p-5 sm:p-6">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h2 className="text-base font-semibold">Recent Employee Knowledge Gaps</h2>
+                      <h2 className="text-base font-semibold">Recent Open Knowledge Gaps</h2>
                       <p className="text-sm text-muted">Questions employees flagged with 👎 or where company docs lacked coverage.</p>
                     </div>
                     {gaps.length > 0 && (
                       <Button variant="secondary" size="sm" onClick={() => setTab('gaps')}>
-                        View all ({gaps.length})
+                        Manage gaps ({openGapsCount} open)
                       </Button>
                     )}
                   </div>
@@ -1425,34 +1454,171 @@ export function CompanyConsoleInner({
 
             {tab === 'gaps' && (
               <Panel className="overflow-hidden">
-                <div className="border-b border-line px-5 py-4">
-                  <h2 className="text-base font-semibold">Knowledge Gaps &amp; Employee Feedback ({gaps.length})</h2>
-                  <p className="mt-0.5 text-sm text-muted">
-                    Use these insights to upload missing policies, SOPs, or technical docs.
-                  </p>
+                <div className="flex flex-col gap-3 border-b border-line px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-base font-semibold">Knowledge Gaps &amp; Employee Feedback</h2>
+                    <p className="mt-0.5 text-sm text-muted">
+                      Upload missing policies or handbooks, then mark gaps as resolved to keep your knowledge base accurate.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex rounded-lg border border-line bg-surface-2 p-0.5 text-xs font-medium">
+                      <button
+                        type="button"
+                        onClick={() => setGapFilter('open')}
+                        className={`rounded-md px-2.5 py-1 transition-colors ${gapFilter === 'open' ? 'bg-surface text-fg shadow-xs' : 'text-muted hover:text-fg'}`}
+                      >
+                        Open ({openGapsCount})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setGapFilter('resolved')}
+                        className={`rounded-md px-2.5 py-1 transition-colors ${gapFilter === 'resolved' ? 'bg-surface text-fg shadow-xs' : 'text-muted hover:text-fg'}`}
+                      >
+                        Resolved ({gaps.length - openGapsCount})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setGapFilter('all')}
+                        className={`rounded-md px-2.5 py-1 transition-colors ${gapFilter === 'all' ? 'bg-surface text-fg shadow-xs' : 'text-muted hover:text-fg'}`}
+                      >
+                        All ({gaps.length})
+                      </button>
+                    </div>
+                    <Button size="sm" variant="secondary" onClick={() => setUploadOpen(true)}>
+                      <Icon name="upload" className="size-3.5" /> Upload Doc
+                    </Button>
+                  </div>
                 </div>
-                {gaps.length === 0 ? (
-                  <p className="px-5 py-12 text-center text-sm text-muted">No gaps or negative ratings reported yet.</p>
+                {filteredGaps.length === 0 ? (
+                  <p className="px-5 py-12 text-center text-sm text-muted">
+                    {gapFilter === 'open'
+                      ? 'All caught up! No open knowledge gaps right now.'
+                      : gapFilter === 'resolved'
+                        ? 'No resolved knowledge gaps yet.'
+                        : 'No gaps or negative ratings reported yet.'}
+                  </p>
                 ) : (
                   <ul className="divide-y divide-line">
-                    {gaps.map(g => (
-                      <li key={g.id} className="space-y-1.5 px-5 py-4">
-                        <div className="flex items-start justify-between gap-3">
+                    {filteredGaps.map(g => (
+                      <li key={g.id} className="space-y-2.5 px-5 py-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
                           <p className="text-sm font-semibold">{g.question}</p>
-                          <span className="shrink-0 rounded-full bg-warn-soft px-2.5 py-0.5 text-[11px] font-medium text-warn">
-                            {g.reason === 'NEGATIVE_FEEDBACK' ? '👎 Needs better info' : 'Not found in docs'}
-                          </span>
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            <span className="rounded-full bg-warn-soft px-2.5 py-0.5 text-[11px] font-medium text-warn">
+                              {g.reason === 'NEGATIVE_FEEDBACK' ? '👎 Needs better info' : 'Not found in docs'}
+                            </span>
+                            {g.resolved && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-ok-soft px-2.5 py-0.5 text-[11px] font-semibold text-ok">
+                                <Icon name="check" className="size-3" /> Resolved
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <p className="text-xs text-muted">{g.answer_excerpt}</p>
                         {g.comment && <p className="text-xs text-fg">Employee note: &ldquo;{g.comment}&rdquo;</p>}
                         <p className="text-[11px] text-faint">
                           {g.user_email} &bull; {formatDate(g.created_at)}
                         </p>
+
+                        {g.resolved ? (
+                          <div className="flex flex-col gap-2 rounded-xl border border-ok/25 bg-ok-soft/40 p-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="text-xs text-fg">
+                              <span className="font-semibold">
+                                Resolved{g.resolved_by_email ? ` by ${g.resolved_by_email}` : ''}
+                              </span>
+                              {g.resolved_at ? ` • ${formatDate(g.resolved_at)}` : ''}
+                              {g.resolution_note && <p className="mt-0.5 text-muted">Note: {g.resolution_note}</p>}
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={resolvingGapId === g.message_id}
+                              onClick={() => void resolveGap(g, false)}
+                            >
+                              {resolvingGapId === g.message_id ? <Spinner className="size-3.5" /> : <Icon name="retry" className="size-3.5" />}
+                              Reopen
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center">
+                            <input
+                              type="text"
+                              value={gapNoteMap[g.message_id] || ''}
+                              onChange={e => setGapNoteMap(prev => ({ ...prev, [g.message_id]: e.target.value }))}
+                              placeholder="Optional resolution note (e.g. Uploaded FY27 Leave Policy PDF)..."
+                              className="h-9 flex-1 rounded-lg border border-line-strong bg-bg px-3 text-xs focus:border-fg focus:outline-none"
+                            />
+                            <Button
+                              size="sm"
+                              disabled={resolvingGapId === g.message_id}
+                              onClick={() => void resolveGap(g, true)}
+                            >
+                              {resolvingGapId === g.message_id ? <Spinner className="size-3.5" /> : <Icon name="check" className="size-3.5" />}
+                              Mark Resolved
+                            </Button>
+                          </div>
+                        )}
                       </li>
                     ))}
                   </ul>
                 )}
               </Panel>
+            )}
+
+            {tab === 'governance' && (
+              <div className="space-y-6">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold tracking-tight">Governance, Quotas &amp; Developer API</h2>
+                    <p className="text-sm text-muted">
+                      Monitor plan capacity, issue workspace API keys, and inspect or export compliance audit trails.
+                    </p>
+                  </div>
+                  <div className="flex rounded-xl border border-line bg-surface p-1 text-xs font-medium">
+                    <button
+                      type="button"
+                      onClick={() => setGovTab('quotas')}
+                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 transition-colors ${govTab === 'quotas' ? 'bg-brand text-brand-fg shadow-xs' : 'text-muted hover:text-fg'}`}
+                    >
+                      <Icon name="layers" className="size-3.5" /> Quotas &amp; Plan
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGovTab('apikeys')}
+                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 transition-colors ${govTab === 'apikeys' ? 'bg-brand text-brand-fg shadow-xs' : 'text-muted hover:text-fg'}`}
+                    >
+                      <Icon name="key" className="size-3.5" /> API Keys
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGovTab('audit')}
+                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 transition-colors ${govTab === 'audit' ? 'bg-brand text-brand-fg shadow-xs' : 'text-muted hover:text-fg'}`}
+                    >
+                      <Icon name="history" className="size-3.5" /> Audit Logs
+                    </button>
+                  </div>
+                </div>
+
+                {govTab === 'quotas' && (
+                  <QuotaMetersPanel usage={usage} memberCount={overview?.member_count ?? members.length} showTierComparison />
+                )}
+                {govTab === 'apikeys' && (
+                  <WorkspaceApiKeysPanel
+                    workspaceId={session.workspaceId}
+                    canManage={isAdmin}
+                    onAuthError={docWorkspaceCtx.handleApiError}
+                  />
+                )}
+                {govTab === 'audit' && (
+                  <WorkspaceAuditLogsPanel
+                    workspaceId={session.workspaceId}
+                    workspaceSlug={activeSlug || session.workspaceSlug}
+                    canManage={isAdmin}
+                    onAuthError={docWorkspaceCtx.handleApiError}
+                  />
+                )}
+              </div>
             )}
           </>
         )}

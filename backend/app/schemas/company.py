@@ -122,6 +122,23 @@ class KnowledgeGapDTO(BaseModel):
     comment: Optional[str] = None
     user_email: str
     created_at: datetime
+    resolved: bool = False
+    resolved_at: Optional[datetime] = None
+    resolved_by_email: Optional[str] = None
+    resolution_note: Optional[str] = None
+
+
+class ResolveKnowledgeGapRequest(BaseModel):
+    resolved: bool = Field(default=True)
+    resolution_note: Optional[str] = Field(default=None, max_length=500)
+
+
+class KnowledgeGapResolutionDTO(BaseModel):
+    message_id: uuid.UUID
+    resolved: bool
+    resolved_at: Optional[datetime] = None
+    resolved_by_email: Optional[str] = None
+    resolution_note: Optional[str] = None
 
 
 class CompanyOverviewDTO(BaseModel):

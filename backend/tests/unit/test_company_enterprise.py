@@ -350,6 +350,44 @@ async def _run_test_company_and_employee_enterprise_flow():
             assert len(overview.json()["recent_gaps"]) >= 1
             assert overview.json()["recent_gaps"][0]["question"] == "What is our leave policy?"
 
+            # Employee cannot resolve a Knowledge Gap (403); Company Admin resolves & can reopen it cleanly
+            emp_resolve = await client.post(
+                f"/api/v1/company/knowledge-gaps/{msg_id}/resolve",
+                headers=emp_headers,
+                json={"resolved": True, "resolution_note": "Unauthorized attempt"},
+            )
+            assert emp_resolve.status_code == 403
+
+            adm_resolve = await client.post(
+                f"/api/v1/company/knowledge-gaps/{msg_id}/resolve",
+                headers=admin_headers,
+                json={"resolved": True, "resolution_note": "Uploaded carryover policy PDF"},
+            )
+            assert adm_resolve.status_code == 200
+            assert adm_resolve.json()["resolved"] is True
+            assert adm_resolve.json()["resolution_note"] == "Uploaded carryover policy PDF"
+
+            # Resolved gap disappears from Overview open recent_gaps, remains marked resolved in full list
+            overview_after_res = await client.get("/api/v1/company/overview", headers=admin_headers)
+            assert all(g["message_id"] != msg_id for g in overview_after_res.json()["recent_gaps"])
+            gaps_full = await client.get("/api/v1/company/knowledge-gaps", headers=admin_headers)
+            assert any(g["message_id"] == msg_id and g["resolved"] is True for g in gaps_full.json())
+
+            # Admin reopens gap cleanly and audit log records resolution/reopen actions
+            adm_reopen = await client.post(
+                f"/api/v1/company/knowledge-gaps/{msg_id}/resolve",
+                headers=admin_headers,
+                json={"resolved": False},
+            )
+            assert adm_reopen.status_code == 200
+            assert adm_reopen.json()["resolved"] is False
+
+            audit_logs = await client.get(f"/api/v1/workspaces/{ws_id}/audit-logs", headers=admin_headers)
+            assert audit_logs.status_code == 200
+            actions = [e["action"] for e in audit_logs.json()]
+            assert "KNOWLEDGE_GAP_RESOLVED" in actions
+            assert "KNOWLEDGE_GAP_REOPENED" in actions
+
             # 8. Employee can update their own password after signing in, and log in with the new password
             pwd_upd = await client.post(
                 "/api/v1/change-password",
