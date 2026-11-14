@@ -199,7 +199,7 @@ async def get_company_overview(
             )
         )
     ).one()
-    total_docs = int(doc_row[0] or 0)
+    total_docs = doc_row[0]
     ready_docs = int(doc_row[1] or 0)
     storage_bytes = int(doc_row[2] or 0)
 
@@ -214,7 +214,7 @@ async def get_company_overview(
             ).where(MessageFeedback.workspace_id == ws.id)
         )
     ).one()
-    total_feedback = int(fb_row[0] or 0)
+    total_feedback = fb_row[0]
     helpful_count = int(fb_row[1] or 0)
     helpful_rate_pct = round((helpful_count / total_feedback) * 100.0, 1) if total_feedback > 0 else None
 
