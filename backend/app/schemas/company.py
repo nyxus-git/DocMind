@@ -61,6 +61,7 @@ class CompanySettingsDTO(BaseModel):
     join_policy: str
     default_join_role: str
     starter_prompts: List[str] = Field(default_factory=list)
+    logo_url: Optional[str] = None
 
 
 class UpdateCompanySettingsRequest(BaseModel):
@@ -69,6 +70,7 @@ class UpdateCompanySettingsRequest(BaseModel):
     join_policy: Optional[str] = Field(default=None, description="INVITE_ONLY | DOMAIN_APPROVAL | DOMAIN_AUTO_JOIN")
     default_join_role: Optional[str] = Field(default=None, description="EMPLOYEE | MEMBER | VIEWER")
     starter_prompts: Optional[List[str]] = None
+    logo_url: Optional[str] = None
 
 
 class BulkInviteRequest(BaseModel):
@@ -157,6 +159,7 @@ class CompanyOverviewDTO(BaseModel):
     total_feedback_count: int = 0
     spaces_count: int = 0
     recent_gaps: List[KnowledgeGapDTO] = Field(default_factory=list)
+    logo_url: Optional[str] = None
 
 
 class EmployeePortalInfoDTO(BaseModel):
@@ -169,4 +172,5 @@ class EmployeePortalInfoDTO(BaseModel):
     spaces: List[KnowledgeSpaceDTO] = Field(default_factory=list)
     pending_company_name: Optional[str] = None
     pending_company_slug: Optional[str] = None
+    logo_url: Optional[str] = None
 

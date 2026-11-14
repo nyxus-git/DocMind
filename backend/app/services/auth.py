@@ -73,6 +73,7 @@ class AuthService:
             slug=ws.slug,
             join_policy=ws.join_policy,
             allowed_domains=list(ws.allowed_domains or []),
+            logo_url=ws.logo_url,
         )
 
     def _validate_target_company_eligibility(self, ws: Workspace, email: str) -> None:

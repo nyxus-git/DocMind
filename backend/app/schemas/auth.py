@@ -61,6 +61,7 @@ class CompanyPortalPublicDTO(BaseModel):
     slug: str
     join_policy: str
     allowed_domains: List[str] = Field(default_factory=list)
+    logo_url: Optional[str] = None
 
 
 class PortalAccessRequestBody(BaseModel):

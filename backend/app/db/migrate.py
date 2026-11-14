@@ -23,6 +23,7 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS join_policy VARCHAR(32) NOT NULL DEFAULT 'INVITE_ONLY';",
     "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS default_join_role VARCHAR(32) NOT NULL DEFAULT 'EMPLOYEE';",
     "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS starter_prompts JSONB DEFAULT '[]'::jsonb;",
+    "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS logo_url TEXT;",
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS space_id UUID NULL REFERENCES knowledge_spaces(id) ON DELETE SET NULL;",
     "CREATE INDEX IF NOT EXISTS ix_documents_space_id ON documents (space_id);",
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS insufficient_evidence BOOLEAN NOT NULL DEFAULT FALSE;",

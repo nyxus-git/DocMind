@@ -377,6 +377,7 @@ export function EmployeePortalInner({
   const roleLabel = portalInfo?.role === 'VIEWER' ? 'Read-Only Portal' : 'Employee Portal';
   const companyBrand = portalInfo?.company_name || session.workspaceName || 'Company';
   const companyInitials = companyMonogram(companyBrand);
+  const companyLogo = portalInfo?.logo_url;
 
   const submitPasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -414,9 +415,15 @@ export function EmployeePortalInner({
               <Logo />
               <span className="hidden h-5 w-px bg-line sm:inline-block" />
               <div className="flex min-w-0 items-center gap-2.5">
-                <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-xs font-bold tracking-tight text-brand-fg shadow-xs">
-                  {companyInitials}
-                </span>
+                {companyLogo ? (
+                  <div className="size-8 shrink-0 overflow-hidden rounded-lg border border-line bg-surface-2 p-0.5 flex items-center justify-center shadow-xs">
+                    <img src={companyLogo} alt={companyBrand} className="size-full object-contain" />
+                  </div>
+                ) : (
+                  <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-xs font-bold tracking-tight text-brand-fg shadow-xs">
+                    {companyInitials}
+                  </span>
+                )}
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="truncate text-sm font-semibold text-fg">{companyBrand}</span>
@@ -451,11 +458,6 @@ export function EmployeePortalInner({
               {isCompanyAdmin && (
                 <Link href={activeSlug ? `/${activeSlug}/` : '/company/'} className="hidden h-8 items-center gap-1 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium hover:bg-surface-2 sm:inline-flex">
                   <Icon name="building" className="size-3.5 text-muted" /> Console
-                </Link>
-              )}
-              {canContributorWorkspace && (
-                <Link href="/app/" className="hidden h-8 items-center gap-1 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium hover:bg-surface-2 lg:inline-flex">
-                  Workspace
                 </Link>
               )}
               <Button
@@ -729,7 +731,7 @@ export function EmployeePortalInner({
                               </Button>
                             ) : (
                               <Link
-                                href="/app/?upload=1#library"
+                                href={activeSlug ? `/${activeSlug}/` : '/company/'}
                                 className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand px-3 text-xs font-medium text-brand-fg hover:opacity-90"
                               >
                                 <Icon name="upload" className="size-3.5" /> Upload company docs
@@ -961,7 +963,7 @@ export function EmployeePortalInner({
                       </Button>
                     ) : (
                       <Link
-                        href="/app/?upload=1#library"
+                        href={activeSlug ? `/${activeSlug}/` : '/company/'}
                         className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand px-3 text-xs font-medium text-brand-fg hover:opacity-90"
                       >
                         <Icon name="upload" className="size-3.5" /> Upload company docs

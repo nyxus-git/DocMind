@@ -77,6 +77,7 @@ class Workspace(Base):
     join_policy: Mapped[str] = mapped_column(String(32), default=JoinPolicy.INVITE_ONLY.value, nullable=False)
     default_join_role: Mapped[str] = mapped_column(String(32), default=WorkspaceRole.EMPLOYEE.value, nullable=False)
     starter_prompts: Mapped[Optional[list]] = mapped_column(JSONB, default=list, nullable=True)
+    logo_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)

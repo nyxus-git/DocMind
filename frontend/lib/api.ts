@@ -96,6 +96,7 @@ export interface CompanyPortalPublicDTO {
   slug: string;
   join_policy: 'INVITE_ONLY' | 'DOMAIN_APPROVAL' | 'DOMAIN_AUTO_JOIN';
   allowed_domains: string[];
+  logo_url?: string | null;
 }
 
 export interface PortalAccessRequestResult {
@@ -149,6 +150,7 @@ export interface CompanySettingsDTO {
   join_policy: 'INVITE_ONLY' | 'DOMAIN_APPROVAL' | 'DOMAIN_AUTO_JOIN';
   default_join_role: 'EMPLOYEE' | 'MEMBER' | 'VIEWER';
   starter_prompts: string[];
+  logo_url?: string | null;
 }
 
 export interface KnowledgeGapDTO {
@@ -191,6 +193,7 @@ export interface CompanyOverviewDTO {
   total_feedback_count: number;
   spaces_count: number;
   recent_gaps: KnowledgeGapDTO[];
+  logo_url?: string | null;
 }
 
 export interface EmployeePortalInfoDTO {
@@ -203,6 +206,7 @@ export interface EmployeePortalInfoDTO {
   spaces: KnowledgeSpaceDTO[];
   pending_company_name?: string;
   pending_company_slug?: string;
+  logo_url?: string | null;
 }
 
 export interface DocumentContentChunkDTO {
@@ -1315,6 +1319,7 @@ export class ApiClient {
     join_policy?: string;
     default_join_role?: string;
     starter_prompts?: string[];
+    logo_url?: string | null;
   }): Promise<CompanySettingsDTO> {
     return this.request<CompanySettingsDTO>('/company/settings', {
       method: 'PATCH',

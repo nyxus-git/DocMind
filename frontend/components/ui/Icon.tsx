@@ -1,6 +1,7 @@
 import React from 'react';
 
 const PATHS = {
+  arrowLeft: ['M19 12H5', 'M11 18l-6-6 6-6'],
   arrowRight: ['M5 12h14', 'M13 6l6 6-6 6'],
   check: ['M5 12.5l4.5 4.5L19 7.5'],
   x: ['M6 6l12 12', 'M18 6L6 18'],

@@ -42,7 +42,7 @@ function useDismiss(open: boolean, onClose: () => void) {
 /* Sidebar (desktop)                                                 */
 /* ---------------------------------------------------------------- */
 export function Sidebar() {
-  const { tab, setTab, usage, documents, conversations } = useWorkspace();
+  const { session, tab, setTab, usage, documents, conversations } = useWorkspace();
   const counts: Partial<Record<TabId, number>> = { library: documents.length, chat: conversations.length };
 
   return (
@@ -51,6 +51,22 @@ export function Sidebar() {
         <Link href="/" className="mb-7 block px-2.5" aria-label="DocMind website">
           <Logo />
         </Link>
+
+        {session.isCompany && session.workspaceSlug && session.workspaceSlug !== 'personal' && (
+          <div className="mb-4">
+            <Link
+              href={`/${session.workspaceSlug}/`}
+              className="flex items-center gap-2 rounded-xl border border-brand/30 bg-brand/10 p-2.5 text-xs font-semibold text-brand-ink hover:bg-brand/20 transition-colors"
+            >
+              <Icon name="arrowLeft" className="size-4 shrink-0" />
+              <div className="min-w-0">
+                <p className="truncate">Return to {session.workspaceName || 'Company'} Console</p>
+                <p className="truncate text-[10px] text-muted">/{session.workspaceSlug}/</p>
+              </div>
+            </Link>
+          </div>
+        )}
+
         <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-faint">Workspace</p>
         <nav aria-label="Workspace" className="space-y-0.5">
           {NAV.map(item => {
@@ -286,6 +302,16 @@ export function TopBar({
             <span className="hidden sm:inline">Upload</span>
             <span className="sr-only sm:hidden">Upload documents</span>
           </Button>
+        )}
+        {session.isCompany && session.workspaceSlug && session.workspaceSlug !== 'personal' && (
+          <Link
+            href={`/${session.workspaceSlug}/`}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-brand/40 bg-brand/10 px-3 text-xs font-semibold text-brand-ink hover:bg-brand/20 transition-colors"
+            title={`Return to ${session.workspaceName || 'Company'} Console`}
+          >
+            <Icon name="arrowLeft" className="size-3.5" />
+            <span className="hidden sm:inline">Back to</span> {session.workspaceName || 'Company'} Console
+          </Link>
         )}
         <ThemeToggle />
         <div className="relative" ref={menuRef}>

@@ -121,6 +121,7 @@ export function CompanyConsoleInner({
   const [companyName, setCompanyName] = useState('');
   const [domainsInput, setDomainsInput] = useState('');
   const [promptsInput, setPromptsInput] = useState('');
+  const [logoUrl, setLogoUrl] = useState<string>('');
   const [savingPolicy, setSavingPolicy] = useState(false);
 
   // Employee provisioning & directory state
@@ -208,6 +209,7 @@ export function CompanyConsoleInner({
       setCompanyName(st.name);
       setDomainsInput((st.allowed_domains || []).join(', '));
       setPromptsInput((st.starter_prompts || []).join('\n'));
+      setLogoUrl(st.logo_url || ov?.logo_url || '');
       setProvisionPassword(prev => prev || generateBatchPassword(st.name));
       setJoinRequests(jr);
       setMembers(mems);
@@ -332,6 +334,23 @@ export function CompanyConsoleInner({
     }
   };
 
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      toast('Company logo file size must be under 2MB.', 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setLogoUrl(reader.result);
+        toast('Logo selected. Click "Save Company Settings" to apply.', 'info');
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const savePolicy = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingPolicy(true);
@@ -350,9 +369,10 @@ export function CompanyConsoleInner({
         join_policy: 'INVITE_ONLY',
         default_join_role: 'EMPLOYEE',
         starter_prompts: prompts,
+        logo_url: logoUrl.trim() || null,
       });
       setSettings(updated);
-      toast('Company settings saved.', 'success');
+      toast('Company settings and branding saved.', 'success');
       await loadAll();
     } catch (err) {
       handleErr(err, 'Failed to save settings.');
@@ -563,6 +583,7 @@ export function CompanyConsoleInner({
 
   const brandName = overview?.company_name || session.workspaceName || 'Company';
   const initials = companyMonogram(brandName);
+  const brandLogo = settings?.logo_url || overview?.logo_url || logoUrl;
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg text-fg">
@@ -575,9 +596,15 @@ export function CompanyConsoleInner({
 
           {/* Company Brand Badge */}
           <div className="flex items-center gap-2.5 rounded-xl border border-line bg-bg p-2.5">
-            <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand text-xs font-bold tracking-tight text-brand-fg shadow-xs">
-              {initials}
-            </span>
+            {brandLogo ? (
+              <div className="size-9 shrink-0 overflow-hidden rounded-lg border border-line bg-surface-2 p-0.5 flex items-center justify-center shadow-xs">
+                <img src={brandLogo} alt={brandName} className="size-full object-contain" />
+              </div>
+            ) : (
+              <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand text-xs font-bold tracking-tight text-brand-fg shadow-xs">
+                {initials}
+              </span>
+            )}
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-semibold">{brandName}</p>
               <div className="flex items-center gap-1.5">
@@ -634,28 +661,20 @@ export function CompanyConsoleInner({
             </nav>
           </div>
 
-          <div className="pt-2 border-t border-line space-y-0.5">
-            <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-wider text-faint">
-              Platform Tools
-            </p>
-            <Link
-              href="/app/"
-              className="flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs font-medium text-muted hover:bg-surface-2 hover:text-fg transition-colors"
-              title="Open Compare matrix and workspace tools"
-            >
-              <Icon name="compare" className="size-4" />
-              <span>Workspace Tools</span>
-            </Link>
-            {session.isSuperAdmin && (
+          {session.isSuperAdmin && (
+            <div className="pt-2 border-t border-line space-y-0.5">
+              <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-wider text-faint">
+                Super Admin
+              </p>
               <Link
                 href="/admin/"
                 className="flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs font-medium text-amber-500 hover:bg-amber-500/10 transition-colors"
               >
                 <Icon name="shield" className="size-4" />
-                <span>Super Admin</span>
+                <span>Super Admin Console</span>
               </Link>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {/* Sidebar Footer */}
@@ -698,28 +717,28 @@ export function CompanyConsoleInner({
             </div>
           )}
 
-          <div className="flex items-center justify-between px-1">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-xs font-semibold text-white">
-                {(session.fullName || session.email).charAt(0).toUpperCase()}
-              </span>
-              <div className="min-w-0">
-                <p className="truncate text-xs font-medium">{session.fullName || session.email}</p>
-                <p className="text-[10px] text-faint">Admin Console</p>
+          <div className="rounded-xl border border-line bg-surface-2/40 p-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-xs font-semibold text-white shadow-xs">
+                  {(session.fullName || session.email).charAt(0).toUpperCase()}
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-medium text-fg">{session.fullName || session.email}</p>
+                  <p className="truncate text-[10px] text-muted">{isAdmin ? 'Company Administrator' : 'Contributor'}</p>
+                </div>
               </div>
-            </div>
-            <div className="flex items-center gap-1">
               <ThemeToggle />
-              <button
-                type="button"
-                onClick={() => void signOut()}
-                className="inline-flex size-7 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg"
-                title="Sign out"
-                aria-label="Sign out"
-              >
-                <Icon name="logout" className="size-3.5" />
-              </button>
             </div>
+            <button
+              type="button"
+              onClick={() => void signOut()}
+              className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-medium text-muted hover:border-danger/30 hover:bg-danger-soft hover:text-danger transition-colors"
+              title="Sign out of Admin Console"
+            >
+              <Icon name="logout" className="size-3.5" />
+              <span>Sign out</span>
+            </button>
           </div>
         </div>
       </aside>
@@ -1784,6 +1803,55 @@ export function CompanyConsoleInner({
                 </div>
 
                 <form onSubmit={savePolicy} className="mt-5 space-y-5">
+                  {/* Company Logo & Branding */}
+                  <div className="rounded-xl border border-line bg-surface-2/40 p-4">
+                    <label className="mb-1 block text-sm font-medium">Company Logo &amp; Branding</label>
+                    <p className="mb-3 text-xs text-muted">
+                      Upload your company&apos;s official logo (PNG, SVG, JPEG, or WebP under 2MB). It appears on the employee login portal (/{activeSlug || 'company'}/), employee portal header, and this admin console.
+                    </p>
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                      <div className="flex size-20 shrink-0 items-center justify-center rounded-xl border border-line bg-surface p-2 shadow-xs">
+                        {logoUrl ? (
+                          <img src={logoUrl} alt="Company logo preview" className="size-full object-contain" />
+                        ) : (
+                          <span className="inline-flex size-14 items-center justify-center rounded-xl bg-brand text-lg font-bold text-brand-fg">
+                            {initials}
+                          </span>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-fg hover:bg-surface-2 transition-colors">
+                            <Icon name="upload" className="size-3.5" />
+                            <span>Upload Logo Image</span>
+                            <input
+                              type="file"
+                              accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                              onChange={handleLogoUpload}
+                              className="sr-only"
+                            />
+                          </label>
+                          {logoUrl && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setLogoUrl('');
+                                toast('Logo removed. Click "Save Company Settings" to apply.', 'info');
+                              }}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-danger/30 bg-danger-soft px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger-soft/80 transition-colors"
+                            >
+                              <Icon name="trash" className="size-3.5" />
+                              <span>Remove Logo</span>
+                            </button>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-faint">
+                          Square or landscape SVG or PNG with transparent background recommended.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
                   <div>
                     <label htmlFor="pol-name" className="mb-1.5 block text-sm font-medium">Company name</label>
                     <input id="pol-name" type="text" required value={companyName} onChange={e => setCompanyName(e.target.value)} className={inputClass} />

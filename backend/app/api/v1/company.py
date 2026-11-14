@@ -132,6 +132,7 @@ async def get_employee_portal_info(
                 role="PENDING",
                 pending_company_name=req_ws.name,
                 pending_company_slug=req_ws.slug,
+                logo_url=req_ws.logo_url,
             )
         raise DocMindException(
             status_code=403,
@@ -158,6 +159,7 @@ async def get_employee_portal_info(
         role=role_val,
         starter_prompts=list(active_ws.starter_prompts or []),
         spaces=visible_spaces,
+        logo_url=active_ws.logo_url,
     )
 
 
@@ -237,6 +239,7 @@ async def get_company_overview(
         total_feedback_count=total_feedback,
         spaces_count=spaces_count,
         recent_gaps=[KnowledgeGapDTO(**g) for g in gaps_raw],
+        logo_url=ws.logo_url,
     )
 
 
@@ -255,6 +258,7 @@ async def get_company_settings(
         join_policy=ws.join_policy,
         default_join_role=ws.default_join_role,
         starter_prompts=list(ws.starter_prompts or []),
+        logo_url=ws.logo_url,
     )
 
 
@@ -270,6 +274,10 @@ async def update_company_settings(
 
     if req.name is not None and req.name.strip():
         ws.name = req.name.strip()
+
+    if req.logo_url is not None:
+        trimmed = req.logo_url.strip()
+        ws.logo_url = trimmed if trimmed else None
 
     if req.allowed_domains is not None:
         try:
@@ -328,6 +336,7 @@ async def update_company_settings(
         join_policy=ws.join_policy,
         default_join_role=ws.default_join_role,
         starter_prompts=list(ws.starter_prompts or []),
+        logo_url=ws.logo_url,
     )
 
 

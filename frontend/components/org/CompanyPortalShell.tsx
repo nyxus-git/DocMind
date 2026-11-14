@@ -144,9 +144,15 @@ function CompanyPortalAuthCard({
             </Link>
             <span className="h-5 w-px bg-line" />
             <div className="flex min-w-0 items-center gap-2.5">
-              <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-xs font-bold tracking-tight text-brand-fg shadow-xs">
-                {initials}
-              </span>
+              {portal.logo_url ? (
+                <div className="size-8 shrink-0 overflow-hidden rounded-lg border border-line bg-surface p-0.5 flex items-center justify-center shadow-xs">
+                  <img src={portal.logo_url} alt={portal.company_name} className="size-full object-contain" />
+                </div>
+              ) : (
+                <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-xs font-bold tracking-tight text-brand-fg shadow-xs">
+                  {initials}
+                </span>
+              )}
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold leading-tight text-fg">{portal.company_name}</p>
                 <p className="truncate text-[11px] text-muted">/{portal.slug}/ • Enterprise Portal</p>
@@ -176,9 +182,15 @@ function CompanyPortalAuthCard({
             </div>
 
             <div className="flex items-start gap-4">
-              <div className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-brand text-xl font-bold tracking-tight text-brand-fg shadow-sm">
-                {initials}
-              </div>
+              {portal.logo_url ? (
+                <div className="size-16 shrink-0 overflow-hidden rounded-2xl border border-line bg-surface p-1.5 flex items-center justify-center shadow-md">
+                  <img src={portal.logo_url} alt={portal.company_name} className="size-full object-contain" />
+                </div>
+              ) : (
+                <div className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-xl font-bold tracking-tight text-white shadow-sm">
+                  {initials}
+                </div>
+              )}
               <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-widest text-muted">Authorized Company Workspace</p>
                 <h1 className="mt-1 text-3xl font-semibold tracking-tight text-fg sm:text-4xl">
@@ -238,7 +250,7 @@ function CompanyPortalAuthCard({
           </section>
 
           {/* Focused Sign-In Card */}
-          <Panel className="p-6 shadow-sm sm:p-8">
+          <Panel className="relative overflow-hidden p-6 shadow-md sm:p-8 border-line/80 backdrop-blur-sm">
             <div className="flex items-center justify-between gap-3 border-b border-line pb-4">
               <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">
@@ -248,9 +260,15 @@ function CompanyPortalAuthCard({
                   {view === 'signin' ? `Welcome to ${portal.company_name}` : 'Send a reset link'}
                 </h2>
               </div>
-              <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-surface-2 text-sm font-bold text-fg">
-                {initials}
-              </span>
+              {portal.logo_url ? (
+                <div className="size-10 shrink-0 overflow-hidden rounded-xl border border-line bg-surface p-1 flex items-center justify-center shadow-xs">
+                  <img src={portal.logo_url} alt={portal.company_name} className="size-full object-contain" />
+                </div>
+              ) : (
+                <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-surface-2 text-sm font-bold text-fg">
+                  {initials}
+                </span>
+              )}
             </div>
 
             {error && (
@@ -533,9 +551,14 @@ function CompanyPortalInner() {
   }, [bootstrap]);
 
   const handleSignOut = async () => {
-    await ApiClient.logout();
+    const currentPortal = 'portal' in state && state.portal ? state.portal : null;
     clearSession();
-    void bootstrap();
+    await ApiClient.logout().catch(() => {});
+    if (currentPortal) {
+      setState({ kind: 'unauthenticated', portal: currentPortal, prefillEmail: '' });
+    } else {
+      void bootstrap();
+    }
   };
 
   if (state.kind === 'loading') {
