@@ -17,16 +17,16 @@ import {
   UsageSummaryDTO,
   WorkspaceMemberDTO,
 } from '../../lib/api';
-import { formatBytes, formatDate, timeAgo } from '../../lib/format';
+import { formatBytes, formatDate, percent, timeAgo } from '../../lib/format';
 import { clearSession, readRawSession, UserSession } from '../../lib/session';
 import { Button, inputClass, Spinner } from '../ui/Button';
 import { Icon, IconName } from '../ui/Icon';
-import { Logo } from '../ui/Logo';
+import { Logo, LogoMark } from '../ui/Logo';
 import { ThemeToggle } from '../ui/ThemeToggle';
 import { ToastProvider, useToast } from '../ui/Toast';
 import { EmployeePortalInner } from '../employee/EmployeePortal';
 import { QuotaMetersPanel, WorkspaceApiKeysPanel, WorkspaceAuditLogsPanel } from '../workspace/GovernancePanels';
-import { FileTypeIcon, Panel, StatusBadge } from '../workspace/parts';
+import { FileTypeIcon, Meter, Panel, StatusBadge } from '../workspace/parts';
 import { UploadModal } from '../workspace/UploadModal';
 import { WorkspaceContextValue, WorkspaceProvider } from '../workspace/WorkspaceContext';
 import { LibraryView } from '../workspace/views/LibraryView';
@@ -115,6 +115,7 @@ export function CompanyConsoleInner({
   const [showGuide, setShowGuide] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Policy edit state
   const [companyName, setCompanyName] = useState('');
@@ -506,13 +507,51 @@ export function CompanyConsoleInner({
     [documents, isAdmin, loadAll, loading, session, settings?.starter_prompts, signOut, spaces, usage],
   );
 
+  const pdfDocs = useMemo(
+    () => documents.filter(d => d.filename.toLowerCase().endsWith('.pdf') || d.mime_type === 'application/pdf'),
+    [documents],
+  );
+  const docxDocs = useMemo(
+    () =>
+      documents.filter(
+        d =>
+          d.filename.toLowerCase().endsWith('.docx') ||
+          d.filename.toLowerCase().endsWith('.doc') ||
+          d.mime_type.includes('word'),
+      ),
+    [documents],
+  );
+  const txtDocs = useMemo(
+    () =>
+      documents.filter(
+        d =>
+          d.filename.toLowerCase().endsWith('.txt') ||
+          d.filename.toLowerCase().endsWith('.md') ||
+          d.mime_type.includes('text/plain'),
+      ),
+    [documents],
+  );
+  const otherDocs = documents.length - pdfDocs.length - docxDocs.length - txtDocs.length;
+  const pdfPages = useMemo(() => pdfDocs.reduce((acc, d) => acc + (d.page_count || 0), 0), [pdfDocs]);
+  const totalPages = useMemo(() => documents.reduce((acc, d) => acc + (d.page_count || 0), 0), [documents]);
+  const readyDocs = useMemo(() => documents.filter(d => d.status === 'READY'), [documents]);
+  const inProgressDocs = useMemo(
+    () => documents.filter(d => ['UPLOADING', 'QUEUED', 'PROCESSING'].includes(d.status)),
+    [documents],
+  );
+  const failedDocs = useMemo(() => documents.filter(d => d.status === 'FAILED'), [documents]);
+
+  const storageUsed = overview?.storage_bytes ?? usage?.storage_bytes ?? 0;
+  const storageLimit = usage?.storage_limit_bytes ?? 10737418240;
+  const storagePercent = percent(storageUsed, storageLimit);
+
   const tabs: { id: CompanyTab; label: string; icon: IconName; badge?: number }[] = isAdmin
     ? [
-        { id: 'overview', label: 'Overview', icon: 'grid' },
+        { id: 'overview', label: 'Dashboard', icon: 'grid' },
         { id: 'ask', label: 'Ask AI', icon: 'chat' },
         { id: 'documents', label: 'Documents', icon: 'file', badge: documents.length || undefined },
         { id: 'employees', label: 'Employees', icon: 'users', badge: pendingJoinReqs.length || undefined },
-        { id: 'spaces', label: 'Departments', icon: 'folder' },
+        { id: 'spaces', label: 'Departments', icon: 'folder', badge: spaces.length || undefined },
         { id: 'gaps', label: 'Knowledge Gaps', icon: 'alert', badge: openGapsCount || undefined },
         { id: 'governance', label: 'Audit & API', icon: 'shield' },
         { id: 'policy', label: 'Company Settings', icon: 'sliders' },
@@ -526,28 +565,197 @@ export function CompanyConsoleInner({
   const initials = companyMonogram(brandName);
 
   return (
-    <div className="min-h-screen bg-bg text-fg">
-      {/* Header */}
-      <header className="sticky top-0 z-30 border-b border-line bg-bg/92 px-4 backdrop-blur sm:px-6">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <Link href="/" aria-label="DocMind" className="shrink-0">
-              <Logo />
+    <div className="flex h-screen overflow-hidden bg-bg text-fg">
+      {/* Desktop Left Sidebar */}
+      <aside className="hidden w-64 shrink-0 flex-col justify-between border-r border-line bg-surface px-3 py-4 lg:flex">
+        <div className="space-y-4">
+          <Link href="/" className="block px-2.5" aria-label="DocMind Home">
+            <Logo />
+          </Link>
+
+          {/* Company Brand Badge */}
+          <div className="flex items-center gap-2.5 rounded-xl border border-line bg-bg p-2.5">
+            <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand text-xs font-bold tracking-tight text-brand-fg shadow-xs">
+              {initials}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-semibold">{brandName}</p>
+              <div className="flex items-center gap-1.5">
+                <span className="rounded bg-brand/10 px-1.5 py-0.5 text-[10px] font-semibold text-fg">
+                  {isAdmin ? 'Admin Console' : 'Contributor'}
+                </span>
+                {activeSlug && (
+                  <span className="truncate font-mono text-[10px] text-muted">
+                    /{activeSlug}/
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-faint">
+              Admin Menu
+            </p>
+            <nav className="space-y-0.5" aria-label="Company sections">
+              {tabs.map(t => {
+                const active = tab === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setTab(t.id)}
+                    aria-current={active ? 'page' : undefined}
+                    className={`group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
+                      active ? 'bg-brand-soft text-brand-ink' : 'text-muted hover:bg-surface-2 hover:text-fg'
+                    }`}
+                  >
+                    {active && (
+                      <span className="absolute -left-3 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-brand" aria-hidden="true" />
+                    )}
+                    <Icon name={t.icon} className="size-[18px]" />
+                    <span className="flex-1 truncate">{t.label}</span>
+                    {typeof t.badge === 'number' && t.badge > 0 && (
+                      <span
+                        className={`tabular rounded-full px-1.5 py-0.5 text-[11px] font-semibold leading-none ${
+                          t.id === 'gaps' || t.id === 'employees'
+                            ? 'bg-warn-soft text-warn'
+                            : active
+                              ? 'bg-brand/15 text-brand-ink'
+                              : 'bg-surface-2 text-faint'
+                        }`}
+                      >
+                        {t.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+
+          <div className="pt-2 border-t border-line space-y-0.5">
+            <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-wider text-faint">
+              Platform Tools
+            </p>
+            <Link
+              href="/app/"
+              className="flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs font-medium text-muted hover:bg-surface-2 hover:text-fg transition-colors"
+              title="Open Compare matrix and workspace tools"
+            >
+              <Icon name="compare" className="size-4" />
+              <span>Workspace Tools</span>
             </Link>
-            <span className="hidden h-5 w-px bg-line sm:inline-block" />
-            <div className="hidden min-w-0 items-center gap-2.5 sm:flex">
-              <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-xs font-bold tracking-tight text-brand-fg shadow-xs">
-                {initials}
+            {session.isSuperAdmin && (
+              <Link
+                href="/admin/"
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs font-medium text-amber-500 hover:bg-amber-500/10 transition-colors"
+              >
+                <Icon name="shield" className="size-4" />
+                <span>Super Admin</span>
+              </Link>
+            )}
+          </div>
+        </div>
+
+        {/* Sidebar Footer */}
+        <div className="space-y-3 pt-3 border-t border-line">
+          {shareUrl && (
+            <button
+              type="button"
+              onClick={() => void copyShareUrl()}
+              className="flex w-full items-center justify-between gap-2 rounded-lg border border-line bg-bg px-2.5 py-1.5 text-left text-xs font-medium text-muted hover:bg-surface-2 hover:text-fg transition-colors"
+              title="Copy employee sign-in URL"
+            >
+              <div className="flex items-center gap-1.5 truncate">
+                <Icon name={copiedLink ? 'check' : 'copy'} className="size-3.5 shrink-0 text-brand-ink" />
+                <span className="truncate">{activeSlug ? `/${activeSlug}/` : 'Portal URL'}</span>
+              </div>
+              <span className="text-[10px] uppercase font-semibold text-faint">
+                {copiedLink ? 'Copied' : 'Copy'}
+              </span>
+            </button>
+          )}
+
+          {usage && (
+            <div className="space-y-2 rounded-xl border border-line bg-bg p-3 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-fg">{usage.tier_name || usage.tier || 'Enterprise'}</span>
+                <span className="text-[11px] text-muted">{overview?.total_documents ?? documents.length} docs</span>
+              </div>
+              <Meter
+                label="Storage"
+                used={usage.storage_bytes}
+                limit={usage.storage_limit_bytes}
+                valueText={`${formatBytes(usage.storage_bytes)} / ${formatBytes(usage.storage_limit_bytes)}`}
+              />
+              <Meter
+                label="Questions"
+                used={usage.questions_used}
+                limit={usage.questions_limit}
+                valueText={`${usage.questions_used} / ${usage.questions_limit.toLocaleString('en-US')}`}
+              />
+            </div>
+          )}
+
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-xs font-semibold text-white">
+                {(session.fullName || session.email).charAt(0).toUpperCase()}
               </span>
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-semibold">{brandName}</span>
-                  <span className="rounded-md bg-brand/10 px-2 py-0.5 text-[11px] font-semibold text-fg">
-                    {isAdmin ? 'Admin Console' : 'Contributor'}
-                  </span>
-                </div>
+                <p className="truncate text-xs font-medium">{session.fullName || session.email}</p>
+                <p className="text-[10px] text-faint">Admin Console</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1">
+              <ThemeToggle />
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                className="inline-flex size-7 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg"
+                title="Sign out"
+                aria-label="Sign out"
+              >
+                <Icon name="logout" className="size-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      {/* Main Content Area */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Top Header Bar */}
+        <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between border-b border-line bg-surface/80 px-4 backdrop-blur-xl sm:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(m => !m)}
+              className="inline-flex size-8 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg lg:hidden"
+              aria-label="Toggle navigation menu"
+            >
+              <Icon name="menu" className="size-4" />
+            </button>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h1 className="truncate text-sm font-semibold capitalize text-fg">
+                  {tab === 'overview'
+                    ? 'Admin Dashboard'
+                    : tab === 'spaces'
+                      ? 'Departments & Spaces'
+                      : tab === 'gaps'
+                        ? 'Knowledge Gaps'
+                        : tab === 'policy'
+                          ? 'Company Settings'
+                          : tab === 'governance'
+                            ? 'Audit Logs & API Keys'
+                            : tab}
+                </h1>
                 {activeSlug && (
-                  <p className="truncate font-mono text-[11px] text-muted">/{activeSlug}/</p>
+                  <span className="hidden rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] text-muted sm:inline-block">
+                    /{activeSlug}/
+                  </span>
                 )}
               </div>
             </div>
@@ -555,361 +763,524 @@ export function CompanyConsoleInner({
 
           <div className="flex items-center gap-2">
             {shareUrl && (
-              <Button variant="secondary" size="sm" onClick={() => void copyShareUrl()}>
+              <Button variant="secondary" size="sm" onClick={() => void copyShareUrl()} className="hidden sm:inline-flex">
                 <Icon name={copiedLink ? 'check' : 'copy'} className="size-3.5" />
-                <span className="hidden sm:inline">{copiedLink ? 'Copied URL' : 'Copy Portal URL'}</span>
+                <span>{copiedLink ? 'Copied URL' : 'Copy Portal URL'}</span>
               </Button>
             )}
             {isAdmin && (
-              <Button variant="secondary" size="sm" onClick={() => setTab('employees')}>
+              <Button variant="secondary" size="sm" onClick={() => setTab('employees')} className="hidden md:inline-flex">
                 <Icon name="userCheck" className="size-3.5" />
-                <span className="hidden md:inline">Add Employees</span>
+                <span>Add Employees</span>
               </Button>
             )}
             <Button size="sm" onClick={() => setUploadOpen(true)}>
               <Icon name="upload" className="size-3.5" />
               <span>Upload Docs</span>
             </Button>
-            <Link
-              href="/app/"
-              className="hidden h-8 items-center gap-1 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium hover:bg-surface-2 lg:inline-flex"
-              title="Open Compare matrix and workspace tools"
-            >
-              Workspace Tools
-            </Link>
-            {session.isSuperAdmin && (
-              <Link
-                href="/admin/"
-                className="hidden h-8 items-center gap-1 rounded-lg border border-amber-500/30 px-2.5 text-xs font-medium text-amber-500 hover:bg-amber-500/10 xl:inline-flex"
-              >
-                <Icon name="shield" className="size-3.5" /> Super Admin
-              </Link>
-            )}
-            <ThemeToggle />
-            <Button variant="ghost" size="sm" onClick={() => void signOut()} aria-label="Sign out">
-              <Icon name="logout" className="size-4" />
-            </Button>
+            <div className="lg:hidden flex items-center gap-1">
+              <ThemeToggle />
+              <Button variant="ghost" size="sm" onClick={() => void signOut()} aria-label="Sign out">
+                <Icon name="logout" className="size-4" />
+              </Button>
+            </div>
           </div>
-        </div>
+        </header>
 
-        <nav className="mx-auto flex max-w-6xl gap-1 overflow-x-auto pb-2.5" aria-label="Company sections">
-          {tabs.map(t => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors sm:text-sm sm:font-medium ${
-                tab === t.id ? 'bg-brand text-brand-fg shadow-xs' : 'text-muted hover:bg-surface-2 hover:text-fg'
-              }`}
-            >
-              <Icon name={t.icon} className="size-3.5" />
-              <span>{t.label}</span>
-              {t.badge !== undefined && t.badge > 0 && (
-                <span className={`tabular rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${tab === t.id ? 'bg-white/20 text-white' : 'bg-warn-soft text-warn'}`}>
-                  {t.badge}
-                </span>
-              )}
-            </button>
-          ))}
-        </nav>
-      </header>
-
-      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
-        {loading && !overview ? (
-          <div className="flex items-center justify-center py-24">
-            <Spinner className="size-6 text-fg" />
-          </div>
-        ) : (
-          <>
-            {tab === 'overview' && overview && (() => {
-              const needsOnboarding = overview.total_documents === 0 || overview.member_count <= 1;
-              const guideVisible = needsOnboarding || showGuide;
-              const inProgressDocs = documents.filter(d => ['UPLOADING', 'QUEUED', 'PROCESSING'].includes(d.status)).length;
-              return (
-              <div className="space-y-6">
-                <Panel className="relative overflow-hidden p-5 sm:p-6">
-                  <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="flex items-start gap-4">
-                      <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-brand text-lg font-bold tracking-tight text-brand-fg shadow-xs">
-                        {initials}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="inline-flex items-center gap-1 rounded-full border border-line bg-surface-2 px-2.5 py-0.5 text-[11px] font-semibold text-fg">
-                            <Icon name="shield" className="size-3" /> Admin-Managed Portal
-                          </span>
-                          <span className="rounded-full bg-surface-2 px-2.5 py-0.5 text-[11px] font-medium text-muted">
-                            Plan: <strong className="text-fg">{overview.tier}</strong>
-                          </span>
-                          {settings?.allowed_domains?.length ? (
-                            <span className="rounded-full bg-surface-2 px-2.5 py-0.5 text-[11px] font-medium text-muted">
-                              Domain: <strong className="text-fg">@{settings.allowed_domains.join(', @')}</strong>
-                            </span>
-                          ) : null}
-                        </div>
-                        <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">{overview.company_name} Control Center</h1>
-                        <p className="mt-1 text-sm text-muted">
-                          Upload company knowledge, issue employee login credentials by email, and review citation-backed Q&amp;A.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      {!needsOnboarding && (
-                        <Button variant="ghost" size="sm" onClick={() => setShowGuide(g => !g)}>
-                          <Icon name="info" className="size-3.5" />
-                          {showGuide ? 'Hide setup guide' : 'Setup guide'}
-                        </Button>
-                      )}
-                      <Button variant="secondary" size="sm" onClick={() => setTab('employees')}>
-                        <Icon name="userCheck" className="size-3.5" /> Provision Employees
-                      </Button>
-                      <Button size="sm" onClick={() => setTab('ask')}>
-                        <Icon name="sparkles" className="size-3.5" /> Open Ask AI
-                      </Button>
-                    </div>
-                  </div>
-
-                  {shareUrl && (
-                    <div className="mt-5 flex flex-col gap-3 rounded-xl border border-line bg-surface-2/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0">
-                        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">
-                          Custom Company Sign-In Portal URL
-                        </p>
-                        <p className="mt-0.5 truncate font-mono text-xs font-medium text-fg sm:text-sm">{shareUrl}</p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <span className="hidden rounded-md bg-surface px-2 py-1 text-[11px] text-muted sm:inline">
-                          Self-signup disabled
-                        </span>
-                        <Button size="sm" variant="secondary" onClick={() => void copyShareUrl()}>
-                          <Icon name={copiedLink ? 'check' : 'copy'} className="size-3.5" />
-                          {copiedLink ? 'Copied!' : 'Copy Link'}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </Panel>
-
-                {guideVisible && (
-                  <Panel className="border-brand/30 bg-brand/5 p-5 sm:p-6">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wider text-muted">Company Portal Workflow</p>
-                        <h2 className="mt-1 text-base font-semibold">Launch your {overview.company_name} Knowledge Base in 3 steps</h2>
-                      </div>
-                    </div>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                      <div className="flex flex-col justify-between rounded-xl border border-line bg-surface p-4">
-                        <div>
-                          <div className="flex items-center gap-2 text-xs font-semibold text-muted">
-                            <span className="inline-flex size-5 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-brand-fg">1</span>
-                            Upload Company Docs
+        {/* Scrollable View Area */}
+        <main className="scroll-thin flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-6xl">
+            {loading && !overview ? (
+              <div className="flex items-center justify-center py-24">
+                <Spinner className="size-6 text-fg" />
+              </div>
+            ) : (
+              <>
+                {tab === 'overview' && overview && (() => {
+                  const needsOnboarding = overview.total_documents === 0 || overview.member_count <= 1;
+                  const guideVisible = needsOnboarding || showGuide;
+                  return (
+                    <div className="space-y-6">
+                      {/* Hero Card */}
+                      <Panel className="relative overflow-hidden p-5 sm:p-6">
+                        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                          <div className="flex items-start gap-4">
+                            <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-brand text-lg font-bold tracking-tight text-brand-fg shadow-xs">
+                              {initials}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="inline-flex items-center gap-1 rounded-full border border-line bg-surface-2 px-2.5 py-0.5 text-[11px] font-semibold text-fg">
+                                  <Icon name="shield" className="size-3" /> Admin Control Center
+                                </span>
+                                <span className="rounded-full bg-surface-2 px-2.5 py-0.5 text-[11px] font-medium text-muted">
+                                  Plan: <strong className="text-fg">{overview.tier}</strong>
+                                </span>
+                                {settings?.allowed_domains?.length ? (
+                                  <span className="rounded-full bg-surface-2 px-2.5 py-0.5 text-[11px] font-medium text-muted">
+                                    Domain: <strong className="text-fg">@{settings.allowed_domains.join(', @')}</strong>
+                                  </span>
+                                ) : null}
+                              </div>
+                              <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
+                                {overview.company_name} Knowledge Hub
+                              </h1>
+                              <p className="mt-1 text-sm text-muted">
+                                Complete visibility over uploaded company PDFs, departments, employee access, and citation-backed RAG intelligence.
+                              </p>
+                            </div>
                           </div>
-                          <p className="mt-2 text-sm font-medium">Add handbooks, policies &amp; SOPs</p>
-                          <p className="mt-1 text-xs leading-5 text-muted">
-                            Upload files right in Documents. By default they go to General (visible to all company staff).
-                          </p>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            {!needsOnboarding && (
+                              <Button variant="ghost" size="sm" onClick={() => setShowGuide(g => !g)}>
+                                <Icon name="info" className="size-3.5" />
+                                {showGuide ? 'Hide guide' : 'Setup guide'}
+                              </Button>
+                            )}
+                            <Button variant="secondary" size="sm" onClick={() => setTab('employees')}>
+                              <Icon name="userCheck" className="size-3.5" /> Add Staff
+                            </Button>
+                            <Button size="sm" onClick={() => setTab('ask')}>
+                              <Icon name="sparkles" className="size-3.5" /> Ask AI
+                            </Button>
+                          </div>
                         </div>
+
+                        {shareUrl && (
+                          <div className="mt-5 flex flex-col gap-3 rounded-xl border border-line bg-surface-2/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
+                              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+                                Company Knowledge Portal Link (For Employees)
+                              </p>
+                              <p className="mt-0.5 truncate font-mono text-xs font-medium text-fg sm:text-sm">{shareUrl}</p>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <span className="hidden rounded-md bg-surface px-2 py-1 text-[11px] text-muted sm:inline">
+                                Self-signup disabled
+                              </span>
+                              <Button size="sm" variant="secondary" onClick={() => void copyShareUrl()}>
+                                <Icon name={copiedLink ? 'check' : 'copy'} className="size-3.5" />
+                                {copiedLink ? 'Copied Link!' : 'Copy Portal Link'}
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </Panel>
+
+                      {/* Top 4 KPI Metrics */}
+                      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                        <Panel className="p-4 transition-colors hover:border-line-strong sm:p-5">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-muted">Uploaded Documents</p>
+                            <span className="inline-flex size-7 items-center justify-center rounded-lg bg-brand-soft text-brand-ink">
+                              <Icon name="file" className="size-3.5" />
+                            </span>
+                          </div>
+                          <div className="mt-2.5 flex items-baseline gap-2">
+                            <span className="tabular text-2xl font-semibold tracking-tight">{overview.total_documents}</span>
+                            <span className="rounded-md bg-rose-500/10 px-2 py-0.5 text-xs font-bold text-rose-500">
+                              {pdfDocs.length} PDFs
+                            </span>
+                          </div>
+                          <p className="mt-1 text-xs text-faint">
+                            {totalPages} pages indexed &bull; {readyDocs.length} ready
+                          </p>
+                        </Panel>
+
+                        <Panel className="p-4 transition-colors hover:border-line-strong sm:p-5">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-muted">Storage Utilization</p>
+                            <span className="inline-flex size-7 items-center justify-center rounded-lg bg-surface-2 text-muted">
+                              <Icon name="table" className="size-3.5" />
+                            </span>
+                          </div>
+                          <p className="tabular mt-2.5 text-2xl font-semibold tracking-tight">
+                            {formatBytes(overview.storage_bytes)}
+                          </p>
+                          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
+                            <div
+                              className="h-full rounded-full bg-brand transition-all duration-500"
+                              style={{ width: `${Math.min(storagePercent, 100)}%` }}
+                            />
+                          </div>
+                          <p className="mt-1 text-xs text-faint">
+                            {storagePercent}% of {formatBytes(storageLimit)} quota limit
+                          </p>
+                        </Panel>
+
+                        <Panel className="p-4 transition-colors hover:border-line-strong sm:p-5">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-muted">Active Workforce</p>
+                            <span className="inline-flex size-7 items-center justify-center rounded-lg bg-surface-2 text-muted">
+                              <Icon name="users" className="size-3.5" />
+                            </span>
+                          </div>
+                          <div className="mt-2.5 flex items-baseline gap-2">
+                            <span className="tabular text-2xl font-semibold tracking-tight">{overview.member_count}</span>
+                            {pendingJoinReqs.length > 0 && (
+                              <span className="rounded-md bg-warn-soft px-2 py-0.5 text-xs font-semibold text-warn">
+                                {pendingJoinReqs.length} pending
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-1 text-xs text-faint">
+                            {spaces.length} departments &bull; {pendingInvites.length} pending invites
+                          </p>
+                        </Panel>
+
+                        <Panel className="p-4 transition-colors hover:border-line-strong sm:p-5">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-muted">AI Activity &amp; Quality</p>
+                            <span className="inline-flex size-7 items-center justify-center rounded-lg bg-surface-2 text-muted">
+                              <Icon name="sparkles" className="size-3.5" />
+                            </span>
+                          </div>
+                          <p className="tabular mt-2.5 text-2xl font-semibold tracking-tight">
+                            {overview.monthly_questions}
+                            <span className="text-sm font-normal text-muted"> / {overview.monthly_questions_limit}</span>
+                          </p>
+                          <p className="mt-1 text-xs text-faint">
+                            {overview.helpful_rate_pct !== null && overview.helpful_rate_pct !== undefined ? `${overview.helpful_rate_pct}% helpful rating` : 'Active'} ({overview.total_feedback_count} ratings)
+                          </p>
+                        </Panel>
+                      </div>
+
+                      {/* Document Fleet & PDF Telemetry Card */}
+                      <Panel className="p-5 sm:p-6">
+                        <div className="flex flex-col gap-3 border-b border-line pb-4 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex items-center gap-3">
+                            <span className="inline-flex size-10 items-center justify-center rounded-xl bg-brand-soft text-brand-ink">
+                              <Icon name="file" className="size-5" />
+                            </span>
+                            <div>
+                              <h2 className="text-base font-semibold">Document Fleet &amp; Format Telemetry</h2>
+                              <p className="text-xs text-muted">
+                                Complete breakdown of uploaded PDFs, Word docs, text handbooks, and ingestion pipeline health.
+                              </p>
+                            </div>
+                          </div>
+                          <Button variant="secondary" size="sm" onClick={() => setTab('documents')}>
+                            Manage All Documents ({documents.length})
+                          </Button>
+                        </div>
+
+                        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                          {/* PDF count card */}
+                          <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-3.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold uppercase tracking-wider text-rose-500">PDF Files</span>
+                              <span className="rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-bold text-rose-500">PDF</span>
+                            </div>
+                            <p className="mt-1.5 text-2xl font-bold tracking-tight text-fg">{pdfDocs.length}</p>
+                            <p className="mt-1 text-[11px] text-muted">
+                              {pdfPages} pages ({Math.round(pdfDocs.length / (documents.length || 1) * 100)}% of library)
+                            </p>
+                          </div>
+
+                          {/* Word count card */}
+                          <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold uppercase tracking-wider text-blue-500">Word Docs</span>
+                              <span className="rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-bold text-blue-500">DOCX</span>
+                            </div>
+                            <p className="mt-1.5 text-2xl font-bold tracking-tight text-fg">{docxDocs.length}</p>
+                            <p className="mt-1 text-[11px] text-muted">Office policies &amp; contracts</p>
+                          </div>
+
+                          {/* Text & MD count card */}
+                          <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold uppercase tracking-wider text-amber-500">Text &amp; Markdown</span>
+                              <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold text-amber-500">TXT/MD</span>
+                            </div>
+                            <p className="mt-1.5 text-2xl font-bold tracking-tight text-fg">{txtDocs.length}</p>
+                            <p className="mt-1 text-[11px] text-muted">Documentation &amp; notes</p>
+                          </div>
+
+                          {/* Ingestion Health */}
+                          <div className="rounded-xl border border-line bg-surface-2/40 p-3.5">
+                            <span className="text-xs font-bold uppercase tracking-wider text-muted">Pipeline Health</span>
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                              <span className="rounded-md bg-ok-soft px-2 py-0.5 text-xs font-semibold text-ok">
+                                {readyDocs.length} Ready
+                              </span>
+                              {inProgressDocs.length > 0 && (
+                                <span className="flex items-center gap-1 rounded-md bg-warn-soft px-2 py-0.5 text-xs font-semibold text-warn">
+                                  <Spinner className="size-2.5" /> {inProgressDocs.length} In-flight
+                                </span>
+                              )}
+                              {failedDocs.length > 0 && (
+                                <span className="rounded-md bg-danger-soft px-2 py-0.5 text-xs font-semibold text-danger">
+                                  {failedDocs.length} Failed
+                                </span>
+                              )}
+                            </div>
+                            <p className="mt-1 text-[11px] text-muted">OCR &amp; Vector Index Status</p>
+                          </div>
+                        </div>
+
+                        {/* Format distribution bar */}
+                        {documents.length > 0 && (
+                          <div className="mt-4 space-y-1.5">
+                            <div className="flex items-center justify-between text-xs text-muted">
+                              <span>Format Distribution</span>
+                              <span>{documents.length} Total Files Uploaded</span>
+                            </div>
+                            <div className="flex h-2 w-full overflow-hidden rounded-full bg-surface-2">
+                              <div
+                                className="bg-rose-500 transition-all duration-500"
+                                style={{ width: `${(pdfDocs.length / documents.length) * 100}%` }}
+                                title={`PDFs: ${pdfDocs.length}`}
+                              />
+                              <div
+                                className="bg-blue-500 transition-all duration-500"
+                                style={{ width: `${(docxDocs.length / documents.length) * 100}%` }}
+                                title={`Word Docs: ${docxDocs.length}`}
+                              />
+                              <div
+                                className="bg-amber-500 transition-all duration-500"
+                                style={{ width: `${(txtDocs.length / documents.length) * 100}%` }}
+                                title={`Text & Markdown: ${txtDocs.length}`}
+                              />
+                              {otherDocs > 0 && (
+                                <div
+                                  className="bg-purple-500 transition-all duration-500"
+                                  style={{ width: `${(otherDocs / documents.length) * 100}%` }}
+                                  title={`Other: ${otherDocs}`}
+                                />
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </Panel>
+
+                      {/* Actionable Alerts (Pending join requests) */}
+                      {pendingJoinReqs.length > 0 && (
+                        <Panel className="border-warn/40 bg-warn-soft/20 p-5 sm:p-6">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2.5">
+                              <span className="inline-flex size-8 items-center justify-center rounded-lg bg-warn-soft text-warn">
+                                <Icon name="alert" className="size-4" />
+                              </span>
+                              <div>
+                                <h2 className="text-base font-semibold">
+                                  Pending Employee Access Requests ({pendingJoinReqs.length})
+                                </h2>
+                                <p className="text-xs text-muted">Staff waiting for account approval</p>
+                              </div>
+                            </div>
+                            <Button variant="secondary" size="sm" onClick={() => setTab('employees')}>
+                              View All in Employees
+                            </Button>
+                          </div>
+                          <ul className="mt-4 divide-y divide-line">
+                            {pendingJoinReqs.slice(0, 3).map(r => (
+                              <li key={r.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                  <p className="text-sm font-semibold">{r.email}</p>
+                                  <p className="text-xs text-muted">Requested {timeAgo(r.created_at)}</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Button size="sm" onClick={() => void decideJoin(r.id, 'APPROVE')} disabled={busyId === r.id}>
+                                    Approve
+                                  </Button>
+                                  <Button variant="ghost" size="sm" onClick={() => void decideJoin(r.id, 'REJECT')} disabled={busyId === r.id}>
+                                    Reject
+                                  </Button>
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        </Panel>
+                      )}
+
+                      {/* Quick Admin Actions Launchpad */}
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                         <button
                           type="button"
                           onClick={() => setUploadOpen(true)}
-                          className="mt-3 inline-flex items-center gap-1 text-left text-xs font-semibold text-fg underline underline-offset-2 hover:no-underline"
+                          className="group flex flex-col items-start rounded-xl border border-line bg-surface p-4 text-left transition hover:border-brand hover:shadow-xs"
                         >
-                          Upload documents <Icon name="arrowRight" className="size-3" />
+                          <span className="inline-flex size-9 items-center justify-center rounded-lg bg-brand-soft text-brand-ink transition group-hover:scale-105">
+                            <Icon name="upload" className="size-4" />
+                          </span>
+                          <p className="mt-3 text-sm font-semibold">Upload New Documents</p>
+                          <p className="mt-0.5 text-xs text-muted">Add company handbooks, PDF policies or spreadsheets.</p>
                         </button>
-                      </div>
 
-                      <div className="flex flex-col justify-between rounded-xl border border-line bg-surface p-4">
-                        <div>
-                          <div className="flex items-center gap-2 text-xs font-semibold text-muted">
-                            <span className="inline-flex size-5 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-brand-fg">2</span>
-                            Add Employees &amp; Email Password
-                          </div>
-                          <p className="mt-2 text-sm font-medium">Admin-managed employee credentials</p>
-                          <p className="mt-1 text-xs leading-5 text-muted">
-                            Enter employee emails &amp; a shared dynamic password. Every employee receives their portal link &amp; credentials by mail.
-                          </p>
-                        </div>
                         <button
                           type="button"
                           onClick={() => setTab('employees')}
-                          className="mt-3 inline-flex items-center gap-1 text-left text-xs font-semibold text-fg underline underline-offset-2 hover:no-underline"
+                          className="group flex flex-col items-start rounded-xl border border-line bg-surface p-4 text-left transition hover:border-brand hover:shadow-xs"
                         >
-                          Add employee accounts <Icon name="arrowRight" className="size-3" />
+                          <span className="inline-flex size-9 items-center justify-center rounded-lg bg-surface-2 text-muted transition group-hover:scale-105">
+                            <Icon name="userCheck" className="size-4" />
+                          </span>
+                          <p className="mt-3 text-sm font-semibold">Add Employee Accounts</p>
+                          <p className="mt-0.5 text-xs text-muted">Provision staff credentials and email login links.</p>
                         </button>
-                      </div>
 
-                      <div className="flex flex-col justify-between rounded-xl border border-line bg-surface p-4">
-                        <div>
-                          <div className="flex items-center gap-2 text-xs font-semibold text-muted">
-                            <span className="inline-flex size-5 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-brand-fg">3</span>
-                            Ask AI &amp; Track Gaps
-                          </div>
-                          <p className="mt-2 text-sm font-medium">Instant cited Q&amp;A for staff</p>
-                          <p className="mt-1 text-xs leading-5 text-muted">
-                            Staff sign in at /{overview.slug}/ with their emailed credentials and immediately query approved docs.
-                          </p>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setTab('spaces')}
+                          className="group flex flex-col items-start rounded-xl border border-line bg-surface p-4 text-left transition hover:border-brand hover:shadow-xs"
+                        >
+                          <span className="inline-flex size-9 items-center justify-center rounded-lg bg-surface-2 text-muted transition group-hover:scale-105">
+                            <Icon name="folder" className="size-4" />
+                          </span>
+                          <p className="mt-3 text-sm font-semibold">Create Department Space</p>
+                          <p className="mt-0.5 text-xs text-muted">Group documents for HR, Legal, or Engineering.</p>
+                        </button>
+
                         <button
                           type="button"
                           onClick={() => setTab('ask')}
-                          className="mt-3 inline-flex items-center gap-1 text-left text-xs font-semibold text-fg underline underline-offset-2 hover:no-underline"
+                          className="group flex flex-col items-start rounded-xl border border-line bg-surface p-4 text-left transition hover:border-brand hover:shadow-xs"
                         >
-                          Preview Ask AI <Icon name="arrowRight" className="size-3" />
+                          <span className="inline-flex size-9 items-center justify-center rounded-lg bg-surface-2 text-muted transition group-hover:scale-105">
+                            <Icon name="sparkles" className="size-4" />
+                          </span>
+                          <p className="mt-3 text-sm font-semibold">Test Portal Ask AI</p>
+                          <p className="mt-0.5 text-xs text-muted">Experience citation-grounded answers as an employee.</p>
                         </button>
                       </div>
-                    </div>
-                  </Panel>
-                )}
 
-                {!guideVisible && (
-                  <div className="flex flex-col gap-2 rounded-xl border border-line bg-surface-2/70 px-4 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex items-center gap-2 text-muted">
-                      <Icon name="info" className="size-4 shrink-0 text-fg" />
-                      <span>
-                        Docs uploaded in <button type="button" onClick={() => setTab('documents')} className="font-semibold text-fg underline underline-offset-2">Documents</button> are indexed automatically. Once <strong>Ready</strong>, provisioned staff can query them in <button type="button" onClick={() => setTab('ask')} className="font-semibold text-fg underline underline-offset-2">Ask AI</button>.
-                      </span>
-                    </div>
-                  </div>
-                )}
-
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  <StatCard icon="users" label="Provisioned Staff" value={overview.member_count} hint="Admin-managed members" />
-                  <StatCard icon="file" label="Company Docs" value={`${overview.ready_documents} / ${overview.total_documents}`} hint={formatBytes(overview.storage_bytes)} />
-                  <StatCard icon="folder" label="Departments" value={overview.spaces_count} hint="Knowledge spaces" />
-                  <StatCard
-                    icon="sparkles"
-                    label="Answer Quality"
-                    value={overview.helpful_rate_pct !== null && overview.helpful_rate_pct !== undefined ? `${overview.helpful_rate_pct}%` : '—'}
-                    hint={`${overview.total_feedback_count} employee ratings`}
-                  />
-                </div>
-
-                <Panel className="overflow-hidden">
-                  <div className="flex flex-col gap-3 border-b border-line px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <h2 className="text-base font-semibold">Company Documents &amp; Portal Visibility ({documents.length})</h2>
-                      <p className="text-xs text-muted">
-                        Choose whether each document is shared with <strong>General (All employees)</strong> or restricted to a Department Space.
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button variant="secondary" size="sm" onClick={() => setTab('documents')}>
-                        Manage All ({documents.length})
-                      </Button>
-                      <Button size="sm" onClick={() => setUploadOpen(true)}>
-                        <Icon name="upload" className="size-3.5" /> Upload Doc
-                      </Button>
-                    </div>
-                  </div>
-
-                  {inProgressDocs > 0 && (
-                    <div className="flex items-center gap-2 border-b border-line bg-warn-soft/50 px-5 py-2.5 text-xs text-warn">
-                      <Spinner className="size-3.5" />
-                      <span>
-                        {inProgressDocs} document{inProgressDocs === 1 ? ' is' : 's are'} currently queued or processing. Once status becomes <strong>Ready</strong>, employees can query it in the Employee Portal.
-                      </span>
-                    </div>
-                  )}
-
-                  {documents.length === 0 ? (
-                    <div className="px-5 py-10 text-center">
-                      <p className="text-sm font-medium">No company documents uploaded yet</p>
-                      <p className="mt-1 text-xs text-muted">
-                        Upload your first policy, handbook, or guide so employees can search and ask questions in the Employee Portal.
-                      </p>
-                      <Button className="mt-4" size="sm" onClick={() => setUploadOpen(true)}>
-                        <Icon name="upload" className="size-3.5" /> Upload your first company doc
-                      </Button>
-                    </div>
-                  ) : (
-                    <ul className="divide-y divide-line">
-                      {documents.slice(0, 6).map(d => (
-                        <li key={d.id} className="flex flex-col gap-3 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
-                          <div className="flex min-w-0 items-center gap-3">
-                            <FileTypeIcon filename={d.filename} />
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-medium">{d.filename}</p>
-                              <p className="text-xs text-muted">
-                                {d.page_count ? `${d.page_count} pages • ` : ''}
-                                {formatBytes(d.size_bytes)} &bull; {timeAgo(d.created_at)}
-                              </p>
-                            </div>
+                      {/* Recent Documents Table */}
+                      <Panel className="overflow-hidden">
+                        <div className="flex flex-col gap-3 border-b border-line px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <h2 className="text-base font-semibold">
+                              Recent Company Uploads ({documents.length})
+                            </h2>
+                            <p className="text-xs text-muted">
+                              Documents available for citations. Assign to <strong>General (All employees)</strong> or a Department Space.
+                            </p>
                           </div>
-                          <div className="flex flex-wrap items-center gap-2.5">
-                            <StatusBadge status={d.status} />
-                            <select
-                              aria-label={`Department visibility for ${d.filename}`}
-                              value={d.space_id || ''}
-                              disabled={busyId === d.id}
-                              onChange={e => void assignDocSpace(d, e.target.value)}
-                              className="h-8 rounded-lg border border-line-strong bg-surface px-2.5 text-xs font-medium"
-                            >
-                              <option value="">General (All employees)</option>
-                              {spaces.map(sp => (
-                                <option key={sp.id} value={sp.id}>
-                                  {sp.name} ({sp.visibility === 'RESTRICTED' ? 'Restricted' : 'All Company'})
-                                </option>
-                              ))}
-                            </select>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button variant="secondary" size="sm" onClick={() => setTab('documents')}>
+                              Manage All in Documents ({documents.length})
+                            </Button>
+                            <Button size="sm" onClick={() => setUploadOpen(true)}>
+                              <Icon name="upload" className="size-3.5" /> Upload Doc
+                            </Button>
                           </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </Panel>
+                        </div>
 
-                <div className="space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
-                      Plan Quotas &amp; Usage
-                    </h2>
-                    <Button variant="ghost" size="sm" onClick={() => setTab('governance')}>
-                      <Icon name="shield" className="size-3.5" /> API Keys &amp; Audit Logs <Icon name="arrowRight" className="size-3" />
-                    </Button>
-                  </div>
-                  <QuotaMetersPanel usage={usage} memberCount={overview.member_count} />
-                </div>
-
-                <Panel className="p-5 sm:p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h2 className="text-base font-semibold">Recent Open Knowledge Gaps</h2>
-                      <p className="text-sm text-muted">Questions employees flagged with 👎 or where company docs lacked coverage.</p>
-                    </div>
-                    {gaps.length > 0 && (
-                      <Button variant="secondary" size="sm" onClick={() => setTab('gaps')}>
-                        Manage gaps ({openGapsCount} open)
-                      </Button>
-                    )}
-                  </div>
-                  {overview.recent_gaps.length === 0 ? (
-                    <p className="mt-4 text-sm text-muted">No unanswered or downvoted employee questions yet.</p>
-                  ) : (
-                    <ul className="mt-4 divide-y divide-line">
-                      {overview.recent_gaps.slice(0, 5).map(g => (
-                        <li key={g.id} className="py-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium">{g.question}</p>
-                              <p className="mt-0.5 text-xs text-muted">
-                                Asked by {g.user_email} &bull; {timeAgo(g.created_at)}
-                                {g.comment ? ` • "${g.comment}"` : ''}
-                              </p>
-                            </div>
-                            <span className="shrink-0 rounded-full bg-warn-soft px-2.5 py-0.5 text-[11px] font-medium text-warn">
-                              {g.reason === 'NEGATIVE_FEEDBACK' ? '👎 Flagged' : 'Missing Info'}
+                        {inProgressDocs.length > 0 && (
+                          <div className="flex items-center gap-2 border-b border-line bg-warn-soft/50 px-5 py-2.5 text-xs text-warn">
+                            <Spinner className="size-3.5" />
+                            <span>
+                              {inProgressDocs.length} document{inProgressDocs.length === 1 ? ' is' : 's are'} currently queued or processing. Once status becomes <strong>Ready</strong>, employees can query it.
                             </span>
                           </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </Panel>
-              </div>
-              );
-            })()}
+                        )}
+
+                        {documents.length === 0 ? (
+                          <div className="px-5 py-10 text-center">
+                            <p className="text-sm font-medium">No company documents uploaded yet</p>
+                            <p className="mt-1 text-xs text-muted">
+                              Upload your first policy, handbook, or guide so employees can search and ask questions.
+                            </p>
+                            <Button className="mt-4" size="sm" onClick={() => setUploadOpen(true)}>
+                              <Icon name="upload" className="size-3.5" /> Upload your first company doc
+                            </Button>
+                          </div>
+                        ) : (
+                          <ul className="divide-y divide-line">
+                            {documents.slice(0, 6).map(d => (
+                              <li key={d.id} className="flex flex-col gap-3 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="flex min-w-0 items-center gap-3">
+                                  <FileTypeIcon filename={d.filename} />
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <p className="truncate text-sm font-medium">{d.filename}</p>
+                                      {d.filename.toLowerCase().endsWith('.pdf') && (
+                                        <span className="rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-bold text-rose-500">
+                                          PDF
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-muted">
+                                      {d.page_count ? `${d.page_count} pages • ` : ''}
+                                      {formatBytes(d.size_bytes)} &bull; {timeAgo(d.created_at)}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2.5">
+                                  <StatusBadge status={d.status} />
+                                  <select
+                                    aria-label={`Department visibility for ${d.filename}`}
+                                    value={d.space_id || ''}
+                                    disabled={busyId === d.id}
+                                    onChange={e => void assignDocSpace(d, e.target.value)}
+                                    className="h-8 rounded-lg border border-line-strong bg-surface px-2.5 text-xs font-medium"
+                                  >
+                                    <option value="">General (All employees)</option>
+                                    {spaces.map(sp => (
+                                      <option key={sp.id} value={sp.id}>
+                                        {sp.name} ({sp.visibility === 'RESTRICTED' ? 'Restricted' : 'All Company'})
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </Panel>
+
+                      {/* Quotas & Open Gaps */}
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
+                            Plan Quotas &amp; Usage
+                          </h2>
+                          <Button variant="ghost" size="sm" onClick={() => setTab('governance')}>
+                            <Icon name="shield" className="size-3.5" /> API Keys &amp; Audit Logs <Icon name="arrowRight" className="size-3" />
+                          </Button>
+                        </div>
+                        <QuotaMetersPanel usage={usage} memberCount={overview.member_count} />
+                      </div>
+
+                      <Panel className="p-5 sm:p-6">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h2 className="text-base font-semibold">Recent Open Knowledge Gaps</h2>
+                            <p className="text-sm text-muted">Questions employees flagged with 👎 or where company docs lacked coverage.</p>
+                          </div>
+                          {gaps.length > 0 && (
+                            <Button variant="secondary" size="sm" onClick={() => setTab('gaps')}>
+                              Manage gaps ({openGapsCount} open)
+                            </Button>
+                          )}
+                        </div>
+                        {overview.recent_gaps.length === 0 ? (
+                          <p className="mt-4 text-sm text-muted">No unanswered or downvoted employee questions yet.</p>
+                        ) : (
+                          <ul className="mt-4 divide-y divide-line">
+                            {overview.recent_gaps.slice(0, 5).map(g => (
+                              <li key={g.id} className="py-3">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-medium">{g.question}</p>
+                                    <p className="mt-0.5 text-xs text-muted">
+                                      Asked by {g.user_email} &bull; {timeAgo(g.created_at)}
+                                      {g.comment ? ` • "${g.comment}"` : ''}
+                                    </p>
+                                  </div>
+                                  <span className="shrink-0 rounded-full bg-warn-soft px-2.5 py-0.5 text-[11px] font-medium text-warn">
+                                    {g.reason === 'NEGATIVE_FEEDBACK' ? '👎 Flagged' : 'Missing Info'}
+                                  </span>
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </Panel>
+                    </div>
+                  );
+                })()}
 
             {tab === 'ask' && (
               <EmployeePortalInner
@@ -1622,7 +1993,94 @@ export function CompanyConsoleInner({
             )}
           </>
         )}
-      </main>
+          </div>
+        </main>
+      </div>
+
+      {/* Mobile Bottom Navigation */}
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden" aria-label="Mobile navigation">
+        {[
+          { id: 'overview' as const, label: 'Dashboard', icon: 'grid' as const },
+          { id: 'ask' as const, label: 'Ask AI', icon: 'chat' as const },
+          { id: 'documents' as const, label: 'Docs', icon: 'file' as const, badge: documents.length },
+          { id: 'employees' as const, label: 'Staff', icon: 'users' as const, badge: pendingJoinReqs.length },
+          { id: 'spaces' as const, label: 'Spaces', icon: 'folder' as const, badge: spaces.length },
+        ].map(item => {
+          const active = tab === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => {
+                setTab(item.id);
+                setMobileMenuOpen(false);
+              }}
+              className={`flex flex-col items-center gap-1 py-2 text-[10px] font-medium ${active ? 'text-brand-ink' : 'text-faint'}`}
+            >
+              <span className={`relative inline-flex h-6 w-10 items-center justify-center rounded-full transition-colors ${active ? 'bg-brand-soft text-brand-ink' : ''}`}>
+                <Icon name={item.icon} className="size-4" />
+                {typeof item.badge === 'number' && item.badge > 0 && (
+                  <span className="absolute -top-1 -right-1 size-3.5 rounded-full bg-warn text-[9px] font-bold text-white flex items-center justify-center">
+                    {item.badge}
+                  </span>
+                )}
+              </span>
+              {item.label}
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* Mobile Slide-Over Drawer for full navigation */}
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-50 flex lg:hidden">
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-xs" onClick={() => setMobileMenuOpen(false)} />
+          <div className="relative flex w-72 max-w-xs flex-1 flex-col bg-surface p-4 shadow-xl">
+            <div className="flex items-center justify-between pb-3 border-b border-line">
+              <Logo />
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen(false)}
+                className="rounded-lg p-1 text-muted hover:bg-surface-2"
+              >
+                <Icon name="x" className="size-5" />
+              </button>
+            </div>
+            <div className="mt-4 flex-1 space-y-1 overflow-y-auto">
+              {tabs.map(t => {
+                const active = tab === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      setTab(t.id);
+                      setMobileMenuOpen(false);
+                    }}
+                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium ${
+                      active ? 'bg-brand-soft text-brand-ink' : 'text-muted hover:bg-surface-2'
+                    }`}
+                  >
+                    <Icon name={t.icon} className="size-4" />
+                    <span className="flex-1">{t.label}</span>
+                    {typeof t.badge === 'number' && t.badge > 0 && (
+                      <span className="rounded-full bg-surface-2 px-1.5 py-0.5 text-xs font-semibold">
+                        {t.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="pt-3 border-t border-line">
+              <Button variant="ghost" size="sm" onClick={() => void signOut()} className="w-full justify-start">
+                <Icon name="logout" className="size-4" />
+                <span>Sign Out</span>
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <UploadModal
         open={uploadOpen}

@@ -263,106 +263,170 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignO
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  const adminPdfDocs = documents.filter(
+    d => d.filename.toLowerCase().endsWith('.pdf') || d.mime_type === 'application/pdf',
+  );
+
+  const adminNavItems = [
+    { id: 'workspaces' as const, label: 'Workspaces', badge: workspaces.length, icon: '🏢' },
+    { id: 'users' as const, label: 'Registered Users', badge: users.length, icon: '👥' },
+    { id: 'jobs' as const, label: 'Worker Queue', badge: jobs.length, icon: '⚙️' },
+    { id: 'overview' as const, label: 'Platform Telemetry', badge: undefined, icon: '📊' },
+    { id: 'documents' as const, label: 'Document Fleet', badge: documents.length, icon: '📄' },
+    { id: 'audit' as const, label: 'Global Audit Trail', badge: undefined, icon: '🛡️' },
+    { id: 'system' as const, label: 'System Config', badge: undefined, icon: '🔧' },
+  ];
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      {/* Top Header Bar */}
-      <header className="h-16 border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-xl px-6 flex items-center justify-between sticky top-0 z-40">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-amber-500 to-rose-500 flex items-center justify-center text-sm font-bold text-slate-950 shadow-md shadow-amber-500/20">
-            ⚡
-          </div>
-          <div>
-            <h1 className="text-sm font-bold text-white tracking-tight flex items-center gap-2">
-              DocMind Super-Admin Control Center
-              <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30">
-                Global Platform Admin
+    <div className="flex h-screen overflow-hidden bg-slate-950 text-slate-100 font-sans">
+      {/* Super-Admin Left Sidebar */}
+      <aside className="hidden w-64 shrink-0 flex-col justify-between border-r border-slate-800/80 bg-slate-900/60 p-4 lg:flex">
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 px-2 py-1">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-amber-500 to-rose-500 flex items-center justify-center text-sm font-bold text-slate-950 shadow-md shadow-amber-500/20">
+              ⚡
+            </div>
+            <div>
+              <h1 className="text-xs font-bold text-white tracking-tight flex items-center gap-1.5">
+                DocMind Platform
+              </h1>
+              <span className="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                Super-Admin
               </span>
-            </h1>
-            <p className="text-[11px] text-slate-400">
-              {adminEmail ? `Signed in as ${adminEmail} • ` : ''}Live Database Governance — All Companies, Users & Infrastructure
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Platform Fleet
             </p>
+            <nav className="space-y-1">
+              {adminNavItems.map(item => {
+                const active = activeAdminTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setActiveAdminTab(item.id)}
+                    className={`flex w-full items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all text-left ${
+                      active
+                        ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent'
+                    }`}
+                  >
+                    <span>{item.icon}</span>
+                    <span className="flex-1 truncate">{item.label}</span>
+                    {typeof item.badge === 'number' && (
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-300">
+                        {item.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={loadData}
-            disabled={refreshing}
-            className="flex items-center gap-1.5 text-xs text-slate-300 hover:text-white px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 transition-colors disabled:opacity-50"
-          >
-            <span className={refreshing ? 'animate-spin inline-block' : ''}>↻</span>
-            <span>{refreshing ? 'Syncing DB...' : 'Refresh Database'}</span>
-          </button>
-          <button
-            onClick={onBackToApp}
-            className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-colors"
-            title="Switch to DocMind HQ Document Workspace"
-          >
-            <span>HQ Workspace</span>
-            <span>&rarr;</span>
-          </button>
-          {onSignOut && (
+        {/* Sidebar Footer */}
+        <div className="space-y-3 pt-3 border-t border-slate-800/80">
+          <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80 text-xs">
+            <div className="text-[10px] uppercase font-bold text-slate-500">PDF Fleet Counter</div>
+            <div className="mt-1 flex items-baseline justify-between">
+              <span className="text-base font-bold text-white">{adminPdfDocs.length}</span>
+              <span className="text-[10px] text-slate-400">of {documents.length} docs</span>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
             <button
-              onClick={onSignOut}
-              className="text-xs font-semibold text-rose-300 hover:text-white px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/30 border border-rose-500/30 transition-colors"
+              onClick={loadData}
+              disabled={refreshing}
+              className="flex w-full items-center justify-center gap-1.5 text-xs text-slate-300 hover:text-white px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 transition-colors disabled:opacity-50"
             >
-              Sign out
+              <span className={refreshing ? 'animate-spin inline-block' : ''}>↻</span>
+              <span>{refreshing ? 'Syncing DB...' : 'Sync Database'}</span>
             </button>
-          )}
-        </div>
-      </header>
-
-      {/* Error / Action Notification Banners */}
-      {errorBanner && (
-        <div className="bg-rose-500/15 border-b border-rose-500/40 px-6 py-2.5 text-xs text-rose-200 flex items-center justify-between">
-          <span className="flex items-center gap-2 font-medium">
-            <span>⚠️</span> {errorBanner}
-          </span>
-          <button onClick={() => setErrorBanner(null)} className="text-rose-300 hover:text-white">✕</button>
-        </div>
-      )}
-
-      {actionNotice && (
-        <div className="bg-gradient-to-r from-cyan-500/20 via-teal-500/20 to-cyan-500/20 border-b border-cyan-500/40 px-6 py-2.5 text-xs text-cyan-200 flex items-center justify-between">
-          <span className="flex items-center gap-2">
-            <span>✓</span> {actionNotice}
-          </span>
-          <button onClick={() => setActionNotice(null)} className="text-cyan-400 hover:text-white">✕</button>
-        </div>
-      )}
-
-      {/* Navigation Sub-Tabs */}
-      <div className="px-6 border-b border-slate-800/80 bg-slate-900/30">
-        <div className="flex gap-2 py-3 overflow-x-auto">
-          {(
-            [
-              { id: 'workspaces', label: `Companies & Workspaces (${workspaces.length})`, icon: '🏢' },
-              { id: 'users', label: `Registered Users (${users.length})`, icon: '👥' },
-              { id: 'jobs', label: `Worker Queue (${jobs.length})`, icon: '⚙️' },
-              { id: 'overview', label: 'Platform Telemetry', icon: '📊' },
-              { id: 'documents', label: `Document Fleet (${documents.length})`, icon: '📄' },
-              { id: 'audit', label: 'Global Audit Trail', icon: '🛡️' },
-              { id: 'system', label: 'System Config', icon: '🔧' },
-            ] as const
-          ).map(tab => (
             <button
-              key={tab.id}
-              onClick={() => setActiveAdminTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${
-                activeAdminTab === tab.id
-                  ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/40 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60 border border-transparent'
-              }`}
+              onClick={onBackToApp}
+              className="flex w-full items-center justify-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-colors"
             >
-              <span>{tab.icon}</span>
-              <span>{tab.label}</span>
+              <span>HQ Workspace &rarr;</span>
             </button>
-          ))}
+            {onSignOut && (
+              <button
+                onClick={onSignOut}
+                className="flex w-full items-center justify-center text-xs font-semibold text-rose-300 hover:text-white px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/30 border border-rose-500/30 transition-colors"
+              >
+                Sign out
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      </aside>
 
-      {/* Main Content Area */}
-      <main className="flex-1 p-6 max-w-7xl w-full mx-auto space-y-6">
+      {/* Main Content Column */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Top Header Bar */}
+        <header className="h-14 border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-xl px-6 flex items-center justify-between sticky top-0 z-40">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-bold text-white capitalize">{activeAdminTab}</span>
+            <span className="text-xs text-slate-500">&bull;</span>
+            <span className="text-xs text-slate-400">{adminEmail || 'Admin Control'}</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Mobile nav buttons */}
+            <div className="flex lg:hidden overflow-x-auto gap-1">
+              {adminNavItems.slice(0, 4).map(item => (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveAdminTab(item.id)}
+                  className={`px-2 py-1 text-[11px] rounded ${activeAdminTab === item.id ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400'}`}
+                >
+                  {item.icon}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={loadData}
+              disabled={refreshing}
+              className="flex items-center gap-1 text-xs text-slate-400 hover:text-white px-2 py-1 rounded bg-slate-800"
+            >
+              ↻ Refresh
+            </button>
+            {onSignOut && (
+              <button
+                onClick={onSignOut}
+                className="lg:hidden text-xs text-rose-400 px-2 py-1 rounded bg-rose-500/10"
+              >
+                Sign out
+              </button>
+            )}
+          </div>
+        </header>
+
+        {/* Error / Action Notification Banners */}
+        {errorBanner && (
+          <div className="bg-rose-500/15 border-b border-rose-500/40 px-6 py-2.5 text-xs text-rose-200 flex items-center justify-between">
+            <span className="flex items-center gap-2 font-medium">
+              <span>⚠️</span> {errorBanner}
+            </span>
+            <button onClick={() => setErrorBanner(null)} className="text-rose-300 hover:text-white">✕</button>
+          </div>
+        )}
+
+        {actionNotice && (
+          <div className="bg-gradient-to-r from-cyan-500/20 via-teal-500/20 to-cyan-500/20 border-b border-cyan-500/40 px-6 py-2.5 text-xs text-cyan-200 flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <span>✓</span> {actionNotice}
+            </span>
+            <button onClick={() => setActionNotice(null)} className="text-cyan-400 hover:text-white">✕</button>
+          </div>
+        )}
+
+        {/* Scrollable Main Area */}
+        <div className="flex-1 overflow-y-auto scroll-thin">
+          <main className="p-6 max-w-7xl w-full mx-auto space-y-6">
         {/* Global Platform KPI Strip */}
         {overview && (activeAdminTab === 'workspaces' || activeAdminTab === 'users') && (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -820,6 +884,27 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignO
         {/* TAB 4: DOCUMENT & OCR FLEET */}
         {activeAdminTab === 'documents' && (
           <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
+              <div>
+                <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                  <span>Document &amp; OCR Fleet</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-normal">
+                    {documents.length} Total
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Multi-tenant document storage, OCR processing status, and vector embeddings.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1 rounded-xl text-xs font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
+                  {adminPdfDocs.length} PDFs Uploaded
+                </span>
+                <span className="px-3 py-1 rounded-xl text-xs font-bold bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">
+                  {documents.length - adminPdfDocs.length} Other Docs
+                </span>
+              </div>
+            </div>
             <div className="rounded-2xl bg-slate-900/60 border border-slate-800 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs text-slate-300">
@@ -1066,7 +1151,9 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToApp, onSignO
             </div>
           </div>
         )}
-      </main>
+        </main>
+      </div>
     </div>
-  );
+  </div>
+);
 };
