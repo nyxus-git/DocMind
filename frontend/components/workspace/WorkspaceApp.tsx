@@ -9,6 +9,7 @@ import {
   ConversationDTO,
   DocumentDTO,
   KnowledgeSpaceDTO,
+  SavedInsightDTO,
   UsageSummaryDTO,
   WorkspaceDetailDTO,
 } from '../../lib/api';
@@ -19,6 +20,8 @@ import { MobileNav, Sidebar, TopBar } from './Chrome';
 import { CitationDrawer } from './CitationDrawer';
 import { CompanyContextBanner } from './CompanyContextBanner';
 import { GlobalSearchModal } from './GlobalSearchModal';
+import { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
+import { SavedInsightsModal } from './SavedInsightsModal';
 import { UploadModal } from './UploadModal';
 import { TabId, WorkspaceProvider } from './WorkspaceContext';
 import { ErrorBanner } from './parts';
@@ -62,13 +65,21 @@ function Shell({ session: initialSession }: { session: UserSession }) {
   const [chatScope, setChatScope] = useState<string[]>([]);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [notebookOpen, setNotebookOpen] = useState(false);
+  const [insights, setInsights] = useState<SavedInsightDTO[]>([]);
   const [citation, setCitation] = useState<CitationDTO | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setSearchOpen(prev => !prev);
+      } else if (e.key === '?' && !isInput && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        setShortcutsOpen(prev => !prev);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -148,6 +159,29 @@ function Shell({ session: initialSession }: { session: UserSession }) {
       handleApiError(err);
     }
   }, [handleApiError]);
+
+  const refreshInsights = useCallback(async () => {
+    if (!session.workspaceId) return;
+    try {
+      setInsights(await ApiClient.listSavedInsights(session.workspaceId));
+    } catch (err) {
+      handleApiError(err);
+    }
+  }, [handleApiError, session.workspaceId]);
+
+  const handleDeleteInsight = useCallback(
+    async (id: string) => {
+      if (!session.workspaceId) return;
+      try {
+        await ApiClient.deleteSavedInsight(session.workspaceId, id);
+        setInsights(prev => prev.filter(i => i.id !== id));
+        toast('Insight removed from notebook.', 'success');
+      } catch (err) {
+        toast(err instanceof Error ? err.message : 'Failed to delete insight', 'error');
+      }
+    },
+    [session.workspaceId, toast],
+  );
 
   const reloadAll = useCallback(async () => {
     try {
@@ -269,6 +303,7 @@ function Shell({ session: initialSession }: { session: UserSession }) {
     setStarterPrompts([]);
     setUsage(null);
     setChatScope([]);
+    setInsights([]);
     setWorkspaceKey(k => k + 1);
     toast(`Switched to ${ws.name}.`, 'success');
   };
@@ -304,6 +339,11 @@ function Shell({ session: initialSession }: { session: UserSession }) {
       },
       openUpload: () => setUploadOpen(true),
       openCitation: (c: CitationDTO) => setCitation(c),
+      openNotebook: () => {
+        void refreshInsights();
+        setNotebookOpen(true);
+      },
+      openShortcuts: () => setShortcutsOpen(true),
       handleApiError,
       updateWorkspaceTitle: (name: string) => {
         setSession(prev => {
@@ -321,7 +361,7 @@ function Shell({ session: initialSession }: { session: UserSession }) {
     }),
     [
       session, usage, documents, documentsLoaded, conversations, loadError, refreshDocuments, refreshUsage,
-      refreshConversations, reloadAll, spaces, starterPrompts, tab, setTab, chatScope, handleApiError, signOut, role, canUpload, canAsk,
+      refreshConversations, refreshInsights, reloadAll, spaces, starterPrompts, tab, setTab, chatScope, handleApiError, signOut, role, canUpload, canAsk,
       canManageMembers, isOwner,
     ],
   );
@@ -370,6 +410,13 @@ function Shell({ session: initialSession }: { session: UserSession }) {
         spaces={spaces}
       />
       <GlobalSearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <KeyboardShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <SavedInsightsModal
+        open={notebookOpen}
+        onClose={() => setNotebookOpen(false)}
+        insights={insights}
+        onDeleteInsight={handleDeleteInsight}
+      />
       <CitationDrawer
         citation={citation}
         onClose={() => setCitation(null)}

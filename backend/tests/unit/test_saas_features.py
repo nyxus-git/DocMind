@@ -10,7 +10,7 @@ from app.db.session import get_db
 from app.ingestion.parsers.structured import parse_csv, parse_html, parse_json_doc
 from app.ingestion.validator import validate_file_metadata
 from app.main import app
-from app.models.entities import Base, User, Workspace, WorkspaceMember
+from app.models.entities import Base, Conversation, Document, DocumentChunk, KnowledgeSpace, Message, User, Workspace, WorkspaceMember
 from app.models.enums import UserStatus, WorkspaceRole, WorkspaceTier
 from app.repositories.workspace import WorkspaceRepository
 from app.services.auth import AuthService
@@ -219,4 +219,221 @@ async def _run_test_rbac_invites_api_keys_and_admin():
 
 def test_rbac_invites_api_keys_and_admin():
     asyncio.run(_run_test_rbac_invites_api_keys_and_admin())
+
+
+async def _run_test_webhooks_compliance_insights_and_batch_ops():
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async_session = async_sessionmaker(bind=engine, expire_on_commit=False)
+
+    owner = User(
+        id=uuid.uuid4(),
+        email="compliance_owner@corp.com",
+        password_hash="h_owner",
+        status=UserStatus.ACTIVE.value,
+        is_superadmin=False,
+    )
+
+    async with async_session() as s:
+        s.add(owner)
+        await s.flush()
+        ws_repo = WorkspaceRepository(s)
+        ws = await ws_repo.create_workspace("FinTech Labs", "fintech-labs", owner.id, WorkspaceTier.ENTERPRISE.value)
+        ws_id = ws.id
+        space = KnowledgeSpace(
+            id=uuid.uuid4(),
+            workspace_id=ws_id,
+            name="Legal & Compliance",
+            slug="legal-comp",
+            created_by=owner.id,
+        )
+        s.add(space)
+        await s.flush()
+        space_id = space.id
+
+        # Insert a document with sensitive content for compliance scan
+        doc = Document(
+            id=uuid.uuid4(),
+            workspace_id=ws_id,
+            uploaded_by=owner.id,
+            filename="Vendor_NDA_Sensitive.pdf",
+            mime_type="application/pdf",
+            size_bytes=4096,
+            checksum_sha256="0" * 64,
+            object_key="fintech/docs/nda.pdf",
+            status="READY",
+            page_count=2,
+        )
+        s.add(doc)
+        await s.flush()
+        doc_id = doc.id
+
+        chunk1 = DocumentChunk(
+            id=uuid.uuid4(),
+            workspace_id=ws_id,
+            document_id=doc_id,
+            chunk_index=0,
+            content="This agreement is STRICTLY CONFIDENTIAL. Live API access token: sk_live_99887766554433221100aa.",
+            page_start=1,
+            token_count=20,
+        )
+        chunk2 = DocumentChunk(
+            id=uuid.uuid4(),
+            workspace_id=ws_id,
+            document_id=doc_id,
+            chunk_index=1,
+            content="Customer billing contact: john.doe@enterprise-client.com. Social Security: 123-45-6789.",
+            page_start=2,
+            token_count=18,
+        )
+        s.add_all([chunk1, chunk2])
+
+        # Also insert a conversation for export test
+        conv = Conversation(
+            id=uuid.uuid4(),
+            workspace_id=ws_id,
+            created_by=owner.id,
+            title="NDA Risk Review",
+            scope_mode="all",
+        )
+        s.add(conv)
+        await s.flush()
+        conv_id = conv.id
+
+        msg_user = Message(
+            id=uuid.uuid4(),
+            conversation_id=conv_id,
+            role="user",
+            content="What are the confidentiality obligations?",
+        )
+        msg_asst = Message(
+            id=uuid.uuid4(),
+            conversation_id=conv_id,
+            role="assistant",
+            content="The agreement is strictly confidential and restricts disclosure [S1].",
+        )
+        s.add_all([msg_user, msg_asst])
+        await s.commit()
+
+    async def override_get_db():
+        async with async_session() as s:
+            try:
+                yield s
+                await s.commit()
+            except Exception:
+                await s.rollback()
+                raise
+
+    def override_user():
+        return owner
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_user
+
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            headers = {"X-Workspace-ID": str(ws_id)}
+
+            # 1. Compliance Scan on document
+            scan_res = await client.post(f"/api/v1/documents/{doc_id}/compliance-scan", headers=headers)
+            assert scan_res.status_code == 200
+            scan_data = scan_res.json()
+            assert scan_data["risk_score"] > 0
+            assert scan_data["findings_count"] >= 2
+            assert any(f["category"] == "SECRET_CREDENTIAL" for f in scan_data["findings"])
+            assert any(f["category"] == "GOVERNMENT_ID" for f in scan_data["findings"])
+
+            # Workspace Compliance Summary
+            sum_res = await client.get(f"/api/v1/workspaces/{ws_id}/compliance-summary")
+            assert sum_res.status_code == 200
+            sum_data = sum_res.json()
+            assert sum_data["total_documents"] == 1
+            assert sum_data["at_risk_documents"] == 1
+
+            # 2. Webhook Management (Create, List, Test Ping, Delete)
+            hook_res = await client.post(
+                f"/api/v1/workspaces/{ws_id}/webhooks",
+                json={
+                    "url": "https://webhook.site/test-endpoint",
+                    "description": "Slack Notifications",
+                    "events": ["document.ready", "document.failed"],
+                },
+            )
+            assert hook_res.status_code == 201
+            hook_data = hook_res.json()
+            assert hook_data["secret"].startswith("whsec_")
+            hook_id = hook_data["id"]
+
+            list_hooks = await client.get(f"/api/v1/workspaces/{ws_id}/webhooks")
+            assert list_hooks.status_code == 200
+            assert len(list_hooks.json()) == 1
+
+            test_ping = await client.post(f"/api/v1/workspaces/{ws_id}/webhooks/{hook_id}/test")
+            assert test_ping.status_code == 200
+            ping_data = test_ping.json()
+            assert "webhook_id" in ping_data
+
+            del_hook = await client.delete(f"/api/v1/workspaces/{ws_id}/webhooks/{hook_id}")
+            assert del_hook.status_code == 204
+
+            # 3. Saved Insights & Research Notebook
+            ins_res = await client.post(
+                f"/api/v1/workspaces/{ws_id}/insights",
+                json={
+                    "title": "Vendor Non-Compete Period",
+                    "question": "What is the non-compete duration?",
+                    "answer": "24 months following agreement termination [S1].",
+                    "tags": ["legal", "procurement"],
+                },
+            )
+            assert ins_res.status_code == 201
+            ins_data = ins_res.json()
+            ins_id = ins_data["id"]
+
+            list_ins = await client.get(f"/api/v1/workspaces/{ws_id}/insights")
+            assert list_ins.status_code == 200
+            assert len(list_ins.json()) == 1
+            assert list_ins.json()[0]["title"] == "Vendor Non-Compete Period"
+
+            del_ins = await client.delete(f"/api/v1/workspaces/{ws_id}/insights/{ins_id}")
+            assert del_ins.status_code == 204
+
+            # 4. Batch Document Operations
+            assign_res = await client.post(
+                "/api/v1/documents/batch-assign-space",
+                headers=headers,
+                json={"document_ids": [str(doc_id)], "space_id": str(space_id)},
+            )
+            assert assign_res.status_code == 200
+            assert assign_res.json()["updated_count"] == 1
+
+            batch_del_res = await client.post(
+                "/api/v1/documents/batch-delete",
+                headers=headers,
+                json={"document_ids": [str(doc_id)]},
+            )
+            assert batch_del_res.status_code == 200
+            assert batch_del_res.json()["deleted_count"] == 1
+
+            # 5. Conversation Export
+            exp_res = await client.get(f"/api/v1/conversations/{conv_id}/export", headers=headers)
+            assert exp_res.status_code == 200
+            exp_data = exp_res.json()
+            assert "NDA Risk Review" in exp_data["markdown_export"]
+            assert "confidentiality obligations" in exp_data["markdown_export"]
+
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_webhooks_compliance_insights_and_batch_ops():
+    asyncio.run(_run_test_webhooks_compliance_insights_and_batch_ops())
+
 

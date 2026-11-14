@@ -57,6 +57,12 @@ const PATHS = {
     'M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z',
     'M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z',
   ],
+  bookmark: ['M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z'],
+  help: [
+    'M12 2a10 10 0 100 20 10 10 0 000-20z',
+    'M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3',
+    'M12 17h.01',
+  ],
 } as const;
 
 export type IconName = keyof typeof PATHS;

@@ -221,7 +221,7 @@ export function TopBar({
   onSignOut: () => void;
   onOpenSearch?: () => void;
 }) {
-  const { session, canUpload, openUpload, setTab } = useWorkspace();
+  const { session, canUpload, openUpload, setTab, openNotebook, openShortcuts } = useWorkspace();
   const [menu, setMenu] = useState(false);
   const menuRef = useDismiss(menu, () => setMenu(false));
   const initial = (session.fullName || session.email).charAt(0).toUpperCase();
@@ -256,6 +256,28 @@ export function TopBar({
             className="inline-flex size-8 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg sm:hidden"
           >
             <Icon name="search" className="size-4" />
+          </button>
+        )}
+        {openNotebook && (
+          <button
+            type="button"
+            onClick={openNotebook}
+            className="inline-flex size-9 items-center justify-center rounded-lg border border-line bg-bg text-muted hover:bg-surface-2 hover:text-fg transition-colors"
+            title="Research Notebook (Saved Insights)"
+            aria-label="Research Notebook"
+          >
+            <Icon name="bookmark" className="size-4" />
+          </button>
+        )}
+        {openShortcuts && (
+          <button
+            type="button"
+            onClick={openShortcuts}
+            className="hidden sm:inline-flex size-9 items-center justify-center rounded-lg border border-line bg-bg text-muted hover:bg-surface-2 hover:text-fg transition-colors"
+            title="Keyboard shortcuts (?)"
+            aria-label="Keyboard shortcuts"
+          >
+            <Icon name="help" className="size-4" />
           </button>
         )}
         {canUpload && (
@@ -295,6 +317,32 @@ export function TopBar({
               >
                 <Icon name="sliders" className="size-4 text-muted" /> Settings
               </button>
+              {openNotebook && (
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setMenu(false);
+                    openNotebook();
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm hover:bg-surface-2"
+                >
+                  <Icon name="bookmark" className="size-4 text-muted" /> Research Notebook
+                </button>
+              )}
+              {openShortcuts && (
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setMenu(false);
+                    openShortcuts();
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm hover:bg-surface-2"
+                >
+                  <Icon name="help" className="size-4 text-muted" /> Keyboard Shortcuts
+                </button>
+              )}
               {session.isCompany && (
                 <Link
                   role="menuitem"

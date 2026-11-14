@@ -239,6 +239,48 @@ class DocumentService:
             metadata={"filename": doc.filename}
         )
 
+    async def batch_delete_documents(self, workspace_id: uuid.UUID, document_ids: List[uuid.UUID]) -> List[uuid.UUID]:
+        deleted: List[uuid.UUID] = []
+        for did in document_ids:
+            doc = await self.doc_repo.mark_deleting(workspace_id, did)
+            if doc:
+                await self.job_repo.enqueue_job(
+                    workspace_id=workspace_id,
+                    job_type=JobType.DELETE_DOCUMENT.value,
+                    payload={"document_id": str(doc.id)},
+                    idempotency_key=f"delete-{doc.id}"
+                )
+                await self.audit_repo.record_event(
+                    workspace_id=workspace_id,
+                    action="DOCUMENT_DELETED",
+                    target_type="document",
+                    target_id=doc.id,
+                    metadata={"filename": doc.filename, "batch": True}
+                )
+                deleted.append(doc.id)
+        return deleted
+
+    async def batch_assign_space(
+        self,
+        workspace_id: uuid.UUID,
+        document_ids: List[uuid.UUID],
+        space_id: Optional[uuid.UUID]
+    ) -> int:
+        if space_id is not None:
+            space = await self.workspace_repo.get_space(workspace_id, space_id)
+            if not space:
+                raise EntityNotFoundException("KnowledgeSpace", space_id)
+        count = 0
+        for did in document_ids:
+            doc = await self.doc_repo.update_metadata(
+                workspace_id,
+                did,
+                space_id=space_id
+            )
+            if doc:
+                count += 1
+        return count
+
     async def get_download_url(
         self,
         workspace_id: uuid.UUID,

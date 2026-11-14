@@ -198,3 +198,19 @@ class ChunkRepository:
         )
         res = await self.db.execute(stmt)
         return list(res.all())
+
+    async def get_chunks_for_document(
+        self,
+        document_id: uuid.UUID,
+        limit: int = 200
+    ) -> List[DocumentChunk]:
+        stmt = (
+            select(DocumentChunk)
+            .where(DocumentChunk.document_id == document_id)
+            .order_by(DocumentChunk.chunk_index.asc())
+            .limit(limit)
+        )
+        res = await self.db.execute(stmt)
+        return list(res.scalars().all())
+
+

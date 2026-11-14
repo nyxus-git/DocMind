@@ -11,6 +11,7 @@ from app.repositories.workspace import WorkspaceRepository
 from app.schemas.chat import (
     CitationDTO,
     ConversationDTO,
+    ConversationExportResponse,
     CreateConversationRequest,
     MessageDTO,
     MessageFeedbackRequest,
@@ -194,7 +195,24 @@ async def send_message(
         idempotency_key=req.idempotency_key,
         allowed_space_ids=allowed_spaces,
         space_id=req.space_id,
+        focus_mode=req.focus_mode,
     )
+
+
+@router.get("/{conversation_id}/export", response_model=ConversationExportResponse)
+async def export_conversation(
+    conversation_id: uuid.UUID,
+    ctx: WorkspaceContext = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db)
+):
+    conv_repo = ConversationRepository(db)
+    existing = await conv_repo.get_by_id(ctx.workspace.id, conversation_id)
+    if not existing or existing.created_by != ctx.user.id:
+        raise EntityNotFoundException("Conversation", conversation_id)
+
+    chat_service = ChatService(db)
+    return await chat_service.export_conversation(ctx.workspace.id, conversation_id)
+
 
 
 @router.post("/{conversation_id}/messages/{message_id}/feedback", response_model=MessageFeedbackResponse)

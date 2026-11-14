@@ -16,7 +16,12 @@ from app.core.security import verify_storage_signature
 from app.db.session import get_db
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.common import MessageResponse
+from app.schemas.compliance import DocumentComplianceScanResponse
 from app.schemas.document import (
+    BatchAssignSpaceRequest,
+    BatchAssignSpaceResponse,
+    BatchDeleteDocumentsRequest,
+    BatchDeleteDocumentsResponse,
     DocumentContentResponse,
     DocumentDTO,
     DocumentUpdateDTO,
@@ -27,6 +32,7 @@ from app.schemas.document import (
 )
 from app.schemas.intelligence import DocumentSummaryResponse, ExtractionPresetRequest, ExtractionResponse
 from app.services.ai_intelligence import IntelligenceService
+from app.services.compliance import ComplianceScannerService
 from app.services.document import DocumentService
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
@@ -193,6 +199,46 @@ async def extract_document_preset(
         user_id=ctx.user.id,
         allowed_space_ids=allowed_spaces,
     )
+
+
+@router.post("/batch-delete", response_model=BatchDeleteDocumentsResponse)
+async def batch_delete_documents(
+    req: BatchDeleteDocumentsRequest,
+    ctx: WorkspaceContext = Depends(require_document_write_access),
+    db: AsyncSession = Depends(get_db)
+):
+    doc_service = DocumentService(db)
+    deleted_ids = await doc_service.batch_delete_documents(ctx.workspace.id, req.document_ids)
+    return BatchDeleteDocumentsResponse(
+        deleted_count=len(deleted_ids),
+        document_ids=deleted_ids
+    )
+
+
+@router.post("/batch-assign-space", response_model=BatchAssignSpaceResponse)
+async def batch_assign_space(
+    req: BatchAssignSpaceRequest,
+    ctx: WorkspaceContext = Depends(require_document_write_access),
+    db: AsyncSession = Depends(get_db)
+):
+    doc_service = DocumentService(db)
+    count = await doc_service.batch_assign_space(ctx.workspace.id, req.document_ids, req.space_id)
+    return BatchAssignSpaceResponse(
+        updated_count=count,
+        document_ids=req.document_ids
+    )
+
+
+@router.post("/{document_id}/compliance-scan", response_model=DocumentComplianceScanResponse)
+async def scan_document_compliance(
+    document_id: uuid.UUID,
+    ctx: WorkspaceContext = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db)
+):
+    allowed_spaces = await WorkspaceRepository(db).get_accessible_space_ids(ctx.workspace.id, ctx.user.id, ctx.role)
+    scanner = ComplianceScannerService(db)
+    return await scanner.scan_document(ctx.workspace.id, document_id, allowed_space_ids=allowed_spaces)
+
 
 
 # Signed local storage upload/download handler when R2 is not configured

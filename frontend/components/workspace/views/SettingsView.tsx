@@ -9,11 +9,11 @@ import { Icon } from '../../ui/Icon';
 import { Modal } from '../../ui/Modal';
 import { ThemeToggle } from '../../ui/ThemeToggle';
 import { useToast } from '../../ui/Toast';
-import { WorkspaceApiKeysPanel, WorkspaceAuditLogsPanel } from '../GovernancePanels';
+import { WorkspaceApiKeysPanel, WorkspaceAuditLogsPanel, WorkspaceWebhooksPanel } from '../GovernancePanels';
 import { Meter, PageHeader, Panel } from '../parts';
 import { useWorkspace } from '../WorkspaceContext';
 
-type SubTab = 'workspace' | 'plan' | 'team' | 'apikeys' | 'activity' | 'account';
+type SubTab = 'workspace' | 'plan' | 'team' | 'apikeys' | 'webhooks' | 'activity' | 'account';
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -94,8 +94,14 @@ function PlanTab() {
   const toast = useToast();
   const [target, setTarget] = useState<(typeof PLANS)[number] | null>(null);
   const [saving, setSaving] = useState(false);
+  const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
 
   const current = usage?.tier;
+  const isNearQuota =
+    !!usage &&
+    (usage.questions_used / Math.max(1, usage.questions_limit) >= 0.8 ||
+      usage.documents_count / Math.max(1, usage.documents_limit) >= 0.8);
+
   const confirm = async () => {
     if (!target || !session.workspaceId) return;
     setSaving(true);
@@ -113,6 +119,29 @@ function PlanTab() {
 
   return (
     <div className="space-y-6">
+      {isNearQuota && (
+        <div className="flex items-center justify-between rounded-xl border border-warn/40 bg-warn-soft p-4">
+          <div className="flex items-center gap-2.5">
+            <Icon name="alert" className="size-4 shrink-0 text-warn" />
+            <p className="text-xs font-medium text-warn">
+              You are approaching your plan&apos;s usage limit (&ge;80% consumed). Consider upgrading to avoid service pauses.
+            </p>
+          </div>
+          {isOwner && current !== 'ENTERPRISE' && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                const nextPlan = PLANS.find(p => p.id === (current === 'STARTER' ? 'PRO' : 'ENTERPRISE'));
+                if (nextPlan) setTarget(nextPlan);
+              }}
+            >
+              Upgrade Plan
+            </Button>
+          )}
+        </div>
+      )}
+
       {usage && (
         <Panel className="grid gap-6 p-5 sm:grid-cols-2 sm:p-6">
           <Meter label="Documents" used={usage.documents_count} limit={usage.documents_limit} valueText={`${usage.documents_count} of ${usage.documents_limit.toLocaleString('en-US')}`} />
@@ -145,9 +174,38 @@ function PlanTab() {
         </Panel>
       )}
 
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Available Subscription Plans</h2>
+          <p className="text-xs text-muted">Scale capacity with zero downtime or migration friction.</p>
+        </div>
+        <div className="inline-flex items-center rounded-lg border border-line bg-surface-1 p-1 text-xs">
+          <button
+            type="button"
+            onClick={() => setBillingCycle('monthly')}
+            className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
+              billingCycle === 'monthly' ? 'bg-surface-2 text-fg shadow-sm' : 'text-muted hover:text-fg'
+            }`}
+          >
+            Monthly
+          </button>
+          <button
+            type="button"
+            onClick={() => setBillingCycle('annual')}
+            className={`flex items-center gap-1 rounded-md px-2.5 py-1 font-medium transition-colors ${
+              billingCycle === 'annual' ? 'bg-surface-2 text-fg shadow-sm' : 'text-muted hover:text-fg'
+            }`}
+          >
+            <span>Annual</span>
+            <span className="rounded bg-ok-soft px-1 text-[10px] font-semibold text-ok">Save 20%</span>
+          </button>
+        </div>
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-3">
         {PLANS.map(p => {
           const isCurrent = current === p.id;
+          const displayPrice = billingCycle === 'annual' ? Math.round(p.price * 0.8) : p.price;
           return (
             <Panel key={p.id} className={`flex flex-col p-5 ${isCurrent ? 'border-brand ring-1 ring-brand' : ''}`}>
               <div className="flex items-center justify-between">
@@ -155,8 +213,11 @@ function PlanTab() {
                 {isCurrent && <span className="rounded-full bg-brand px-2.5 py-0.5 text-xs font-medium text-brand-fg">Current plan</span>}
               </div>
               <p className="mt-2">
-                <span className="tabular text-3xl font-semibold">${p.price}</span>
+                <span className="tabular text-3xl font-semibold">${displayPrice}</span>
                 <span className="text-sm text-muted"> per month</span>
+                {billingCycle === 'annual' && p.price > 0 && (
+                  <span className="block text-[11px] text-ok">Billed annually (${displayPrice * 12}/yr)</span>
+                )}
               </p>
               <ul className="mt-4 flex-1 space-y-1.5 text-sm text-muted">
                 {LIMIT_ROWS.slice(0, 4).map(r => (
@@ -497,6 +558,18 @@ function ApiKeysTab() {
 }
 
 /* ------------------------------------------------------------------ */
+function WebhooksTab() {
+  const { session, canManageMembers, handleApiError } = useWorkspace();
+  return (
+    <WorkspaceWebhooksPanel
+      workspaceId={session.workspaceId}
+      canManage={canManageMembers}
+      onAuthError={handleApiError}
+    />
+  );
+}
+
+/* ------------------------------------------------------------------ */
 function ActivityTab() {
   const { session, canManageMembers, handleApiError } = useWorkspace();
   return (
@@ -646,6 +719,7 @@ export function SettingsView() {
     { id: 'plan', label: 'Plan and usage', icon: 'layers' },
     { id: 'team', label: 'Team', icon: 'users' },
     { id: 'apikeys', label: 'API Keys', icon: 'key' },
+    { id: 'webhooks', label: 'Webhooks', icon: 'sparkles' },
     { id: 'activity', label: 'Activity', icon: 'history' },
     { id: 'account', label: 'Account', icon: 'user' },
   ];
@@ -675,6 +749,7 @@ export function SettingsView() {
           {tab === 'plan' && <PlanTab />}
           {tab === 'team' && <TeamTab />}
           {tab === 'apikeys' && <ApiKeysTab />}
+          {tab === 'webhooks' && <WebhooksTab />}
           {tab === 'activity' && <ActivityTab />}
           {tab === 'account' && <AccountTab />}
         </div>

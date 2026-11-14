@@ -2,12 +2,13 @@
 
 import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ApiClient, DocumentContentDTO, DocumentDTO, DocumentSummaryResponse, ExtractionResponse } from '../../../lib/api';
+import { ApiClient, DocumentComplianceScanResponse, DocumentContentDTO, DocumentDTO, DocumentSummaryResponse, ExtractionResponse } from '../../../lib/api';
 import { formatBytes, formatDate } from '../../../lib/format';
 import { Button, inputClass, Spinner } from '../../ui/Button';
 import { Icon } from '../../ui/Icon';
 import { Modal } from '../../ui/Modal';
 import { useToast } from '../../ui/Toast';
+import { ComplianceScanModal } from '../ComplianceScanModal';
 import { DocumentReaderModal, openDocumentWithFallback } from '../DocumentReaderModal';
 import { EmptyState, FileTypeIcon, PageHeader, Panel, StatusBadge } from '../parts';
 import { useWorkspace } from '../WorkspaceContext';
@@ -81,25 +82,56 @@ export function LibraryView() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [readerContent, setReaderContent] = useState<DocumentContentDTO | null>(null);
 
+  // Production SaaS Batch Operations & Compliance States
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [batchDeleting, setBatchDeleting] = useState(false);
+  const [showBatchDeleteModal, setShowBatchDeleteModal] = useState(false);
+  const [batchSpaceId, setBatchSpaceId] = useState<string>('');
+  const [showBatchSpaceModal, setShowBatchSpaceModal] = useState(false);
+  const [batchAssigning, setBatchAssigning] = useState(false);
+
+  const [complianceDoc, setComplianceDoc] = useState<DocumentDTO | null>(null);
+  const [complianceScan, setComplianceScan] = useState<DocumentComplianceScanResponse | null>(null);
+  const [complianceLoading, setComplianceLoading] = useState(false);
+
+  const [sortBy, setSortBy] = useState<'date_desc' | 'date_asc' | 'name' | 'size'>('date_desc');
+  const [fileTypeFilter, setFileTypeFilter] = useState<'ALL' | 'PDF' | 'DOCX' | 'TXT'>('ALL');
+
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
     FILTERS.forEach(f => (c[f.id] = documents.filter(d => matchesFilter(d, f.id)).length));
     return c;
   }, [documents]);
 
-  const visible = documents.filter(
-    d =>
-      matchesFilter(d, filter) &&
-      (spaceFilter === 'ALL'
-        ? true
-        : spaceFilter === 'GENERAL'
-          ? !d.space_id
-          : d.space_id === spaceFilter) &&
-      (!query ||
-        d.filename.toLowerCase().includes(query.toLowerCase()) ||
-        (d.space_name || '').toLowerCase().includes(query.toLowerCase()) ||
-        (d.tags || []).some(t => t.toLowerCase().includes(query.toLowerCase()))),
-  );
+  const visible = useMemo(() => {
+    const list = documents.filter(
+      d =>
+        matchesFilter(d, filter) &&
+        (spaceFilter === 'ALL'
+          ? true
+          : spaceFilter === 'GENERAL'
+            ? !d.space_id
+            : d.space_id === spaceFilter) &&
+        (fileTypeFilter === 'ALL'
+          ? true
+          : fileTypeFilter === 'PDF'
+            ? d.filename.toLowerCase().endsWith('.pdf')
+            : fileTypeFilter === 'DOCX'
+              ? d.filename.toLowerCase().endsWith('.docx') || d.filename.toLowerCase().endsWith('.doc')
+              : d.filename.toLowerCase().endsWith('.txt') || d.filename.toLowerCase().endsWith('.md')) &&
+        (!query ||
+          d.filename.toLowerCase().includes(query.toLowerCase()) ||
+          (d.space_name || '').toLowerCase().includes(query.toLowerCase()) ||
+          (d.tags || []).some(t => t.toLowerCase().includes(query.toLowerCase()))),
+    );
+
+    return list.sort((a, b) => {
+      if (sortBy === 'date_asc') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      if (sortBy === 'name') return a.filename.localeCompare(b.filename);
+      if (sortBy === 'size') return b.size_bytes - a.size_bytes;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+  }, [documents, filter, spaceFilter, fileTypeFilter, query, sortBy]);
 
   const confirmDelete = async () => {
     if (!toDelete) return;
@@ -201,6 +233,64 @@ export function LibraryView() {
     }
   };
 
+  const runComplianceScan = async (doc: DocumentDTO) => {
+    setComplianceDoc(doc);
+    setComplianceLoading(true);
+    setComplianceScan(null);
+    try {
+      const res = await ApiClient.scanDocumentCompliance(doc.id);
+      setComplianceScan(res);
+    } catch (err) {
+      if (!handleApiError(err)) toast(err instanceof Error ? err.message : 'Compliance scan failed.', 'error');
+    } finally {
+      setComplianceLoading(false);
+    }
+  };
+
+  const toggleSelectDoc = (id: string) => {
+    setSelectedIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === visible.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(visible.map(d => d.id));
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedIds.length === 0) return;
+    setBatchDeleting(true);
+    try {
+      const res = await ApiClient.batchDeleteDocuments(selectedIds);
+      toast(`Deleted ${res.deleted_count} documents.`, 'success');
+      setSelectedIds([]);
+      setShowBatchDeleteModal(false);
+      await Promise.all([refreshDocuments(), refreshUsage()]);
+    } catch (err) {
+      if (!handleApiError(err)) toast(err instanceof Error ? err.message : 'Batch delete failed.', 'error');
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
+
+  const handleBatchAssignSpace = async () => {
+    if (selectedIds.length === 0) return;
+    setBatchAssigning(true);
+    try {
+      await ApiClient.batchAssignSpace(selectedIds, batchSpaceId || null);
+      toast(`Updated knowledge space for ${selectedIds.length} documents.`, 'success');
+      setSelectedIds([]);
+      setShowBatchSpaceModal(false);
+      await refreshDocuments();
+    } catch (err) {
+      if (!handleApiError(err)) toast(err instanceof Error ? err.message : 'Failed to assign space.', 'error');
+    } finally {
+      setBatchAssigning(false);
+    }
+  };
+
   return (
     <div>
       <PageHeader
@@ -298,22 +388,68 @@ export function LibraryView() {
                 </select>
               )}
             </div>
-            <div role="group" aria-label="Filter by status" className="flex gap-1 overflow-x-auto">
-              {FILTERS.map(f => (
-                <button
-                  key={f.id}
-                  type="button"
-                  onClick={() => setFilter(f.id)}
-                  aria-pressed={filter === f.id}
-                  className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                    filter === f.id ? 'bg-brand text-brand-fg' : 'text-muted hover:bg-surface-2 hover:text-fg'
-                  }`}
-                >
-                  {f.label} <span className="tabular opacity-70">{counts[f.id]}</span>
-                </button>
-              ))}
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                aria-label="Sort documents"
+                value={sortBy}
+                onChange={e => setSortBy(e.target.value as 'date_desc' | 'date_asc' | 'name' | 'size')}
+                className={`${inputClass} sm:w-40 text-xs`}
+              >
+                <option value="date_desc">Newest First</option>
+                <option value="date_asc">Oldest First</option>
+                <option value="name">Name (A-Z)</option>
+                <option value="size">Largest Size</option>
+              </select>
+
+              <div role="group" aria-label="Filter by file type" className="flex rounded-lg border border-line bg-surface-1 p-0.5 text-xs">
+                {(['ALL', 'PDF', 'DOCX', 'TXT'] as const).map(ft => (
+                  <button
+                    key={ft}
+                    type="button"
+                    onClick={() => setFileTypeFilter(ft)}
+                    className={`rounded-md px-2 py-1 font-medium transition-colors ${
+                      fileTypeFilter === ft ? 'bg-surface-2 text-fg shadow-sm' : 'text-muted hover:text-fg'
+                    }`}
+                  >
+                    {ft === 'TXT' ? 'TXT/MD' : ft}
+                  </button>
+                ))}
+              </div>
+
+              <div role="group" aria-label="Filter by status" className="flex gap-1 overflow-x-auto">
+                {FILTERS.map(f => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setFilter(f.id)}
+                    aria-pressed={filter === f.id}
+                    className={`whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                      filter === f.id ? 'bg-brand text-brand-fg' : 'text-muted hover:bg-surface-2 hover:text-fg'
+                    }`}
+                  >
+                    {f.label} <span className="tabular opacity-70">{counts[f.id]}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
+
+          {visible.length > 0 && canUpload && (
+            <div className="mb-2 flex items-center justify-between px-1 text-xs text-muted">
+              <label className="flex cursor-pointer items-center gap-2 select-none">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.length > 0 && selectedIds.length === visible.length}
+                  onChange={toggleSelectAll}
+                  className="rounded border-line"
+                />
+                <span>Select all ({visible.length})</span>
+              </label>
+              {selectedIds.length > 0 && (
+                <span className="font-medium text-fg">{selectedIds.length} selected</span>
+              )}
+            </div>
+          )}
 
           <Panel className="overflow-hidden">
             {visible.length === 0 ? (
@@ -323,6 +459,15 @@ export function LibraryView() {
                 {visible.map(d => (
                   <li key={d.id} className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center">
                     <div className="flex min-w-0 flex-1 items-center gap-3">
+                      {canUpload && (
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${d.filename}`}
+                          checked={selectedIds.includes(d.id)}
+                          onChange={() => toggleSelectDoc(d.id)}
+                          className="size-4 shrink-0 rounded border-line"
+                        />
+                      )}
                       <FileTypeIcon filename={d.filename} />
                       <div className="min-w-0">
                         <p className="truncate text-[15px] font-medium">{d.filename}</p>
@@ -359,6 +504,11 @@ export function LibraryView() {
                         {d.status === 'READY' && canAsk && (
                           <IconButton label={`Ask ${d.filename}`} onClick={() => askDocuments([d.id])}>
                             <Icon name="chat" />
+                          </IconButton>
+                        )}
+                        {d.status === 'READY' && (
+                          <IconButton label={`Scan security & compliance for ${d.filename}`} onClick={() => runComplianceScan(d)}>
+                            <Icon name="shield" className="text-brand" />
                           </IconButton>
                         )}
                         {d.status === 'READY' && (
@@ -628,6 +778,107 @@ export function LibraryView() {
         onClose={() => setReaderContent(null)}
         onAskDocument={canAsk ? docId => askDocuments([docId]) : undefined}
       />
+
+      <ComplianceScanModal
+        open={!!complianceDoc}
+        onClose={() => setComplianceDoc(null)}
+        scan={complianceScan}
+        loading={complianceLoading}
+        filename={complianceDoc?.filename || ''}
+      />
+
+      {/* Floating Bottom Batch Operations Bar */}
+      {selectedIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 z-30 flex -translate-x-1/2 flex-wrap items-center gap-3 rounded-2xl border border-line-strong bg-surface-1 px-5 py-3 shadow-2xl ring-1 ring-fg/10 animate-fade-in">
+          <span className="rounded-full bg-brand px-2.5 py-0.5 text-xs font-semibold text-brand-fg">
+            {selectedIds.length} selected
+          </span>
+          {canAsk && (
+            <Button size="sm" variant="secondary" onClick={() => askDocuments(selectedIds)}>
+              <Icon name="chat" className="size-3.5" />
+              <span>Ask in Chat</span>
+            </Button>
+          )}
+          {canUpload && spaces.length > 0 && (
+            <Button size="sm" variant="secondary" onClick={() => setShowBatchSpaceModal(true)}>
+              <Icon name="folder" className="size-3.5" />
+              <span>Assign Space</span>
+            </Button>
+          )}
+          {canUpload && (
+            <Button size="sm" variant="danger-solid" onClick={() => setShowBatchDeleteModal(true)}>
+              <Icon name="trash" className="size-3.5" />
+              <span>Delete Selected</span>
+            </Button>
+          )}
+          <button
+            type="button"
+            onClick={() => setSelectedIds([])}
+            className="text-xs text-muted hover:text-fg hover:underline"
+          >
+            Deselect
+          </button>
+        </div>
+      )}
+
+      {/* Batch Delete Confirmation Modal */}
+      <Modal
+        open={showBatchDeleteModal}
+        onClose={() => setShowBatchDeleteModal(false)}
+        title={`Permanently delete ${selectedIds.length} documents?`}
+        lockClose={batchDeleting}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setShowBatchDeleteModal(false)} disabled={batchDeleting}>
+              Cancel
+            </Button>
+            <Button variant="danger-solid" onClick={handleBatchDelete} disabled={batchDeleting}>
+              {batchDeleting && <Spinner />} Delete {selectedIds.length} files
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-muted">
+          This will permanently delete the selected {selectedIds.length} documents, all their indexed text chunks,
+          vector embeddings, and citations. This action cannot be undone.
+        </p>
+      </Modal>
+
+      {/* Batch Assign Space Modal */}
+      <Modal
+        open={showBatchSpaceModal}
+        onClose={() => setShowBatchSpaceModal(false)}
+        title={`Assign space for ${selectedIds.length} documents`}
+        lockClose={batchAssigning}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setShowBatchSpaceModal(false)} disabled={batchAssigning}>
+              Cancel
+            </Button>
+            <Button onClick={handleBatchAssignSpace} disabled={batchAssigning}>
+              {batchAssigning && <Spinner />} Save space
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-muted">
+            Choose the target knowledge space for all {selectedIds.length} selected documents:
+          </p>
+          <select
+            value={batchSpaceId}
+            onChange={e => setBatchSpaceId(e.target.value)}
+            className={inputClass}
+          >
+            <option value="">General (All employees)</option>
+            {spaces.map(s => (
+              <option key={s.id} value={s.id}>
+                {s.name} ({s.visibility === 'RESTRICTED' ? 'Restricted' : 'All members'})
+              </option>
+            ))}
+          </select>
+        </div>
+      </Modal>
     </div>
   );
 }

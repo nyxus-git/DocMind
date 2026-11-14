@@ -84,6 +84,8 @@ class Workspace(Base):
     members = relationship("WorkspaceMember", back_populates="workspace", cascade="all, delete-orphan")
     documents = relationship("Document", back_populates="workspace", cascade="all, delete-orphan")
     conversations = relationship("Conversation", back_populates="workspace", cascade="all, delete-orphan")
+    webhooks = relationship("WorkspaceWebhook", back_populates="workspace", cascade="all, delete-orphan")
+    insights = relationship("SavedInsight", back_populates="workspace", cascade="all, delete-orphan")
 
 
 class WorkspaceMember(Base):
@@ -401,3 +403,38 @@ class KnowledgeGapResolution(Base):
     __table_args__ = (
         UniqueConstraint("workspace_id", "message_id", name="uq_gap_resolution_ws_msg"),
     )
+
+
+class WorkspaceWebhook(Base):
+    __tablename__ = "workspace_webhooks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True, nullable=False)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    url: Mapped[str] = mapped_column(String(512), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    secret: Mapped[str] = mapped_column(String(64), nullable=False)
+    events: Mapped[Optional[list]] = mapped_column(JSONB, default=lambda: ["document.ready", "document.failed"], nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_triggered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    workspace = relationship("Workspace", back_populates="webhooks")
+
+
+class SavedInsight(Base):
+    __tablename__ = "saved_insights"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    citations: Mapped[Optional[list]] = mapped_column(JSONB, default=list, nullable=True)
+    tags: Mapped[Optional[list]] = mapped_column(JSONB, default=list, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    workspace = relationship("Workspace", back_populates="insights")
+

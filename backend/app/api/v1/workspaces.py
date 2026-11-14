@@ -38,7 +38,18 @@ from app.schemas.workspace import (
     WorkspaceDetailDTO,
     WorkspaceMemberDTO,
 )
+from app.schemas.compliance import WorkspaceComplianceSummaryResponse
+from app.schemas.insights import CreateInsightRequest, SavedInsightDTO
+from app.schemas.webhook import (
+    CreateWebhookRequest,
+    WebhookCreatedDTO,
+    WebhookDTO,
+    WebhookTestPingResponse,
+)
+from app.services.compliance import ComplianceScannerService
+from app.services.insights import InsightsService
 from app.services.quota import QuotaService
+from app.services.webhook import WebhookService
 
 router = APIRouter(prefix="/workspaces", tags=["Workspaces"])
 
@@ -766,3 +777,182 @@ async def revoke_workspace_api_key(
         target_id=key_id,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------
+# COMPLIANCE SUMMARY
+# ---------------------------------------------------------
+@router.get("/{workspace_id}/compliance-summary", response_model=WorkspaceComplianceSummaryResponse)
+async def get_workspace_compliance_summary(
+    workspace_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    ws_repo = WorkspaceRepository(db)
+    membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
+    if not membership:
+        raise CrossTenantAccessException()
+
+    scanner = ComplianceScannerService(db)
+    return await scanner.get_workspace_summary(workspace_id)
+
+
+# ---------------------------------------------------------
+# WEBHOOKS & AUTOMATION
+# ---------------------------------------------------------
+@router.get("/{workspace_id}/webhooks", response_model=List[WebhookDTO])
+async def list_workspace_webhooks(
+    workspace_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    ws_repo = WorkspaceRepository(db)
+    membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
+    if not membership:
+        raise CrossTenantAccessException()
+
+    service = WebhookService(db)
+    return await service.list_webhooks(workspace_id)
+
+
+@router.post("/{workspace_id}/webhooks", response_model=WebhookCreatedDTO, status_code=status.HTTP_201_CREATED)
+async def create_workspace_webhook(
+    workspace_id: uuid.UUID,
+    req: CreateWebhookRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    ws_repo = WorkspaceRepository(db)
+    membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
+    if not membership or membership.role not in [WorkspaceRole.OWNER.value, WorkspaceRole.ADMIN.value]:
+        raise DocMindException(status_code=403, code="INSUFFICIENT_PERMISSIONS", title="Forbidden", detail="Only workspace Owners and Admins can configure webhooks.")
+
+    service = WebhookService(db)
+    created = await service.create_webhook(
+        workspace_id=workspace_id,
+        created_by=current_user.id,
+        url=req.url,
+        description=req.description,
+        events=req.events,
+    )
+
+    await AuditRepository(db).record_event(
+        workspace_id=workspace_id,
+        actor_user_id=current_user.id,
+        action="WEBHOOK_CREATED",
+        target_type="webhook",
+        target_id=created.id,
+        metadata={"url": created.url, "events": created.events}
+    )
+    return created
+
+
+@router.post("/{workspace_id}/webhooks/{webhook_id}/test", response_model=WebhookTestPingResponse)
+async def test_workspace_webhook(
+    workspace_id: uuid.UUID,
+    webhook_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    ws_repo = WorkspaceRepository(db)
+    membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
+    if not membership or membership.role not in [WorkspaceRole.OWNER.value, WorkspaceRole.ADMIN.value]:
+        raise DocMindException(status_code=403, code="INSUFFICIENT_PERMISSIONS", title="Forbidden", detail="Only workspace Owners and Admins can trigger webhook tests.")
+
+    service = WebhookService(db)
+    return await service.test_ping(workspace_id, webhook_id)
+
+
+@router.delete("/{workspace_id}/webhooks/{webhook_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workspace_webhook(
+    workspace_id: uuid.UUID,
+    webhook_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    ws_repo = WorkspaceRepository(db)
+    membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
+    if not membership or membership.role not in [WorkspaceRole.OWNER.value, WorkspaceRole.ADMIN.value]:
+        raise DocMindException(status_code=403, code="INSUFFICIENT_PERMISSIONS", title="Forbidden", detail="Only workspace Owners and Admins can delete webhooks.")
+
+    service = WebhookService(db)
+    await service.delete_webhook(workspace_id, webhook_id)
+
+    await AuditRepository(db).record_event(
+        workspace_id=workspace_id,
+        actor_user_id=current_user.id,
+        action="WEBHOOK_DELETED",
+        target_type="webhook",
+        target_id=webhook_id,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------
+# SAVED INSIGHTS & RESEARCH NOTEBOOK
+# ---------------------------------------------------------
+@router.get("/{workspace_id}/insights", response_model=List[SavedInsightDTO])
+async def list_workspace_insights(
+    workspace_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    ws_repo = WorkspaceRepository(db)
+    membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
+    if not membership:
+        raise CrossTenantAccessException()
+
+    service = InsightsService(db)
+    return await service.list_insights(workspace_id)
+
+
+@router.post("/{workspace_id}/insights", response_model=SavedInsightDTO, status_code=status.HTTP_201_CREATED)
+async def create_workspace_insight(
+    workspace_id: uuid.UUID,
+    req: CreateInsightRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    ws_repo = WorkspaceRepository(db)
+    membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
+    if not membership:
+        raise CrossTenantAccessException()
+
+    service = InsightsService(db)
+    insight = await service.create_insight(
+        workspace_id=workspace_id,
+        user_id=current_user.id,
+        title=req.title,
+        question=req.question,
+        answer=req.answer,
+        citations=req.citations,
+        tags=req.tags,
+    )
+
+    await AuditRepository(db).record_event(
+        workspace_id=workspace_id,
+        actor_user_id=current_user.id,
+        action="INSIGHT_SAVED",
+        target_type="insight",
+        target_id=insight.id,
+        metadata={"title": insight.title}
+    )
+    return insight
+
+
+@router.delete("/{workspace_id}/insights/{insight_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workspace_insight(
+    workspace_id: uuid.UUID,
+    insight_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    ws_repo = WorkspaceRepository(db)
+    membership = await ws_repo.get_user_membership(workspace_id, current_user.id)
+    if not membership:
+        raise CrossTenantAccessException()
+
+    service = InsightsService(db)
+    await service.delete_insight(workspace_id, insight_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+

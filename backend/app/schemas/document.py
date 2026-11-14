@@ -78,3 +78,23 @@ class DocumentContentResponse(BaseModel):
     page_count: int
     storage_available: bool
     chunks: List[DocumentContentChunkDTO]
+
+
+class BatchDeleteDocumentsRequest(BaseModel):
+    document_ids: List[uuid.UUID] = Field(min_length=1, max_length=100)
+
+
+class BatchDeleteDocumentsResponse(BaseModel):
+    deleted_count: int
+    document_ids: List[uuid.UUID]
+
+
+class BatchAssignSpaceRequest(BaseModel):
+    document_ids: List[uuid.UUID] = Field(min_length=1, max_length=100)
+    space_id: Optional[uuid.UUID] = None
+
+
+class BatchAssignSpaceResponse(BaseModel):
+    updated_count: int
+    document_ids: List[uuid.UUID]
+

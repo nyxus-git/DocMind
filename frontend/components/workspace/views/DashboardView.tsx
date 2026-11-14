@@ -1,6 +1,7 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { ApiClient, WorkspaceComplianceSummaryResponse } from '../../../lib/api';
 import { formatBytes, timeAgo } from '../../../lib/format';
 import { Button } from '../../ui/Button';
 import { Icon } from '../../ui/Icon';
@@ -13,8 +14,42 @@ function greeting(): string {
 }
 
 export function DashboardView() {
-  const { session, usage, documents, documentsLoaded, conversations, setTab, openUpload, askDocuments, canUpload, canAsk, canManageMembers } =
-    useWorkspace();
+  const {
+    session,
+    usage,
+    documents,
+    documentsLoaded,
+    conversations,
+    setTab,
+    openUpload,
+    askDocuments,
+    openNotebook,
+    canUpload,
+    canAsk,
+    canManageMembers,
+  } = useWorkspace();
+
+  const [compliance, setCompliance] = useState<WorkspaceComplianceSummaryResponse | null>(null);
+  const [loadingCompliance, setLoadingCompliance] = useState(false);
+
+  useEffect(() => {
+    if (!session.workspaceId) return;
+    let active = true;
+    setLoadingCompliance(true);
+    ApiClient.getWorkspaceComplianceSummary(session.workspaceId)
+      .then(res => {
+        if (active) setCompliance(res);
+      })
+      .catch(() => {
+        // graceful fallback if not yet scanned
+      })
+      .finally(() => {
+        if (active) setLoadingCompliance(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [session.workspaceId, documents.length]);
 
   const firstName = (session.fullName || '').split(' ')[0] || 'there';
   const ready = documents.filter(d => d.status === 'READY');
@@ -28,14 +63,30 @@ export function DashboardView() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-[1.75rem] font-semibold tracking-[-0.02em]">
-          {greeting()}, {firstName}
-        </h1>
-        <p className="mt-1 text-[15px] text-muted">
-          {session.workspaceName}
-          {usage?.tier_name ? ` • ${usage.tier_name} plan` : ''}
-        </p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-[1.75rem] font-semibold tracking-[-0.02em]">
+            {greeting()}, {firstName}
+          </h1>
+          <p className="mt-1 text-[15px] text-muted">
+            {session.workspaceName}
+            {usage?.tier_name ? ` • ${usage.tier_name} plan` : ''}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {openNotebook && (
+            <Button variant="secondary" size="sm" onClick={openNotebook}>
+              <Icon name="bookmark" />
+              Notebook
+            </Button>
+          )}
+          {canAsk && ready.length > 0 && (
+            <Button size="sm" onClick={() => setTab('chat')}>
+              <Icon name="chat" />
+              Ask Question
+            </Button>
+          )}
+        </div>
       </div>
 
       {documentsLoaded && !allDone && (
@@ -67,6 +118,63 @@ export function DashboardView() {
           </ul>
         </Panel>
       )}
+
+      {/* Compliance & Governance Posture */}
+      <Panel className="p-5 sm:p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <span className="inline-flex size-10 items-center justify-center rounded-xl bg-brand-soft text-brand-ink">
+              <Icon name="shield" className="size-5" />
+            </span>
+            <div>
+              <h2 className="text-base font-semibold">Security & Compliance Posture</h2>
+              <p className="text-xs text-muted">
+                Zero-leakage scanner for PII, payment cards, API keys, and confidentiality markings.
+              </p>
+            </div>
+          </div>
+          <Button variant="secondary" size="sm" onClick={() => setTab('library')}>
+            <Icon name="scan" />
+            Scan Documents in Library
+          </Button>
+        </div>
+
+        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-xl border border-line bg-surface-2/40 p-3">
+            <span className="text-xs text-muted">Total Documents</span>
+            <p className="mt-1 text-xl font-bold">{compliance ? compliance.total_documents : documents.length}</p>
+          </div>
+          <div className="rounded-xl border border-line bg-surface-2/40 p-3">
+            <span className="text-xs text-muted">Clean Documents</span>
+            <p className="mt-1 text-xl font-bold text-ok">
+              {loadingCompliance ? '...' : (compliance?.clean_documents ?? 0)}
+            </p>
+          </div>
+          <div className="rounded-xl border border-line bg-surface-2/40 p-3">
+            <span className="text-xs text-muted">At-Risk Documents</span>
+            <p className="mt-1 text-xl font-bold text-warn">
+              {loadingCompliance ? '...' : (compliance?.at_risk_documents ?? 0)}
+            </p>
+          </div>
+          <div className="rounded-xl border border-line bg-surface-2/40 p-3">
+            <span className="text-xs text-muted">Critical Findings</span>
+            <p className="mt-1 text-xl font-bold text-red-500">
+              {loadingCompliance ? '...' : (compliance?.critical_findings_count ?? 0)}
+            </p>
+          </div>
+        </div>
+
+        {compliance && Object.keys(compliance.category_counts).length > 0 && (
+          <div className="mt-4 flex flex-wrap items-center gap-2 pt-3 border-t border-line text-xs">
+            <span className="text-muted font-medium">Flagged Categories:</span>
+            {Object.entries(compliance.category_counts).map(([cat, count]) => (
+              <span key={cat} className="rounded-md bg-brand-soft px-2 py-0.5 font-medium text-brand-ink">
+                {cat.replace(/_/g, ' ')}: {count}
+              </span>
+            ))}
+          </div>
+        )}
+      </Panel>
 
       {usage && (
         <Panel className="grid gap-6 p-5 sm:grid-cols-3 sm:p-6">

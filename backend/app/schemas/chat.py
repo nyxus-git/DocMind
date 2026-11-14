@@ -55,6 +55,7 @@ class SendMessageRequest(BaseModel):
     document_ids: Optional[List[uuid.UUID]] = None
     space_id: Optional[uuid.UUID] = None
     response_mode: str = "source_only"
+    focus_mode: Optional[str] = "general"
     idempotency_key: Optional[str] = None
 
 
@@ -105,3 +106,11 @@ class SearchResponse(BaseModel):
     query: str
     results: List[SearchResultItemDTO]
     total_found: int
+
+
+class ConversationExportResponse(BaseModel):
+    conversation_id: uuid.UUID
+    title: str
+    markdown_export: str
+    exported_at: datetime
+

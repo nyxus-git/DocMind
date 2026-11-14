@@ -1,5 +1,6 @@
 import re
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Set, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +21,7 @@ from app.repositories.usage import UsageRepository, calculate_llm_cost_usd
 from app.repositories.workspace import WorkspaceRepository
 from app.schemas.chat import (
     CitationDTO,
+    ConversationExportResponse,
     SearchResultItemDTO,
     SendMessageResponse,
     UsageDTO,
@@ -54,6 +56,7 @@ class ChatService:
         idempotency_key: Optional[str] = None,
         allowed_space_ids: Optional[Set[uuid.UUID]] = None,
         space_id: Optional[uuid.UUID] = None,
+        focus_mode: Optional[str] = "general",
     ) -> SendMessageResponse:
         # 1. Check AI kill-switch and dynamic tier question quota (FR-041, FR-044)
         await self.quota_service.check_question_quota(workspace_id, user_id)
@@ -210,6 +213,23 @@ class ChatService:
         )
 
         # Anti-injection system policy & prompt assembly
+        focus_instruction = ""
+        if focus_mode == "compliance":
+            focus_instruction = (
+                "\n7. FOCUS MODE (COMPLIANCE & AUDIT): Focus with extreme rigor on regulatory clauses, legal liabilities, "
+                "indemnities, audit requirements, and risk disclosures. Provide exact page numbers and verbatim excerpts."
+            )
+        elif focus_mode == "executive":
+            focus_instruction = (
+                "\n7. FOCUS MODE (EXECUTIVE BRIEF): Provide a high-impact Executive Summary first, followed by concise "
+                "bullet points with key metrics, decisions, and strategic takeaways."
+            )
+        elif focus_mode == "technical":
+            focus_instruction = (
+                "\n7. FOCUS MODE (TECHNICAL DEEP-DIVE): Focus on technical specifications, architecture, system parameters, "
+                "algorithms, SLAs, and throughput limits."
+            )
+
         system_policy = (
             "You are DocMind, an enterprise document intelligence and research assistant. "
             "You must answer user questions accurately, thoroughly, and strictly using ONLY the verified evidence passages provided inside <evidence> tags.\n"
@@ -219,7 +239,7 @@ class ChatService:
             "3. If the user asks how many questions, sections, or items are in the document, thoroughly examine the evidence to provide the exact count, breakdown, or list (e.g., 'The document contains 31 interview questions across 3 sections').\n"
             "4. Format your answer with clear markdown: bold section titles, clean bullet points, and inline source citation badges.\n"
             "5. If the evidence does not contain enough information to answer the question, set 'insufficient_evidence': true and state what could not be found.\n"
-            "6. NEVER invent or hallucinate citations or source labels not listed in the evidence bundle."
+            f"6. NEVER invent or hallucinate citations or source labels not listed in the evidence bundle.{focus_instruction}"
         )
 
         user_prompt = (
@@ -377,3 +397,47 @@ class ChatService:
                 score=round(score, 4)
             ))
         return results
+
+    async def export_conversation(
+        self,
+        workspace_id: uuid.UUID,
+        conversation_id: uuid.UUID
+    ) -> ConversationExportResponse:
+        conv = await self.conv_repo.get_by_id(workspace_id, conversation_id)
+        if not conv:
+            raise EntityNotFoundException("Conversation", conversation_id)
+
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        lines = [
+            f"# {conv.title}",
+            f"> Exported from DocMind on {now_str}",
+            f"> Workspace ID: `{workspace_id}` | Conversation ID: `{conv.id}`",
+            "",
+            "---",
+            "",
+        ]
+
+        for msg in (conv.messages or []):
+            role_header = "🧑‍💻 User" if msg.role == "user" else "🤖 DocMind Research Assistant"
+            created_str = msg.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            lines.append(f"### {role_header} ({created_str})")
+            lines.append("")
+            lines.append(msg.content)
+            lines.append("")
+
+            if msg.citations:
+                lines.append("#### 📑 Grounded Source Citations")
+                for c in msg.citations:
+                    page_str = f"Page {c.page_start}" if c.page_start else "General"
+                    lines.append(f"- **[{c.source_label}]** `{c.filename}` ({page_str}): \"{c.excerpt}\"")
+                lines.append("")
+            lines.append("---")
+            lines.append("")
+
+        return ConversationExportResponse(
+            conversation_id=conv.id,
+            title=conv.title,
+            markdown_export="\n".join(lines),
+            exported_at=datetime.now(timezone.utc)
+        )
+

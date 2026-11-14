@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ApiClient, ApiKeyDTO, AuditEventDTO, TierSpecDTO, UsageSummaryDTO } from '../../lib/api';
+import { ApiClient, ApiKeyDTO, AuditEventDTO, TierSpecDTO, UsageSummaryDTO, WebhookDTO, WebhookTestPingResponse } from '../../lib/api';
 import { formatBytes, formatDate, formatDateTime } from '../../lib/format';
 import { Button, inputClass, Spinner } from '../ui/Button';
 import { Icon } from '../ui/Icon';
@@ -360,6 +360,275 @@ export function WorkspaceApiKeysPanel({
   );
 }
 
+export function WorkspaceWebhooksPanel({
+  workspaceId,
+  canManage,
+  onAuthError,
+}: {
+  workspaceId?: string;
+  canManage: boolean;
+  onAuthError?: (err: unknown) => boolean;
+}) {
+  const toast = useToast();
+  const [webhooks, setWebhooks] = useState<WebhookDTO[] | null>(null);
+  const [url, setUrl] = useState('');
+  const [description, setDescription] = useState('');
+  const [events, setEvents] = useState<string[]>(['document.ready', 'document.failed']);
+  const [creating, setCreating] = useState(false);
+  const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [pingResult, setPingResult] = useState<{ id: string; success: boolean; text: string } | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const reloadWebhooks = useCallback(async () => {
+    if (!workspaceId || !canManage) return;
+    try {
+      setWebhooks(await ApiClient.listWebhooks(workspaceId));
+    } catch (err) {
+      if (!onAuthError?.(err)) toast(err instanceof Error ? err.message : 'Failed to load webhooks.', 'error');
+      setWebhooks([]);
+    }
+  }, [workspaceId, canManage, onAuthError, toast]);
+
+  useEffect(() => {
+    reloadWebhooks();
+  }, [reloadWebhooks]);
+
+  if (!canManage) {
+    return (
+      <Panel className="p-6 text-sm text-muted">
+        Webhooks can only be managed by workspace Owners and Admins.
+      </Panel>
+    );
+  }
+  if (!workspaceId) {
+    return <Panel className="p-6 text-sm text-muted">Workspace loading...</Panel>;
+  }
+
+  const toggleEvent = (ev: string) => {
+    setEvents(prev => (prev.includes(ev) ? prev.filter(x => x !== ev) : [...prev, ev]));
+  };
+
+  const createHook = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!url.trim()) return;
+    setCreating(true);
+    try {
+      const created = await ApiClient.createWebhook(workspaceId, {
+        url: url.trim(),
+        description: description.trim() || undefined,
+        events: events.length > 0 ? events : ['document.ready'],
+      });
+      setRevealedSecret(created.secret);
+      setUrl('');
+      setDescription('');
+      toast('Webhook endpoint registered.', 'success');
+      await reloadWebhooks();
+    } catch (err) {
+      if (!onAuthError?.(err)) toast(err instanceof Error ? err.message : 'Failed to create webhook.', 'error');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const testPing = async (hook: WebhookDTO) => {
+    setTestingId(hook.id);
+    try {
+      const res = await ApiClient.testWebhook(workspaceId, hook.id);
+      setPingResult({
+        id: hook.id,
+        success: res.success,
+        text: `${res.success ? '200 OK' : `Status ${res.status_code}`} (${res.latency_ms}ms): ${res.response_preview}`,
+      });
+      toast(res.success ? 'Ping delivered successfully.' : 'Ping failed or returned non-2xx status.', res.success ? 'success' : 'error');
+      await reloadWebhooks();
+    } catch (err) {
+      if (!onAuthError?.(err)) toast(err instanceof Error ? err.message : 'Ping delivery failed.', 'error');
+    } finally {
+      setTestingId(null);
+    }
+  };
+
+  const deleteHook = async (hook: WebhookDTO) => {
+    setDeletingId(hook.id);
+    try {
+      await ApiClient.deleteWebhook(workspaceId, hook.id);
+      toast('Webhook deleted.', 'success');
+      await reloadWebhooks();
+    } catch (err) {
+      if (!onAuthError?.(err)) toast(err instanceof Error ? err.message : 'Failed to delete webhook.', 'error');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <Panel className="p-5 sm:p-6">
+        <div className="flex flex-col gap-1 border-b border-line pb-4">
+          <h2 className="text-base font-semibold">Webhooks &amp; Automated Pipeline Dispatch</h2>
+          <p className="text-sm text-muted">
+            Deliver signed HMAC-SHA256 event payloads to external systems (Slack, Zapier, or internal microservices)
+            when documents are indexed or fail.
+          </p>
+        </div>
+
+        <form onSubmit={createHook} className="mt-4 space-y-3">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              type="url"
+              required
+              value={url}
+              onChange={e => setUrl(e.target.value)}
+              placeholder="https://api.yourcompany.com/webhooks/docmind"
+              className={`${inputClass} sm:flex-1`}
+            />
+            <input
+              type="text"
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="Description (e.g. Slack Ingest Alerts)"
+              className={`${inputClass} sm:w-64`}
+            />
+            <Button type="submit" disabled={creating || !url.trim()}>
+              {creating ? <Spinner /> : <Icon name="sparkles" className="size-3.5" />}
+              <span>Add Endpoint</span>
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4 text-xs text-muted">
+            <span className="font-semibold text-fg">Trigger Events:</span>
+            {[
+              { id: 'document.ready', label: 'Document Ready' },
+              { id: 'document.failed', label: 'Ingestion Failed' },
+              { id: 'knowledge_gap.created', label: 'Knowledge Gap' },
+              { id: 'quota.warning', label: 'Quota Alert' },
+            ].map(ev => (
+              <label key={ev.id} className="flex cursor-pointer items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={events.includes(ev.id)}
+                  onChange={() => toggleEvent(ev.id)}
+                  className="rounded border-line"
+                />
+                <span>{ev.label}</span>
+              </label>
+            ))}
+          </div>
+        </form>
+
+        {revealedSecret && (
+          <div className="mt-4 space-y-2 rounded-xl border border-ok/40 bg-ok-soft p-4">
+            <p className="text-xs font-semibold text-ok">
+              Webhook signing secret generated. Use this to verify incoming requests via the{' '}
+              <code className="rounded bg-bg px-1 font-mono text-[11px] text-fg">X-DocMind-Signature</code> header.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <code className="min-w-0 flex-1 break-all rounded-lg border border-line bg-bg px-3 py-2 font-mono text-xs text-fg">
+                {revealedSecret}
+              </code>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(revealedSecret);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+              >
+                <Icon name={copied ? 'check' : 'copy'} className="size-3.5" />
+                {copied ? 'Copied' : 'Copy'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Panel>
+
+      <Panel className="scroll-thin overflow-x-auto">
+        <table className="w-full min-w-[34rem] border-collapse text-left text-sm">
+          <thead>
+            <tr className="border-b border-line bg-surface-2/60">
+              <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-faint">Endpoint URL</th>
+              <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-faint">Events</th>
+              <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-faint">Status</th>
+              <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider text-faint">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {webhooks === null ? (
+              <tr>
+                <td colSpan={4} className="px-5 py-8 text-center">
+                  <Spinner className="size-4" />
+                </td>
+              </tr>
+            ) : webhooks.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="px-5 py-8 text-center text-muted">
+                  No webhooks configured yet.
+                </td>
+              </tr>
+            ) : (
+              webhooks.map(w => (
+                <tr key={w.id} className="border-b border-line last:border-b-0">
+                  <td className="px-5 py-3.5 font-medium">
+                    <p className="truncate font-mono text-xs text-fg">{w.url}</p>
+                    {w.description && <p className="text-xs text-muted">{w.description}</p>}
+                    {pingResult && pingResult.id === w.id && (
+                      <p
+                        className={`mt-1 font-mono text-[11px] ${
+                          pingResult.success ? 'text-ok' : 'text-danger'
+                        }`}
+                      >
+                        Ping: {pingResult.text}
+                      </p>
+                    )}
+                  </td>
+                  <td className="px-5 py-3.5 text-xs">
+                    <div className="flex flex-wrap gap-1">
+                      {w.events.map(ev => (
+                        <span key={ev} className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-muted">
+                          {ev}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-5 py-3.5 text-xs text-muted">
+                    {w.failure_count > 0 ? (
+                      <span className="text-warn">{w.failure_count} delivery failures</span>
+                    ) : (
+                      <span className="text-ok">Healthy</span>
+                    )}
+                  </td>
+                  <td className="px-5 py-3.5 text-right space-x-3">
+                    <button
+                      type="button"
+                      disabled={testingId === w.id}
+                      onClick={() => void testPing(w)}
+                      className="text-xs font-semibold text-brand hover:underline disabled:opacity-50"
+                    >
+                      {testingId === w.id ? 'Testing...' : 'Test Ping'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={deletingId === w.id}
+                      onClick={() => void deleteHook(w)}
+                      className="text-xs font-semibold text-danger hover:underline disabled:opacity-50"
+                    >
+                      {deletingId === w.id ? 'Deleting...' : 'Delete'}
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </Panel>
+    </div>
+  );
+}
+
+
 export function WorkspaceAuditLogsPanel({
   workspaceId,
   workspaceSlug,
@@ -517,3 +786,5 @@ export function WorkspaceAuditLogsPanel({
     </div>
   );
 }
+
+

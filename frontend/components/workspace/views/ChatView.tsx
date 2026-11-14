@@ -48,7 +48,7 @@ function SourceList({ citations, onOpen }: { citations: CitationDTO[]; onOpen: (
 }
 
 export function ChatView() {
-  const { documents, conversations, starterPrompts, refreshConversations, refreshUsage, chatScope, setChatScope, openCitation, canAsk, usage, handleApiError } =
+  const { session, documents, conversations, starterPrompts, refreshConversations, refreshUsage, chatScope, setChatScope, openCitation, canAsk, usage, handleApiError } =
     useWorkspace();
   const toast = useToast();
 
@@ -57,6 +57,9 @@ export function ChatView() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [loadingConv, setLoadingConv] = useState(false);
+  const [focusMode, setFocusMode] = useState<'general' | 'compliance' | 'executive' | 'technical'>('general');
+  const [savingInsightId, setSavingInsightId] = useState<string | null>(null);
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const idCounter = useRef(0);
@@ -144,7 +147,7 @@ export function ChatView() {
         id = conv.id;
         setConvId(id);
       }
-      const res = await ApiClient.sendMessage(id, question, chatScope.length ? chatScope : undefined);
+      const res = await ApiClient.sendMessage(id, question, chatScope.length ? chatScope : undefined, undefined, focusMode);
       setMessages(prev => [
         ...prev,
         {
@@ -176,14 +179,61 @@ export function ChatView() {
     }
   };
 
-  const exportMarkdown = () => {
-    const md = messages.map(m => `### ${m.role === 'user' ? 'You' : 'DocMind'}\n\n${m.content}\n`).join('\n');
+  const exportMarkdown = async () => {
+    let md = '';
+    if (convId && ApiClient.isUUID(convId)) {
+      try {
+        const exported = await ApiClient.exportConversation(convId);
+        md = exported.markdown_export;
+      } catch {
+        md = messages.map(m => `### ${m.role === 'user' ? 'You' : 'DocMind'}\n\n${m.content}\n`).join('\n');
+      }
+    } else {
+      md = messages.map(m => `### ${m.role === 'user' ? 'You' : 'DocMind'}\n\n${m.content}\n`).join('\n');
+    }
     const url = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'docmind-conversation.md';
+    a.download = `docmind-research-report-${new Date().toISOString().slice(0, 10)}.md`;
     a.click();
     URL.revokeObjectURL(url);
+    toast('Conversation exported as Markdown report.', 'success');
+  };
+
+  const saveToNotebook = async (msg: ChatMessage) => {
+    if (!session.workspaceId) return;
+    const userMsg = messages.slice(0, messages.findIndex(x => x.id === msg.id)).reverse().find(x => x.role === 'user');
+    const questionText = userMsg ? userMsg.content : 'Document Research Finding';
+    setSavingInsightId(msg.id);
+    try {
+      await ApiClient.createSavedInsight(session.workspaceId, {
+        title: questionText.slice(0, 75),
+        question: questionText,
+        answer: msg.content,
+        citations: msg.citations,
+        tags: [focusMode],
+      });
+      toast('Saved to Research Notebook.', 'success');
+    } catch (err) {
+      if (!handleApiError(err)) toast('Could not save insight.', 'error');
+    } finally {
+      setSavingInsightId(null);
+    }
+  };
+
+  const copyFormattedMessage = async (msg: ChatMessage) => {
+    let text = msg.content;
+    if (msg.citations && msg.citations.length > 0) {
+      text += '\n\n**Sources:**\n' + msg.citations.map(c => `- [${c.source_label}] ${c.filename} (p. ${c.page_start || 1})`).join('\n');
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedMsgId(msg.id);
+      setTimeout(() => setCopiedMsgId(null), 2000);
+      toast('Copied message with source citations.', 'success');
+    } catch {
+      toast('Copy failed.', 'error');
+    }
   };
 
   const toggleScope = (id: string) => setChatScope(chatScope.includes(id) ? chatScope.filter(x => x !== id) : [...chatScope, id]);
@@ -244,7 +294,18 @@ export function ChatView() {
               </button>
             ))}
           </div>
-          <div className="flex shrink-0 items-center">
+          <div className="flex shrink-0 items-center gap-2">
+            <select
+              value={focusMode}
+              onChange={e => setFocusMode(e.target.value as 'general' | 'compliance' | 'executive' | 'technical')}
+              className="h-7 rounded-md border border-line bg-surface-2 px-2 text-xs font-medium text-fg focus:outline-none"
+              aria-label="Research Focus Mode"
+            >
+              <option value="general">💬 General</option>
+              <option value="compliance">🛡️ Compliance</option>
+              <option value="executive">⚡ Executive</option>
+              <option value="technical">🔍 Technical</option>
+            </select>
             <button
               type="button"
               onClick={newChat}
@@ -259,7 +320,7 @@ export function ChatView() {
                 type="button"
                 onClick={exportMarkdown}
                 aria-label="Export conversation as Markdown"
-                title="Export as Markdown"
+                title="Export as Markdown Report"
                 className="inline-flex size-8 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg"
               >
                 <Icon name="download" />
@@ -329,7 +390,7 @@ export function ChatView() {
                   <RichText content={m.content} citations={m.citations} onCite={openCitation} />
                   <SourceList citations={m.citations} onOpen={openCitation} />
                   {convId && ApiClient.isUUID(m.id) && canAsk && (
-                    <div className="mt-3 flex items-center gap-1.5">
+                    <div className="mt-3 flex flex-wrap items-center gap-1.5">
                       <button
                         type="button"
                         onClick={() => void giveFeedback(m.id, 1)}
@@ -352,6 +413,27 @@ export function ChatView() {
                       >
                         <Icon name="thumbDown" className="size-3.5" /> Needs info
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => void copyFormattedMessage(m)}
+                        title="Copy answer with citations"
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-faint transition-colors hover:bg-surface-2 hover:text-fg"
+                      >
+                        <Icon name={copiedMsgId === m.id ? 'check' : 'copy'} className="size-3.5" />
+                        {copiedMsgId === m.id ? 'Copied' : 'Copy'}
+                      </button>
+                      {session.workspaceId && (
+                        <button
+                          type="button"
+                          disabled={savingInsightId === m.id}
+                          onClick={() => void saveToNotebook(m)}
+                          title="Save to Research Notebook"
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-faint transition-colors hover:bg-surface-2 hover:text-fg disabled:opacity-50"
+                        >
+                          <Icon name="sparkles" className="size-3.5" />
+                          {savingInsightId === m.id ? 'Saving...' : 'Save to Notebook'}
+                        </button>
+                      )}
                     </div>
                   )}
                   {m.followups && m.followups.length > 0 && m.id === messages[messages.length - 1]?.id && canAsk && (
@@ -389,13 +471,29 @@ export function ChatView() {
           ) : limitReached ? (
             <p className="py-2 text-center text-sm text-warn">You have used all {usage?.questions_limit.toLocaleString('en-US')} questions for this month. Upgrade in Settings or wait for the reset.</p>
           ) : (
-            <form
-              onSubmit={e => {
-                e.preventDefault();
-                void send();
-              }}
-              className="mx-auto flex max-w-3xl items-end gap-2"
-            >
+            <div className="mx-auto max-w-3xl space-y-2">
+              {chatScope.length > 0 && (
+                <div className="flex items-center justify-between rounded-lg bg-surface-2 px-3 py-1.5 text-xs">
+                  <span className="flex items-center gap-1.5 text-muted">
+                    <span className="font-semibold text-fg">Scoped search:</span>
+                    <span>{chatScope.length} {chatScope.length === 1 ? 'document' : 'documents'} selected</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setChatScope([])}
+                    className="font-medium text-brand hover:underline"
+                  >
+                    Clear scope (search all)
+                  </button>
+                </div>
+              )}
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  void send();
+                }}
+                className="flex items-end gap-2"
+              >
               <label htmlFor="chat-input" className="sr-only">
                 Ask a question about your documents
               </label>
@@ -419,6 +517,7 @@ export function ChatView() {
                 {sending ? <Spinner /> : <Icon name="send" className="size-[18px]" />}
               </Button>
             </form>
+          </div>
           )}
         </div>
       </section>

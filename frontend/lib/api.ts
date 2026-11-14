@@ -454,6 +454,103 @@ export interface InviteMemberResponse {
   message: string;
 }
 
+export interface ComplianceFindingItem {
+  category: string;
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  label: string;
+  redacted_snippet: string;
+  page?: number | null;
+  count: number;
+}
+
+export interface DocumentComplianceScanResponse {
+  document_id: string;
+  filename: string;
+  risk_score: number;
+  risk_level: 'CLEAN' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  scanned_chunks: number;
+  findings_count: number;
+  findings: ComplianceFindingItem[];
+  recommendations: string[];
+}
+
+export interface WorkspaceComplianceSummaryResponse {
+  workspace_id: string;
+  total_documents: number;
+  clean_documents: number;
+  at_risk_documents: number;
+  critical_findings_count: number;
+  category_counts: Record<string, number>;
+}
+
+export interface WebhookDTO {
+  id: string;
+  workspace_id: string;
+  url: string;
+  description?: string | null;
+  events: string[];
+  is_active: boolean;
+  last_triggered_at?: string | null;
+  failure_count: number;
+  created_at: string;
+}
+
+export interface WebhookCreatedDTO extends WebhookDTO {
+  secret: string;
+}
+
+export interface WebhookTestPingResponse {
+  webhook_id: string;
+  success: boolean;
+  status_code: number;
+  response_preview: string;
+  latency_ms: number;
+}
+
+export interface CreateWebhookRequest {
+  url: string;
+  description?: string;
+  events?: string[];
+}
+
+export interface SavedInsightDTO {
+  id: string;
+  workspace_id: string;
+  user_id: string;
+  title: string;
+  question: string;
+  answer: string;
+  citations: CitationDTO[];
+  tags: string[];
+  created_at: string;
+}
+
+export interface CreateInsightRequest {
+  title: string;
+  question: string;
+  answer: string;
+  citations?: CitationDTO[];
+  tags?: string[];
+}
+
+export interface BatchDeleteDocumentsResponse {
+  deleted_count: number;
+  document_ids: string[];
+}
+
+export interface BatchAssignSpaceResponse {
+  updated_count: number;
+  document_ids: string[];
+}
+
+export interface ConversationExportResponse {
+  conversation_id: string;
+  title: string;
+  markdown_export: string;
+  exported_at: string;
+}
+
+
 /**
  * Normalizes an API base URL ensuring no trailing slashes and appending /api/v1 if omitted.
  */
@@ -955,7 +1052,13 @@ export class ApiClient {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
   }
 
-  static async sendMessage(conversation_id: string, content: string, document_ids?: string[], space_id?: string) {
+  static async sendMessage(
+    conversation_id: string,
+    content: string,
+    document_ids?: string[],
+    space_id?: string,
+    focus_mode: string = 'general',
+  ) {
     let targetConvId = conversation_id;
     if (!this.isUUID(targetConvId)) {
       const conv = await this.createConversation('DocMind Research Chat');
@@ -972,7 +1075,7 @@ export class ApiClient {
       created_at: string;
     }>(`/conversations/${targetConvId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ content, document_ids, ...(space_id ? { space_id } : {}) }),
+      body: JSON.stringify({ content, document_ids, ...(space_id ? { space_id } : {}), focus_mode }),
     });
   }
 
@@ -1305,5 +1408,76 @@ export class ApiClient {
       method: 'POST',
       body: JSON.stringify({ resolved, resolution_note: resolutionNote || undefined }),
     });
+  }
+
+  // -------------------------------------------------------------
+  // Production SaaS Enterprise Features: Compliance, Webhooks, Insights, Batch Ops
+  // -------------------------------------------------------------
+  static async scanDocumentCompliance(documentId: string): Promise<DocumentComplianceScanResponse> {
+    return this.request<DocumentComplianceScanResponse>(`/documents/${documentId}/compliance-scan`, {
+      method: 'POST',
+    });
+  }
+
+  static async getWorkspaceComplianceSummary(workspaceId: string): Promise<WorkspaceComplianceSummaryResponse> {
+    return this.request<WorkspaceComplianceSummaryResponse>(`/workspaces/${workspaceId}/compliance-summary`);
+  }
+
+  static async listWebhooks(workspaceId: string): Promise<WebhookDTO[]> {
+    return this.request<WebhookDTO[]>(`/workspaces/${workspaceId}/webhooks`);
+  }
+
+  static async createWebhook(workspaceId: string, payload: CreateWebhookRequest): Promise<WebhookCreatedDTO> {
+    return this.request<WebhookCreatedDTO>(`/workspaces/${workspaceId}/webhooks`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  static async testWebhook(workspaceId: string, webhookId: string): Promise<WebhookTestPingResponse> {
+    return this.request<WebhookTestPingResponse>(`/workspaces/${workspaceId}/webhooks/${webhookId}/test`, {
+      method: 'POST',
+    });
+  }
+
+  static async deleteWebhook(workspaceId: string, webhookId: string): Promise<void> {
+    return this.request<void>(`/workspaces/${workspaceId}/webhooks/${webhookId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  static async listSavedInsights(workspaceId: string): Promise<SavedInsightDTO[]> {
+    return this.request<SavedInsightDTO[]>(`/workspaces/${workspaceId}/insights`);
+  }
+
+  static async createSavedInsight(workspaceId: string, payload: CreateInsightRequest): Promise<SavedInsightDTO> {
+    return this.request<SavedInsightDTO>(`/workspaces/${workspaceId}/insights`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  static async deleteSavedInsight(workspaceId: string, insightId: string): Promise<void> {
+    return this.request<void>(`/workspaces/${workspaceId}/insights/${insightId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  static async batchDeleteDocuments(documentIds: string[]): Promise<BatchDeleteDocumentsResponse> {
+    return this.request<BatchDeleteDocumentsResponse>('/documents/batch-delete', {
+      method: 'POST',
+      body: JSON.stringify({ document_ids: documentIds }),
+    });
+  }
+
+  static async batchAssignSpace(documentIds: string[], spaceId?: string | null): Promise<BatchAssignSpaceResponse> {
+    return this.request<BatchAssignSpaceResponse>('/documents/batch-assign-space', {
+      method: 'POST',
+      body: JSON.stringify({ document_ids: documentIds, space_id: spaceId || undefined }),
+    });
+  }
+
+  static async exportConversation(conversationId: string): Promise<ConversationExportResponse> {
+    return this.request<ConversationExportResponse>(`/conversations/${conversationId}/export`);
   }
 }

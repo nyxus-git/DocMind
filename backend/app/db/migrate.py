@@ -31,6 +31,32 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN NOT NULL DEFAULT FALSE;",
     "CREATE INDEX IF NOT EXISTS ix_workspaces_tier ON workspaces (tier);",
     "UPDATE workspaces SET workspace_type = 'COMPANY' WHERE workspace_type = 'PERSONAL' AND name != 'Personal Workspace' AND slug NOT LIKE 'ws-%';",
+    """CREATE TABLE IF NOT EXISTS workspace_webhooks (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        url VARCHAR(512) NOT NULL,
+        description VARCHAR(255),
+        secret VARCHAR(64) NOT NULL,
+        events JSONB DEFAULT '["document.ready","document.failed"]'::jsonb,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        last_triggered_at TIMESTAMP WITH TIME ZONE,
+        failure_count INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );""",
+    "CREATE INDEX IF NOT EXISTS ix_workspace_webhooks_ws_id ON workspace_webhooks(workspace_id);",
+    """CREATE TABLE IF NOT EXISTS saved_insights (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title VARCHAR(255) NOT NULL,
+        question TEXT NOT NULL,
+        answer TEXT NOT NULL,
+        citations JSONB DEFAULT '[]'::jsonb,
+        tags JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );""",
+    "CREATE INDEX IF NOT EXISTS ix_saved_insights_ws_id ON saved_insights(workspace_id);",
 ]
 
 
