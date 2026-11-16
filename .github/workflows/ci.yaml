@@ -1,4 +1,4 @@
-name: DocMind CI/CD Pipeline
+name: DocMind Production CI/CD Pipeline
 
 on:
   push:
@@ -7,8 +7,9 @@ on:
     branches: [main]
 
 jobs:
+  # ─── 1. BACKEND TYPE CHECK & TESTS ──────────────────────────────────────────
   backend-checks:
-    name: Backend Tests & Lint
+    name: Backend Pyright & Pytest
     runs-on: ubuntu-latest
 
     services:
@@ -34,17 +35,28 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Set up Node.js for Pyright
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
       - name: Install System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y tesseract-ocr libpq-dev
 
-      - name: Install Python Dependencies
+      - name: Install Python Dependencies & Pyright
         run: |
-          cd backend
-          pip install --upgrade pip
-          pip install -r requirements.txt pytest pytest-asyncio
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt pytest pytest-asyncio
+          npm install -g pyright
+
+      - name: Run Pyright Type Checking (0 errors allowed)
+        run: |
+          npx pyright backend/
 
       - name: Run Backend Unit & Integration Tests
         env:
@@ -52,11 +64,11 @@ jobs:
           SYNC_DATABASE_URL: postgresql+psycopg2://docmind:testpassword@localhost:5432/docmind_test
           APP_SECRET_KEY: test-secret-key-at-least-32-characters-long!
         run: |
-          cd backend
-          pytest -v tests/
+          PYTHONPATH=backend pytest -v backend/tests/
 
+  # ─── 2. FRONTEND BUILD VERIFICATION (FOR VERCEL) ─────────────────────────────
   frontend-checks:
-    name: Frontend Build & Type Check
+    name: Frontend Typecheck & Build
     runs-on: ubuntu-latest
 
     steps:
@@ -79,3 +91,34 @@ jobs:
         run: |
           cd frontend
           npm run build
+
+  # ─── 3. CONTINUOUS DEPLOYMENT TO BLUEHOST VPS ────────────────────────────────
+  deploy-backend:
+    name: Deploy Backend to Bluehost VPS
+    needs: [backend-checks, frontend-checks]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH to Bluehost
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.BLUEHOST_HOST }}
+          username: ${{ secrets.BLUEHOST_USER }}
+          key: ${{ secrets.BLUEHOST_SSH_KEY }}
+          port: ${{ secrets.BLUEHOST_PORT || 22 }}
+          script_stop: true
+          script: |
+            APP_DIR="${{ secrets.BLUEHOST_APP_DIR || '/var/www/docmind' }}"
+            echo "[INFO] Navigating to application directory: ${APP_DIR}"
+            if [ ! -d "${APP_DIR}" ]; then
+              echo "[ERROR] Application directory ${APP_DIR} does not exist on Bluehost!"
+              exit 1
+            fi
+            cd "${APP_DIR}"
+            echo "[INFO] Fetching latest commit from main..."
+            git fetch origin main
+            git reset --hard origin/main
+            chmod +x infra/scripts/deploy.sh
+            bash infra/scripts/deploy.sh
+
