@@ -13,6 +13,7 @@ interface ChatMessage extends MessageDTO {
   insufficient?: boolean;
   followups?: string[];
   error?: boolean;
+  streaming?: boolean;   // true while tokens are still arriving
 }
 
 const SUGGESTIONS = [
@@ -135,45 +136,97 @@ export function ChatView() {
 
     const now = new Date().toISOString();
     const tempId = `u-${++idCounter.current}`;
+    const streamTempId = `s-${++idCounter.current}`;
+
+    // Add user bubble immediately
     setMessages(prev => [
       ...prev,
       { id: tempId, conversation_id: convId ?? '', role: 'user', content: question, status: 'completed', citations: [], created_at: now },
     ]);
 
+    // Add an empty streaming assistant bubble
+    setMessages(prev => [
+      ...prev,
+      { id: streamTempId, conversation_id: convId ?? '', role: 'assistant', content: '', status: 'pending', citations: [], created_at: new Date().toISOString(), streaming: true },
+    ]);
+
+    const abortController = new AbortController();
+
     try {
       let id = convId;
+      // If no conv yet, start streaming (streamMessage creates one internally)
+      const { convId: resolvedConvId, stream } = await ApiClient.streamMessage(
+        id ?? '',
+        question,
+        chatScope.length ? chatScope : undefined,
+        undefined,
+        focusMode,
+        abortController.signal,
+      );
+
       if (!id) {
-        const conv = await ApiClient.createConversation(question.length > 60 ? `${question.slice(0, 57)}...` : question);
-        id = conv.id;
+        id = resolvedConvId;
         setConvId(id);
       }
-      const res = await ApiClient.sendMessage(id, question, chatScope.length ? chatScope : undefined, undefined, focusMode);
-      setMessages(prev => [
-        ...prev,
-        {
-          id: res.message_id,
-          conversation_id: id as string,
-          role: 'assistant',
-          content: res.content,
-          status: 'completed',
-          citations: res.citations ?? [],
-          created_at: res.created_at,
-          insufficient: res.insufficient_evidence,
-          followups: res.suggested_followups,
-        },
-      ]);
-      void refreshConversations();
-      void refreshUsage();
+
+      let accText = '';
+
+      for await (const event of stream) {
+        if (event.type === 'token') {
+          accText += (event.text as string) ?? '';
+          // Update the streaming bubble content in-place
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === streamTempId ? { ...m, content: accText } : m,
+            ),
+          );
+        } else if (event.type === 'meta') {
+          // Replace temp bubble with final message
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === streamTempId
+                ? {
+                    ...m,
+                    id: (event.message_id as string) ?? streamTempId,
+                    conversation_id: id as string,
+                    content: accText,
+                    status: 'completed',
+                    citations: (event.citations as CitationDTO[]) ?? [],
+                    insufficient: !!(event.insufficient_evidence),
+                    followups: (event.suggested_followups as string[]) ?? [],
+                    streaming: false,
+                  }
+                : m,
+            ),
+          );
+          void refreshConversations();
+          void refreshUsage();
+        } else if (event.type === 'error') {
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === streamTempId
+                ? { ...m, content: (event.message as string) ?? 'Something went wrong.', status: 'failed', error: true, streaming: false }
+                : m,
+            ),
+          );
+        }
+      }
     } catch (err) {
-      if (handleApiError(err)) return;
+      if (handleApiError(err)) {
+        setMessages(prev => prev.filter(m => m.id !== streamTempId));
+        return;
+      }
       let message = err instanceof Error ? err.message : 'Something went wrong.';
       if (err instanceof ApiError && (err.status === 402 || err.status === 429)) {
         message = `${err.message} You can upgrade your plan in Settings.`;
       }
-      setMessages(prev => [
-        ...prev,
-        { id: `e-${++idCounter.current}`, conversation_id: convId ?? '', role: 'assistant', content: message, status: 'failed', citations: [], created_at: new Date().toISOString(), error: true },
-      ]);
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === streamTempId
+            ? { ...m, id: `e-${++idCounter.current}`, content: message, status: 'failed', error: true, streaming: false }
+            : m,
+        ),
+      );
     } finally {
       setSending(false);
     }
@@ -388,8 +441,12 @@ export function ChatView() {
                     </p>
                   )}
                   <RichText content={m.content} citations={m.citations} onCite={openCitation} />
-                  <SourceList citations={m.citations} onOpen={openCitation} />
-                  {convId && ApiClient.isUUID(m.id) && canAsk && (
+                  {/* Blinking cursor while tokens are still arriving */}
+                  {m.streaming && (
+                    <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-fg opacity-80 align-middle" aria-hidden="true" />
+                  )}
+                  {!m.streaming && <SourceList citations={m.citations} onOpen={openCitation} />}
+                  {!m.streaming && convId && ApiClient.isUUID(m.id) && canAsk && (
                     <div className="mt-3 flex flex-wrap items-center gap-1.5">
                       <button
                         type="button"
@@ -455,7 +512,7 @@ export function ChatView() {
               ),
             )}
 
-            {sending && (
+            {sending && !messages.some(m => m.streaming) && (
               <div className="flex items-center gap-2.5 text-sm text-muted" role="status">
                 <Spinner className="size-4" /> Finding passages and writing a cited answer&hellip;
               </div>

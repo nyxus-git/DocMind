@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 import httpx
 from app.adapters.ai.base import EmbeddingProvider, LLMProvider, LLMResult
 from app.core.config import settings
@@ -110,6 +110,76 @@ class GeminiLLM(LLMProvider):
                 "The AI language model service is temporarily unavailable. Please try again in a moment."
             )
         return self._mock_generate(prompt, response_schema)
+
+    async def generate_stream(
+        self,
+        prompt: str,
+        system_prompt: str = "",
+        max_tokens: int = 4000,
+        temperature: float = 0.2
+    ) -> AsyncIterator[str]:
+        """
+        Stream tokens from Gemini using streamGenerateContent (SSE).
+        Yields raw text chunks as they arrive.
+        Falls back to yielding the full mock response in one chunk when no API key.
+        """
+        if not self.api_key:
+            # Offline / test: yield mock response as single chunk
+            mock = self._mock_generate(prompt, None)
+            yield mock.text
+            return
+
+        candidate_models: List[str] = []
+        for m in [self.model, "gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.1-flash-lite"]:
+            if m and m not in candidate_models:
+                candidate_models.append(m)
+
+        payload: Dict[str, Any] = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+            },
+        }
+        if system_prompt:
+            payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+
+        for model_name in candidate_models:
+            url = f"{self.base_url}/models/{model_name}:streamGenerateContent?alt=sse&key={self.api_key}"
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    async with client.stream("POST", url, json=payload) as resp:
+                        if resp.status_code != 200:
+                            logger.warning(f"Gemini stream error {resp.status_code} on {model_name}")
+                            continue
+                        # SSE: each line is "data: <json>" or blank
+                        async for line in resp.aiter_lines():
+                            line = line.strip()
+                            if not line.startswith("data:"):
+                                continue
+                            raw = line[5:].strip()
+                            if raw == "[DONE]":
+                                return
+                            try:
+                                chunk = json.loads(raw)
+                                parts = (
+                                    chunk.get("candidates", [{}])[0]
+                                    .get("content", {})
+                                    .get("parts", [])
+                                )
+                                for part in parts:
+                                    text = part.get("text", "")
+                                    if text:
+                                        yield text
+                            except (json.JSONDecodeError, IndexError, KeyError):
+                                continue
+                        return  # success, stop trying other models
+            except Exception as ex:
+                logger.warning(f"Gemini stream exception on {model_name}: {ex}")
+                continue
+
+        # All models failed — yield degraded notice
+        yield "⚠️ AI service temporarily unavailable. Please try again in a moment."
 
     def _mock_generate(self, prompt: str, response_schema: Optional[Dict[str, Any]]) -> LLMResult:
         """Deterministic fallback when no API key is present or in offline test environments."""

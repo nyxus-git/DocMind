@@ -1083,6 +1083,79 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Streaming chat via Server-Sent Events.
+   * Returns the resolved conversation ID and an async generator of SSE events.
+   * Event shapes:
+   *   { type: 'token', text: string }
+   *   { type: 'meta', message_id: string, citations: CitationDTO[], insufficient_evidence: boolean, suggested_followups: string[] }
+   *   { type: 'error', message: string }
+   */
+  static async streamMessage(
+    conversation_id: string,
+    content: string,
+    document_ids?: string[],
+    space_id?: string,
+    focus_mode: string = 'general',
+    signal?: AbortSignal,
+  ): Promise<{ convId: string; stream: AsyncGenerator<{ type: string; [key: string]: unknown }> }> {
+    let convId = conversation_id;
+    if (!this.isUUID(convId)) {
+      const conv = await this.createConversation(
+        content.length > 60 ? `${content.slice(0, 57)}...` : content,
+      );
+      convId = conv.id;
+    }
+
+    const url = `${getApiBase()}/conversations/${convId}/messages/stream`;
+    const token = typeof window !== 'undefined' ? (document.cookie.match(/(?:^|;\s*)access_token=([^;]*)/) ?? [])[1] : undefined;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${decodeURIComponent(token)}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      credentials: 'include',
+      signal,
+      body: JSON.stringify({ content, document_ids, ...(space_id ? { space_id } : {}), focus_mode }),
+    });
+
+    if (!response.ok || !response.body) {
+      const text = await response.text().catch(() => 'Unknown error');
+      throw new ApiError(`Stream request failed: ${text}`, response.status);
+    }
+
+    async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerator<{ type: string; [key: string]: unknown }> {
+      const reader = body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data:')) continue;
+            const raw = trimmed.slice(5).trim();
+            if (!raw || raw === '[DONE]') continue;
+            try {
+              yield JSON.parse(raw) as { type: string; [key: string]: unknown };
+            } catch {
+              // skip malformed lines
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    }
+
+    return { convId, stream: parseSSE(response.body) };
+  }
+
   static async submitMessageFeedback(
     conversationId: string,
     messageId: string,

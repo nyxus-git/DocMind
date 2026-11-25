@@ -1,6 +1,8 @@
 import uuid
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.dependencies import WorkspaceContext, get_current_workspace, require_write_access
 from app.core.exceptions import DocMindException, EntityNotFoundException
@@ -196,6 +198,54 @@ async def send_message(
         allowed_space_ids=allowed_spaces,
         space_id=req.space_id,
         focus_mode=req.focus_mode,
+    )
+
+
+@router.post("/{conversation_id}/messages/stream")
+async def stream_message(
+    conversation_id: uuid.UUID,
+    req: SendMessageRequest,
+    ctx: WorkspaceContext = Depends(require_write_access),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Streaming chat endpoint — returns Server-Sent Events (text/event-stream).
+    Each event is a JSON object with 'type':
+      - {"type": "token", "text": "..."} — incremental AI token
+      - {"type": "meta", "message_id": "...", "citations": [...], ...} — final metadata
+      - {"type": "error", "message": "..."} — on failure
+    """
+    conv_repo = ConversationRepository(db)
+    existing = await conv_repo.get_by_id(ctx.workspace.id, conversation_id)
+    if not existing or existing.created_by != ctx.user.id:
+        raise EntityNotFoundException("Conversation", conversation_id)
+
+    allowed_spaces = await WorkspaceRepository(db).get_accessible_space_ids(
+        ctx.workspace.id, ctx.user.id, ctx.role
+    )
+    chat_service = ChatService(db)
+
+    async def event_generator():
+        async for chunk in chat_service.stream_message(
+            workspace_id=ctx.workspace.id,
+            user_id=ctx.user.id,
+            conversation_id=conversation_id,
+            content=req.content,
+            document_ids=req.document_ids,
+            allowed_space_ids=allowed_spaces,
+            space_id=req.space_id,
+            focus_mode=req.focus_mode,
+        ):
+            yield chunk
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",   # disables Nginx buffering for SSE
+            "Connection": "keep-alive",
+        },
     )
 
 

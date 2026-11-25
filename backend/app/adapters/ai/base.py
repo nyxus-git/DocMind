@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, AsyncIterator, Dict, List, Optional, Protocol
 from pydantic import BaseModel
 
 
@@ -20,6 +20,15 @@ class LLMProvider(Protocol):
         max_tokens: int = 1500,
         temperature: float = 0.2
     ) -> LLMResult:
+        ...
+
+    async def generate_stream(
+        self,
+        prompt: str,
+        system_prompt: str = "",
+        max_tokens: int = 4000,
+        temperature: float = 0.2
+    ) -> AsyncIterator[str]:
         ...
 
 
